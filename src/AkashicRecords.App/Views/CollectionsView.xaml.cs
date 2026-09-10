@@ -207,8 +207,8 @@ public partial class CollectionsView : UserControl, ISearchNavigable
 
         if (category == "Watchlist")
         {
+            // CategoryTab_OnClick already closes the fiche and hides the tier list.
             CategoryTab_OnClick(WatchlistTab, new RoutedEventArgs());
-            CloseFiche();
             return;
         }
 
@@ -221,6 +221,8 @@ public partial class CollectionsView : UserControl, ISearchNavigable
         ApplyCategoryHeader();
         ListRoot.Visibility = Visibility.Visible;
         WatchlistRoot.Visibility = Visibility.Collapsed;
+        WatchlistHeader.Visibility = Visibility.Collapsed;
+        TabsRow.Visibility = Visibility.Visible;
         RefreshArtworks();
 
         // Auto-open the first work so the fiche is visible, not just the tier list.
@@ -239,15 +241,25 @@ public partial class CollectionsView : UserControl, ISearchNavigable
 
         if (tag == "Watchlist")
         {
+            // NB: call CloseFiche() first — it forces ListRoot back to Visible,
+            // so the Collapsed below must come after it.
+            CloseFiche();
             ListRoot.Visibility = Visibility.Collapsed;
             WatchlistRoot.Visibility = Visibility.Visible;
-            CloseFiche();
+            WatchlistHeader.Visibility = Visibility.Visible;
+            TabsRow.Visibility = Visibility.Collapsed;
+            CategoryHeaderText.Visibility = Visibility.Collapsed;
+            CategorySubText.Visibility = Visibility.Collapsed;
             RefreshWatchlist();
             return;
         }
 
         ListRoot.Visibility = Visibility.Visible;
         WatchlistRoot.Visibility = Visibility.Collapsed;
+        WatchlistHeader.Visibility = Visibility.Collapsed;
+        TabsRow.Visibility = Visibility.Visible;
+        CategoryHeaderText.Visibility = Visibility.Visible;
+        CategorySubText.Visibility = Visibility.Visible;
         CloseFiche();
         _selectedCategory = Enum.Parse<ArtworkCategory>(tag);
         ApplyCategoryHeader();
@@ -615,9 +627,6 @@ public partial class CollectionsView : UserControl, ISearchNavigable
 
         RefreshEvaluations();
         RefreshObservations();
-
-        // Hide the tier list behind the fiche so it doesn't clutter the view.
-        ListRoot.Visibility = Visibility.Collapsed;
 
         FicheOverlay.Visibility = Visibility.Visible;
         FicheOverlay.Focus();
