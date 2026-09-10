@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Akashic Records — Collections (maquette v2)</title>
+<link rel="stylesheet" href="_shared.css">
+</head>
+<body>
+
+<!-- Bureau simulé derrière la surcouche -->
+<div class="desktop-hint">
+  <div class="ico"><div></div>Poste de travail</div>
+  <div class="ico"><div></div>Corbeille</div>
+  <div class="ico"><div></div>Projets</div>
+</div>
+
+<div class="app">
+  <!-- ===== Header global ===== -->
+  <header class="header">
+    <div class="brand">AKASHIC&nbsp;RECORDS</div>
+    <nav class="nav">
+      <a href="03-organisation.html">Organisation</a>
+      <a href="01-journaux.html">Journaux</a>
+      <a class="active">Collections</a>
+      <a href="04-archives.html">Archives</a>
+    </nav>
+    <div class="spacer"></div>
+    <div class="search">
+      <span>🔍</span><input placeholder="Rechercher partout…">
+    </div>
+    <button class="icon-btn">♪ Musique</button>
+    <button class="icon-btn">⚙</button>
+  </header>
+
+  <!-- ===== Corps ===== -->
+  <div class="body">
+    <div class="section-head">
+      <h1>Collections</h1>
+      <span class="sub">Vos œuvres classées par tier — cliquez une œuvre pour sa fiche.</span>
+    </div>
+
+    <div class="toolbar">
+      <div class="segmented">
+        <button class="active">Films</button>
+        <button>Films d'animation</button>
+        <button>Anime / Manga</button>
+        <button>Livres</button>
+        <button>À voir</button>
+      </div>
+      <div class="grow"></div>
+      <button class="icon-btn primary" onclick="openAdd()">＋ Ajouter une œuvre</button>
+    </div>
+
+    <div class="card" style="padding:16px; overflow:auto;">
+      <div class="tiers">
+
+        <div class="tier-row tier-s">
+          <div class="tier-label">S</div>
+          <div class="tier-bin">
+            <div class="work" onclick="openFiche('Princesse Kaguya')">
+              <div class="poster has-cover cover-a"></div>
+              <div class="meta">
+                <div class="title">Princesse Kaguya</div>
+                <div class="badges">
+                  <span class="dot">★ 4.6</span><span class="dot">📝 3</span>
+                </div>
+              </div>
+            </div>
+            <div class="work" onclick="openFiche('Le Voyage de Chihiro')">
+              <div class="poster has-cover cover-b"></div>
+              <div class="meta">
+                <div class="title">Le Voyage de Chihiro</div>
+                <div class="badges"><span class="dot">★ 5.0</span><span class="dot">📝 5</span></div>
+              </div>
+            </div>
+            <button class="add-tile" onclick="openAdd('S')">＋</button>
+          </div>
+        </div>
+
+        <div class="tier-row tier-a">
+          <div class="tier-label">A</div>
+          <div class="tier-bin">
+            <div class="work" onclick="openFiche('Blade Runner 2049')">
+              <div class="poster has-cover cover-c"></div>
+              <div class="meta">
+                <div class="title">Blade Runner 2049</div>
+                <div class="badges"><span class="dot">★ 4.2</span><span class="dot">📝 2</span></div>
+              </div>
+            </div>
+            <button class="add-tile" onclick="openAdd('A')">＋</button>
+          </div>
+        </div>
+
+        <div class="tier-row tier-b">
+          <div class="tier-label">B</div>
+          <div class="tier-bin">
+            <div class="work" onclick="openFiche('Dune')">
+              <div class="poster">🎬</div>
+              <div class="meta">
+                <div class="title">Dune</div>
+                <div class="badges"><span class="dot">★ 3.5</span><span class="dot">📝 1</span></div>
+              </div>
+            </div>
+            <button class="add-tile" onclick="openAdd('B')">＋</button>
+          </div>
+        </div>
+
+        <div class="tier-row tier-c">
+          <div class="tier-label">C</div>
+          <div class="tier-bin">
+            <button class="add-tile" onclick="openAdd('C')">＋</button>
+          </div>
+        </div>
+
+        <div class="tier-row tier-d">
+          <div class="tier-label">D</div>
+          <div class="tier-bin">
+            <button class="add-tile" onclick="openAdd('D')">＋</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Panneau latéral : fiche ===== -->
+<div class="scrim" id="scrim" onclick="closeFiche()"></div>
+<aside class="panel" id="panel">
+  <div class="panel-head">
+    <div class="cover"></div>
+    <div>
+      <h2 id="ficheTitle">Princesse Kaguya</h2>
+      <span class="muted" id="ficheSub">Film d'animation · 2013</span>
+    </div>
+    <button class="panel-close" onclick="closeFiche()">✕</button>
+  </div>
+  <div class="panel-body">
+
+    <div class="panel-section">
+      <h3>Tier</h3>
+      <div class="tier-pills">
+        <button class="on">S</button><button>A</button><button>B</button>
+        <button>C</button><button>D</button>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <h3>Évaluations</h3>
+      <div class="eval">
+        <div class="eval-row"><span class="axis">Visuel</span><span class="stars">★★★★★</span><button class="del">✕</button></div>
+        <div class="eval-row"><span class="axis">Émotion</span><span class="stars">★★★★☆</span><button class="del">✕</button></div>
+        <div class="eval-row"><span class="axis">Scénario</span><span class="stars">★★★★☆</span><button class="del">✕</button></div>
+      </div>
+      <div class="toolbar" style="margin-top:10px;">
+        <input class="txt" style="flex:1;" placeholder="Nouvel axe (ex. Humour)…">
+        <select class="txt" style="width:78px;"><option>★★★★★</option><option>★★★★</option><option>★★★</option><option>★★</option><option>★</option></select>
+        <button class="btn">Ajouter</button>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <h3>Observations</h3>
+      <div class="obs">
+        <div class="obs-item"><div class="subj">Faisan</div><div class="txt">J'aime beaucoup la représentation du faisan, sa raideur presque héraldique.</div></div>
+        <div class="obs-item"><div class="subj">Insectes</div><div class="txt">La façon dont les insectes sont dessinés m'intéresse pour mon projet Nature.</div></div>
+      </div>
+      <div class="field" style="margin-top:10px;">
+        <input class="txt" placeholder="Sujet (ex. Faisan)…">
+        <textarea class="txt" placeholder="Votre observation…"></textarea>
+        <button class="btn primary" style="justify-self:start;">＋ Ajouter l'observation</button>
+      </div>
+    </div>
+
+  </div>
+</aside>
+
+<!-- ===== Modale d'ajout ===== -->
+<div class="modal-scrim" id="addScrim" onclick="if(event.target===this)closeAdd()">
+  <div class="modal">
+    <div class="modal-head">Ajouter une œuvre <button class="panel-close" onclick="closeAdd()">✕</button></div>
+    <div class="modal-body">
+      <div class="field">
+        <label>Titre</label>
+        <input class="txt" id="addTitle" placeholder="Titre de l'œuvre…" autofocus>
+        <span class="faint" style="font-size:11.5px;">La couverture sera cherchée automatiquement (TMDB / Wikipédia).</span>
+      </div>
+      <div class="field">
+        <label>Tier</label>
+        <div class="tier-pills" id="addTiers">
+          <button data-t="S">S</button><button data-t="A">A</button>
+          <button class="on" data-t="B">B</button><button data-t="C">C</button>
+          <button data-t="D">D</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Couverture (optionnel)</label>
+        <button class="btn ghost" style="justify-self:start;">📁 Choisir une image…</button>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" onclick="closeAdd()">Annuler</button>
+      <button class="btn primary" onclick="closeAdd()">Ajouter</button>
+    </div>
+  </div>
+</div>
+
+<div class="note"><b>Maquette Collections v2</b> — clique une œuvre (fiche latérale) · « ＋ Ajouter » (modale à pilules de tier)</div>
+
+<script>
+  const panel = document.getElementById('panel');
+  const scrim = document.getElementById('scrim');
+  function openFiche(t){ document.getElementById('ficheTitle').textContent = t; panel.classList.add('open'); scrim.classList.add('open'); }
+  function closeFiche(){ panel.classList.remove('open'); scrim.classList.remove('open'); }
+
+  const addScrim = document.getElementById('addScrim');
+  function openAdd(tier){
+    if(tier){ document.querySelectorAll('#addTiers button').forEach(b=>b.classList.toggle('on', b.dataset.t===tier)); }
+    addScrim.classList.add('open');
+  }
+  function closeAdd(){ addScrim.classList.remove('open'); }
+  document.querySelectorAll('#addTiers button').forEach(b=>{
+    b.onclick = ()=>{ document.querySelectorAll('#addTiers button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); };
+  });
+
+  document.addEventListener('keydown', e=>{ if(e.key==='Escape'){ closeFiche(); closeAdd(); }});
+</script>
+</body>
+</html>

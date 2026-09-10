@@ -1,0 +1,20 @@
+# .NET build output
+bin/
+obj/
+
+# Build results
+*.user
+*.suo
+.vs/
+
+# Anvil / agent state
+.anvil/
+
+# Local analysis artifacts (gitignored by the project already)
+.jira-analysis/
+.jira-cache/
+.us-refinement/
+
+# OS files
+.DS_Store
+Thumbs.db

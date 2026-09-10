@@ -1,0 +1,220 @@
+<Window x:Class="AkashicRecords.App.MusicPlayerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:AkashicRecords.App"
+        mc:Ignorable="d"
+        Title="Musique"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ResizeMode="CanResizeWithGrip"
+        SizeToContent="Height"
+        Width="360"
+        MinWidth="260"
+        MinHeight="120"
+        WindowStartupLocation="Manual"
+        MouseLeftButtonDown="Root_OnMouseLeftButtonDown"
+        Closing="MusicPlayerWindow_OnClosing"
+        Closed="MusicPlayerWindow_OnClosed">
+    <Window.Resources>
+        <Style x:Key="PlayerIconButton" TargetType="Button">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Width" Value="30"/>
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="Margin" Value="2,0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="#2A2A45" CornerRadius="15">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#3B82F6"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="PlayerSmallButton" TargetType="Button">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Padding" Value="8,3"/>
+            <Setter Property="Margin" Value="0,0,4,0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="#2A2A45" CornerRadius="4" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#3B82F6"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="PlayerChipButton" TargetType="Button">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Padding" Value="8,3"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Background" Value="#2A2A45"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border Background="#EE1A1A2E" CornerRadius="10" BorderBrush="#553B82F6" BorderThickness="1" Padding="12">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0">
+                <!-- Compact bar (always visible) -->
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0" Width="48" Height="48" CornerRadius="6" Background="#2A2A45" Margin="0,0,10,0">
+                        <Grid>
+                            <TextBlock x:Name="CoverPlaceholder" Text="♪" FontSize="22" Foreground="#8888AA"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <Image x:Name="CoverImage" Stretch="UniformToFill" Visibility="Collapsed"/>
+                        </Grid>
+                    </Border>
+
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock x:Name="TitleText" Text="Aucune piste" Foreground="White" FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis"/>
+                        <TextBlock x:Name="ArtistText" Text="" Foreground="#AAAAAA" FontSize="11"
+                                   TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button x:Name="ExpandButton" Content="▾" Style="{StaticResource PlayerIconButton}"
+                                Click="ExpandButton_OnClick" ToolTip="Développer"/>
+                        <Button Content="✕" Style="{StaticResource PlayerIconButton}"
+                                Click="CloseButton_OnClick" ToolTip="Masquer"/>
+                    </StackPanel>
+                </Grid>
+
+                <!-- Position -->
+                <Grid Margin="0,8,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="ElapsedText" Grid.Column="0" Text="0:00" Foreground="#AAAAAA" FontSize="10"
+                               VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <Slider x:Name="PositionSlider" Grid.Column="1" Minimum="0" Maximum="1" Value="0"
+                            IsMoveToPointEnabled="True" VerticalAlignment="Center"
+                            ValueChanged="PositionSlider_OnValueChanged"/>
+                    <TextBlock x:Name="TotalText" Grid.Column="2" Text="0:00" Foreground="#AAAAAA" FontSize="10"
+                               VerticalAlignment="Center" Margin="6,0,0,0"/>
+                </Grid>
+
+                <!-- Controls -->
+                <Grid Margin="0,4,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Center">
+                        <Button Content="⏮" Style="{StaticResource PlayerIconButton}" Click="PrevButton_OnClick"/>
+                        <Button x:Name="PlayPauseButton" Content="▶" Style="{StaticResource PlayerIconButton}"
+                                Click="PlayPauseButton_OnClick"/>
+                        <Button Content="⏭" Style="{StaticResource PlayerIconButton}" Click="NextButton_OnClick"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="🔊" Foreground="#AAAAAA" FontSize="12" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                        <Slider x:Name="VolumeSlider" Width="70" Minimum="0" Maximum="1" Value="0.5"
+                                VerticalAlignment="Center" ValueChanged="VolumeSlider_OnValueChanged"/>
+                    </StackPanel>
+                </Grid>
+
+                <!-- Lightweight feedback (e.g. nothing to play) -->
+                <TextBlock x:Name="StatusText" Text="" Foreground="#F59E0B" FontSize="10"
+                           TextWrapping="Wrap" Margin="0,6,0,0" Visibility="Collapsed"/>
+            </StackPanel>
+
+            <!-- Expanded panel (fills remaining space; the window is resizeable) -->
+            <Border x:Name="ExpandedPanel" Grid.Row="1" Visibility="Collapsed" Margin="0,10,0,0"
+                    BorderBrush="#553B82F6" BorderThickness="0,1,0,0" Padding="0,10,0,0">
+                <ScrollViewer x:Name="ExpandedScroll" VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <!-- Ambiances -->
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="AMBIANCES" Foreground="#8888AA" FontSize="10"
+                                       FontWeight="Bold" VerticalAlignment="Center"/>
+                            <Button Grid.Column="1" x:Name="AddMoodButton" Content="+" Style="{StaticResource PlayerIconButton}"
+                                    Click="AddMoodButton_OnClick" ToolTip="Nouvelle ambiance"/>
+                        </Grid>
+                        <Popup x:Name="NewMoodPopup" PlacementTarget="{Binding ElementName=AddMoodButton}"
+                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
+                            <Border Background="#EE1A1A2E" BorderBrush="#553B82F6" BorderThickness="1" CornerRadius="6" Padding="8">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBox x:Name="NewMoodInput" Width="130" Background="#22223A" Foreground="White"
+                                             BorderBrush="#553B82F6" Padding="4,2" VerticalContentAlignment="Center"/>
+                                    <Button Content="Créer" Style="{StaticResource PlayerSmallButton}" Margin="6,0,0,0"
+                                            Click="CreateMoodButton_OnClick"/>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
+                        <WrapPanel x:Name="MoodChipsPanel" Margin="0,0,0,10"/>
+
+                        <!-- Library (album accordions; flat filtered list when an ambiance/search is active) -->
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="BIBLIOTHÈQUE" Foreground="#8888AA" FontSize="10"
+                                       FontWeight="Bold" VerticalAlignment="Center"/>
+                            <Button Grid.Column="1" Content="⟳ Rescanner" Style="{StaticResource PlayerSmallButton}"
+                                    Click="RescanButton_OnClick"/>
+                        </Grid>
+                        <TextBox x:Name="LibrarySearchInput" Background="#22223A" Foreground="White" BorderBrush="#553B82F6"
+                                 Padding="6,3" Margin="0,0,0,6" VerticalContentAlignment="Center"
+                                 TextChanged="LibrarySearchInput_OnTextChanged"/>
+                        <StackPanel x:Name="LibraryPanel"/>
+
+                        <!-- Queue -->
+                        <TextBlock Text="FILE D'ATTENTE" Foreground="#8888AA" FontSize="10" FontWeight="Bold" Margin="0,10,0,4"/>
+                        <StackPanel x:Name="QueuePanel"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

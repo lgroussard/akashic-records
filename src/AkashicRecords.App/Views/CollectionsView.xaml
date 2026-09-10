@@ -1,0 +1,364 @@
+<UserControl x:Class="AkashicRecords.App.Views.CollectionsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d">
+    <Grid>
+        <!-- Header: title + tabs + add button (always visible, even in watchlist) -->
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,4">
+            <TextBlock x:Name="CategoryHeaderText" Text="COLLECTIONS — FILMS" FontSize="20" FontWeight="Bold"
+                       Foreground="{StaticResource TextBrush}"/>
+            <TextBlock x:Name="CategorySubText" Text="Vos œuvres classées par tier — cliquez une œuvre pour sa fiche."
+                       Foreground="{StaticResource TextMutedBrush}" FontSize="11.5" Margin="0,3,0,0"/>
+        </StackPanel>
+
+        <Grid Grid.Row="0" Margin="0,14,0,14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" HorizontalAlignment="Left" Background="{StaticResource Surface1Brush}"
+                    BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1" CornerRadius="12" Padding="4">
+                <StackPanel Orientation="Horizontal">
+                    <ToggleButton x:Name="FilmsTab" Content="Films" Tag="Film" IsChecked="True"
+                                  Style="{StaticResource NavButtonStyle}" Click="CategoryTab_OnClick"/>
+                    <ToggleButton x:Name="FilmAnimationTab" Content="Films d'animation" Tag="FilmAnimation"
+                                  Style="{StaticResource NavButtonStyle}" Click="CategoryTab_OnClick"/>
+                    <ToggleButton x:Name="AnimesTab" Content="Anime/manga" Tag="Anime"
+                                  Style="{StaticResource NavButtonStyle}" Click="CategoryTab_OnClick"/>
+                    <ToggleButton x:Name="LivresTab" Content="Livres" Tag="Livre"
+                                  Style="{StaticResource NavButtonStyle}" Click="CategoryTab_OnClick"/>
+                    <ToggleButton x:Name="VideoGameTab" Content="Jeux vidéo" Tag="VideoGame"
+                                  Style="{StaticResource NavButtonStyle}" Click="CategoryTab_OnClick"/>
+                    <ToggleButton x:Name="WatchlistTab" Content="À voir" Tag="Watchlist"
+                                  Style="{StaticResource NavButtonStyle}" Click="CategoryTab_OnClick"/>
+                </StackPanel>
+            </Border>
+
+            <Button x:Name="AddWorkButton" Grid.Column="1" Content="＋ Ajouter une œuvre" Style="{StaticResource PrimaryPillButtonStyle}"
+                    VerticalAlignment="Center" Click="OpenAddModalButton_OnClick"/>
+        </Grid>
+
+        <!-- Tier list: one band per tier (S at top), works shown as chips within their band -->
+        <Grid x:Name="ListRoot" Grid.Row="1">
+            <Border Style="{StaticResource CardBorderStyle}" Padding="16">
+                <Grid>
+                    <Grid.Resources>
+                        <Style TargetType="ScrollBar" BasedOn="{StaticResource ThinHorizontalScrollBarStyle}"/>
+                    </Grid.Resources>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="72"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <!-- S tier -->
+                    <Border Grid.Row="0" Grid.Column="0" Background="{StaticResource Surface2Brush}"
+                            BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8" Margin="0,0,8,4">
+                        <TextBlock Text="S" Foreground="{StaticResource TierSBrush}" FontWeight="Bold" FontSize="28" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <Border Grid.Row="0" Grid.Column="1" Background="{StaticResource SurfaceFaintBrush}"
+                            BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8" Margin="0,0,0,4">
+                        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Padding="10"
+                                      PreviewMouseWheel="TierScroll_OnPreviewMouseWheel">
+                            <StackPanel x:Name="STierItems" Orientation="Horizontal"/>
+                        </ScrollViewer>
+                    </Border>
+                    <!-- A tier -->
+                    <Border Grid.Row="1" Grid.Column="0" Background="{StaticResource Surface2Brush}"
+                            BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8" Margin="0,0,8,4">
+                        <TextBlock Text="A" Foreground="{StaticResource TierABrush}" FontWeight="Bold" FontSize="28" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <Border Grid.Row="1" Grid.Column="1" Background="{StaticResource SurfaceFaintBrush}"
+                            BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8" Margin="0,0,0,4">
+                        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Padding="10"
+                                      PreviewMouseWheel="TierScroll_OnPreviewMouseWheel">
+                            <StackPanel x:Name="ATierItems" Orientation="Horizontal"/>
+                        </ScrollViewer>
+                    </Border>
+                    <!-- B tier -->
+                    <Border Grid.Row="2" Grid.Column="0" Background="{StaticResource Surface2Brush}"
+                            BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8" Margin="0,0,8,4">
+                        <TextBlock Text="B" Foreground="{StaticResource TierBBrush}" FontWeight="Bold" FontSize="28" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <Border Grid.Row="2" Grid.Column="1" Background="{StaticResource SurfaceFaintBrush}"
+                            BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8" Margin="0,0,0,4">
+                        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Padding="10"
+                                      PreviewMouseWheel="TierScroll_OnPreviewMouseWheel">
+                            <StackPanel x:Name="BTierItems" Orientation="Horizontal"/>
+                        </ScrollViewer>
+                    </Border>
+                    <!-- C tier -->
+                    <Border Grid.Row="3" Grid.Column="0" Background="{StaticResource Surface2Brush}"
+                            BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8" Margin="0,0,8,4">
+                        <TextBlock Text="C" Foreground="{StaticResource TierCBrush}" FontWeight="Bold" FontSize="28" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <Border Grid.Row="3" Grid.Column="1" Background="{StaticResource SurfaceFaintBrush}"
+                            BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8" Margin="0,0,0,4">
+                        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Padding="10"
+                                      PreviewMouseWheel="TierScroll_OnPreviewMouseWheel">
+                            <StackPanel x:Name="CTierItems" Orientation="Horizontal"/>
+                        </ScrollViewer>
+                    </Border>
+                    <!-- D tier -->
+                    <Border Grid.Row="4" Grid.Column="0" Background="{StaticResource Surface2Brush}"
+                            BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8" Margin="0,0,8,0">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <TextBlock Text="D" Foreground="{StaticResource TierDBrush}" FontWeight="Bold" FontSize="28" HorizontalAlignment="Center"/>
+                            <TextBlock Text="Nostalgie" Foreground="{StaticResource TierDBrush}" FontWeight="SemiBold" FontSize="11" HorizontalAlignment="Center" Margin="0,2,0,0"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Grid.Row="4" Grid.Column="1" Background="{StaticResource SurfaceFaintBrush}"
+                            BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8">
+                        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Padding="10"
+                                      PreviewMouseWheel="TierScroll_OnPreviewMouseWheel">
+                            <StackPanel x:Name="DTierItems" Orientation="Horizontal"/>
+                        </ScrollViewer>
+                    </Border>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Watchlist ("À voir"): films to watch, separate from the watched tier lists; feeds the Film du jour widget -->
+        <Grid x:Name="WatchlistRoot" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,14">
+                <TextBox x:Name="WatchlistTitleInput" Width="220" Margin="0,0,8,0" Style="{StaticResource DarkTextBoxStyle}"/>
+                <ComboBox x:Name="WatchlistCategoryPicker" Width="150" SelectedIndex="0" Margin="0,0,8,0"
+                          Style="{StaticResource DarkComboBoxStyle}">
+                    <ComboBoxItem Content="Film"/>
+                    <ComboBoxItem Content="Film d'animation"/>
+                </ComboBox>
+                <ComboBox x:Name="WatchlistPriorityPicker" Width="160" SelectedIndex="1" Margin="0,0,8,0"
+                          Style="{StaticResource DarkComboBoxStyle}">
+                    <ComboBoxItem Content="À voir un jour"/>
+                    <ComboBoxItem Content="Envie de voir"/>
+                    <ComboBoxItem Content="À voir absolument"/>
+                </ComboBox>
+                <Button Content="Ajouter" Click="AddWatchlistButton_OnClick" Style="{StaticResource PrimaryButtonStyle}"/>
+            </StackPanel>
+
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                <StackPanel x:Name="WatchlistPanel"/>
+            </ScrollViewer>
+        </Grid>
+
+        <!-- Fiche: per-work side panel (slide-in from the right) with its tier, cover, evaluations and observations -->
+        <Border x:Name="FicheOverlay" Background="Transparent" Visibility="Collapsed" Focusable="True"
+                PreviewKeyDown="FicheOverlay_OnPreviewKeyDown">
+            <Grid>
+                <Border Background="{StaticResource OverlayBrush}" MouseLeftButtonDown="FicheScrim_OnMouseLeftButtonDown"/>
+                <Border HorizontalAlignment="Center" VerticalAlignment="Center" Width="440" Height="Auto" Background="{StaticResource AppBgBrush}"
+                        BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1" >
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0,0,0,1">
+                            <DockPanel Margin="20,18" LastChildFill="True">
+                                <Button DockPanel.Dock="Right" Content="✕" Click="CloseFicheButton_OnClick"
+                                        Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextMutedBrush}"
+                                        FontSize="18" Cursor="Hand" VerticalAlignment="Top"/>
+                                <Border x:Name="FicheCoverThumb" Width="62" Height="88" CornerRadius="8" Margin="0,0,12,0"
+                                        Background="{StaticResource Surface3Brush}" VerticalAlignment="Top"/>
+                                <TextBlock x:Name="FicheTitleText" FontSize="18" FontWeight="Bold"
+                                           Foreground="{StaticResource TextBrush}" TextWrapping="Wrap" VerticalAlignment="Top"/>
+                            </DockPanel>
+                        </Border>
+
+                        <ScrollViewer Grid.Row="1" Padding="20,16,20,20" VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+
+                                <StackPanel Margin="0,0,0,20">
+                                    <TextBlock Text="TIER" Style="{StaticResource PanelSectionHeaderStyle}"/>
+                                    <StackPanel x:Name="FicheTierPillsPanel" Orientation="Horizontal" Margin="0,10,0,0">
+                                        <Button Content="S" Tag="S" Style="{StaticResource TierPillButtonStyle}" Click="FicheTierPill_OnClick"/>
+                                        <Button Content="A" Tag="A" Style="{StaticResource TierPillButtonStyle}" Click="FicheTierPill_OnClick"/>
+                                        <Button Content="B" Tag="B" Style="{StaticResource TierPillButtonStyle}" Click="FicheTierPill_OnClick"/>
+                                        <Button Content="C" Tag="C" Style="{StaticResource TierPillButtonStyle}" Click="FicheTierPill_OnClick"/>
+                                        <Button Content="D" Tag="D" Style="{StaticResource TierPillButtonStyle}" Click="FicheTierPill_OnClick"/>
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <StackPanel Margin="0,0,0,20">
+                                    <TextBlock Text="COUVERTURE" Style="{StaticResource PanelSectionHeaderStyle}"/>
+                                    <Image x:Name="FicheCoverImage" Height="140" Margin="0,10,0,8"
+                                           Stretch="Uniform" HorizontalAlignment="Center" Visibility="Collapsed"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                        <Button Content="Choisir une couverture…" Click="SetCoverImageButton_OnClick"
+                                                Style="{StaticResource SecondaryButtonStyle}"/>
+                                        <Button x:Name="RemoveCoverButton" Content="Retirer" Click="RemoveCoverImageButton_OnClick"
+                                                Margin="8,0,0,0" Visibility="Collapsed" Style="{StaticResource SecondaryButtonStyle}"/>
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <StackPanel Margin="0,0,0,20">
+                                    <TextBlock Text="ÉVALUATIONS" Style="{StaticResource PanelSectionHeaderStyle}"/>
+                                    <ListBox x:Name="EvaluationsList" Background="Transparent" Foreground="{StaticResource TextBrush}"
+                                             BorderThickness="0" MaxHeight="160" Margin="0,10,0,0"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Background="{StaticResource Surface2Brush}" BorderBrush="{StaticResource AppBorderBrush}"
+                                                        BorderThickness="1" CornerRadius="8" Padding="10,8" Margin="0,0,0,6">
+                                                    <DockPanel>
+                                                        <Button DockPanel.Dock="Right" Content="✕" Tag="{Binding Id}"
+                                                                Click="DeleteEvaluationButton_OnClick"
+                                                                Background="Transparent" BorderThickness="0"
+                                                                Foreground="{StaticResource TextFaintBrush}" Cursor="Hand"/>
+                                                        <TextBlock Text="{Binding Text}" TextWrapping="Wrap"
+                                                                   Foreground="{StaticResource TextBrush}"/>
+                                                    </DockPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                    <Grid Margin="0,10,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Margin="0,0,6,0">
+                                            <TextBlock Text="Axe existant" Style="{StaticResource FieldLabelStyle}"/>
+                                            <ComboBox x:Name="AxisPicker" DisplayMemberPath="Name" Style="{StaticResource DarkComboBoxStyle}" Margin="0,0,0,6"/>
+                                            <TextBlock Text="Ou nouvel axe" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBox x:Name="NewAxisNameInput" Style="{StaticResource DarkTextBoxStyle}"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Margin="0,0,6,0" VerticalAlignment="Bottom">
+                                            <TextBlock Text="Score" Style="{StaticResource FieldLabelStyle}"/>
+                                            <ComboBox x:Name="ScoreInput" Width="56" SelectedIndex="4" Style="{StaticResource DarkComboBoxStyle}">
+                                                <ComboBoxItem Content="1"/>
+                                                <ComboBoxItem Content="2"/>
+                                                <ComboBoxItem Content="3"/>
+                                                <ComboBoxItem Content="4"/>
+                                                <ComboBoxItem Content="5"/>
+                                            </ComboBox>
+                                        </StackPanel>
+                                        <Button Grid.Column="2" Content="Ajouter" Click="AddEvaluationButton_OnClick"
+                                                Style="{StaticResource SecondaryButtonStyle}" VerticalAlignment="Bottom"/>
+                                    </Grid>
+                                </StackPanel>
+
+                                <StackPanel>
+                                    <TextBlock Text="OBSERVATIONS" Style="{StaticResource PanelSectionHeaderStyle}"/>
+                                    <ListBox x:Name="ObservationsList" Background="Transparent" Foreground="{StaticResource TextBrush}"
+                                             BorderThickness="0" MaxHeight="220" Margin="0,10,0,0"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Background="{StaticResource Surface2Brush}" BorderBrush="{StaticResource AppBorderBrush}"
+                                                        BorderThickness="1" CornerRadius="8" Padding="10,8" Margin="0,0,0,6">
+                                                    <DockPanel>
+                                                        <Button DockPanel.Dock="Right" Content="✕" Tag="{Binding Id}"
+                                                                Click="DeleteObservationButton_OnClick" VerticalAlignment="Top"
+                                                                Background="Transparent" BorderThickness="0"
+                                                                Foreground="{StaticResource TextFaintBrush}" Cursor="Hand"/>
+                                                        <TextBlock Text="{Binding Text}" TextWrapping="Wrap"
+                                                                   Foreground="{StaticResource TextBrush}"/>
+                                                    </DockPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                    <StackPanel Margin="0,10,0,0">
+                                        <TextBlock Text="Sujet (ex. Faisan)" Style="{StaticResource FieldLabelStyle}"/>
+                                        <TextBox x:Name="ObservationSubjectInput" Style="{StaticResource DarkTextBoxStyle}" Margin="0,0,0,8"/>
+                                        <TextBlock Text="Observation" Style="{StaticResource FieldLabelStyle}"/>
+                                        <TextBox x:Name="ObservationContentInput" Height="70" TextWrapping="Wrap"
+                                                 AcceptsReturn="True" Style="{StaticResource DarkTextBoxStyle}"/>
+                                        <Button Content="＋ Ajouter l'observation" Click="AddObservationButton_OnClick"
+                                                Margin="0,10,0,0" HorizontalAlignment="Left"
+                                                Style="{StaticResource PrimaryButtonStyle}"/>
+                                    </StackPanel>
+                                </StackPanel>
+
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Border>
+
+        <!-- Add modal: title + tier pills + optional cover -->
+        <Border x:Name="AddOverlay" Background="Transparent" Visibility="Collapsed" Focusable="True"
+                PreviewKeyDown="AddOverlay_OnPreviewKeyDown">
+            <Grid>
+                <Border Background="{StaticResource OverlayBrush}" MouseLeftButtonDown="AddScrim_OnMouseLeftButtonDown"/>
+                <Border Style="{StaticResource CardBorderStyle}" Background="{StaticResource AppBgBrush}"
+                        BorderBrush="{StaticResource BorderStrongBrush}" Width="460"
+                        HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <DockPanel Grid.Row="0" Margin="20,16" LastChildFill="True">
+                            <Button DockPanel.Dock="Right" Content="✕" Click="CloseAddModalButton_OnClick"
+                                    Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextMutedBrush}"
+                                    FontSize="16" Cursor="Hand"/>
+                            <TextBlock Text="Ajouter une œuvre" FontSize="16" FontWeight="Bold"
+                                       Foreground="{StaticResource TextBrush}"/>
+                        </DockPanel>
+
+                        <Border Grid.Row="1" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0,1,0,0">
+                            <StackPanel Margin="20,16">
+                                <TextBlock Text="TITRE" Style="{StaticResource PanelSectionHeaderStyle}"/>
+                                <TextBox x:Name="AddTitleInput" Style="{StaticResource DarkTextBoxStyle}" Margin="0,8,0,4"/>
+                                <TextBlock Text="La couverture sera cherchée automatiquement (TMDB / Wikipédia / MangaDex) si vous n'en choisissez pas une."
+                                           Foreground="{StaticResource TextFaintBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,16"/>
+
+                                <TextBlock Text="TIER" Style="{StaticResource PanelSectionHeaderStyle}"/>
+                                <StackPanel x:Name="AddTierPillsPanel" Orientation="Horizontal" Margin="0,8,0,16">
+                                    <Button Content="S" Tag="S" Style="{StaticResource TierPillButtonStyle}" Click="AddTierPill_OnClick"/>
+                                    <Button Content="A" Tag="A" Style="{StaticResource TierPillButtonStyle}" Click="AddTierPill_OnClick"/>
+                                    <Button Content="B" Tag="B" Style="{StaticResource TierPillButtonStyle}" Click="AddTierPill_OnClick"/>
+                                    <Button Content="C" Tag="C" Style="{StaticResource TierPillButtonStyle}" Click="AddTierPill_OnClick"/>
+                                    <Button Content="D" Tag="D" Style="{StaticResource TierPillButtonStyle}" Click="AddTierPill_OnClick"/>
+                                </StackPanel>
+
+                                <TextBlock Text="COUVERTURE (OPTIONNEL)" Style="{StaticResource PanelSectionHeaderStyle}"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                    <Button Content="📁 Choisir une image…" Click="ChooseAddCoverButton_OnClick"
+                                            Style="{StaticResource SecondaryButtonStyle}"/>
+                                    <TextBlock x:Name="AddCoverPathText" Text="Aucune (recherche automatique)"
+                                               Foreground="{StaticResource TextFaintBrush}" FontSize="11"
+                                               VerticalAlignment="Center" Margin="10,0,0,0"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Row="2" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0,1,0,0">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="20,14">
+                                <Button Content="Annuler" Click="CancelAddButton_OnClick" Style="{StaticResource SecondaryButtonStyle}"/>
+                                <Button Content="Ajouter" Click="ConfirmAddButton_OnClick" Margin="10,0,0,0"
+                                        Style="{StaticResource PrimaryButtonStyle}"/>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>
+

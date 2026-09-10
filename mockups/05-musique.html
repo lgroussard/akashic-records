@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Akashic Records — Lecteur musique (maquette v2)</title>
+<link rel="stylesheet" href="_shared.css">
+<style>
+  body { display:flex; align-items:center; justify-content:center; }
+  .player {
+    width:380px; background:var(--app-bg); border:1px solid var(--border-strong);
+    border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden;
+  }
+  .player-head { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--border); }
+  .player-head b { font-size:13px; letter-spacing:1px; }
+  .now { display:flex; gap:14px; padding:16px; align-items:center; }
+  .now .art { width:72px; height:72px; border-radius:10px; background:var(--accent-grad); display:flex; align-items:center; justify-content:center; font-size:30px; }
+  .now .t { font-weight:700; font-size:15px; }
+  .now .a { color:var(--text-muted); font-size:12.5px; margin-top:2px; }
+  .seek { height:5px; border-radius:999px; background:var(--surface-3); margin:0 16px; overflow:hidden; }
+  .seek > i { display:block; height:100%; width:42%; background:var(--accent-grad); }
+  .times { display:flex; justify-content:space-between; padding:6px 16px 0; font-size:11px; color:var(--text-muted); }
+  .controls { display:flex; align-items:center; justify-content:center; gap:18px; padding:12px; }
+  .controls button { background:transparent; border:0; color:var(--text); font-size:20px; cursor:pointer; }
+  .controls .play { width:52px; height:52px; border-radius:999px; background:var(--accent-grad); font-size:22px; color:#fff; }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; padding:0 16px 12px; }
+  .chip { background:var(--surface-2); border:1px solid var(--border); padding:5px 12px; border-radius:999px; font-size:12px; cursor:pointer; }
+  .chip.on { background:var(--accent-soft); border-color:rgba(91,140,255,0.4); color:#fff; }
+  .lib { border-top:1px solid var(--border); max-height:220px; overflow:auto; }
+  .acc { padding:10px 16px; border-bottom:1px solid var(--border); }
+  .acc .h { display:flex; align-items:center; gap:8px; font-weight:600; font-size:13px; cursor:pointer; }
+  .acc .h .cnt { margin-left:auto; color:var(--text-muted); font-size:11px; }
+  .trk { display:flex; align-items:center; gap:10px; padding:7px 4px 7px 26px; font-size:13px; cursor:pointer; border-radius:6px; }
+  .trk:hover { background:rgba(255,255,255,0.05); }
+  .trk.playing { color:var(--accent); }
+</style>
+</head>
+<body>
+
+<div class="player">
+  <div class="player-head">
+    <b>♪ MUSIQUE</b>
+    <div class="grow" style="flex:1;"></div>
+    <button class="btn ghost" style="padding:4px 8px;">▁</button>
+    <button class="btn ghost" style="padding:4px 8px;">✕</button>
+  </div>
+
+  <div class="now">
+    <div class="art">🎧</div>
+    <div>
+      <div class="t">Arcana</div>
+      <div class="a">Myuk · album Myuk</div>
+    </div>
+  </div>
+  <div class="seek"><i></i></div>
+  <div class="times"><span>1:24</span><span>3:18</span></div>
+
+  <div class="controls">
+    <button>🔀</button>
+    <button>⏮</button>
+    <button class="play">⏸</button>
+    <button>⏭</button>
+    <button>🔁</button>
+  </div>
+
+  <div class="chips">
+    <span class="chip on">Toutes</span>
+    <span class="chip">Calme</span>
+    <span class="chip">Nostalgie</span>
+    <span class="chip">Focus</span>
+    <span class="chip">＋ ambiance</span>
+  </div>
+
+  <div class="lib">
+    <div class="acc">
+      <div class="h">▾ Myuk <span class="cnt">4 titres · ▶</span></div>
+      <div class="trk playing">♪ Arcana</div>
+      <div class="trk">Reflet</div>
+      <div class="trk">Silence bleu</div>
+      <div class="trk">Aube</div>
+    </div>
+    <div class="acc">
+      <div class="h">▸ Lo-fi nights <span class="cnt">12 titres · ▶</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="note"><b>Maquette Lecteur v2</b> — fenêtre flottante · ambiances (chips) · bibliothèque en accordéons d'album</div>
+</body>
+</html>

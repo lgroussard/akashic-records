@@ -1,0 +1,140 @@
+<Window x:Class="AkashicRecords.App.DownloaderWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Téléchargements"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize"
+        SizeToContent="WidthAndHeight"
+        Width="420"
+        WindowStartupLocation="Manual"
+        MouseLeftButtonDown="Root_OnMouseLeftButtonDown"
+        Closing="DownloaderWindow_OnClosing">
+    <Window.Resources>
+        <Style x:Key="DlSmallButton" TargetType="Button">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="Margin" Value="0,0,6,0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="#2A2A45" CornerRadius="4" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#3B82F6"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="DlToggle" TargetType="ToggleButton">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="Margin" Value="0,0,6,0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bg" Background="#2A2A45" CornerRadius="4" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#4ADE80"/>
+                                <Setter Property="Foreground" Value="#0A1A0A"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#3B82F6"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border Background="#EE1A1A2E" CornerRadius="10" BorderBrush="#553B82F6" BorderThickness="1" Padding="14">
+        <StackPanel>
+            <Grid Margin="0,0,0,8">
+                <TextBlock Text="TÉLÉCHARGEMENTS" FontWeight="Bold" Foreground="White" VerticalAlignment="Center"/>
+                <Button Content="✕" HorizontalAlignment="Right" Style="{StaticResource DlSmallButton}"
+                        Click="CloseButton_OnClick"/>
+            </Grid>
+
+            <TextBlock TextWrapping="Wrap" Foreground="#AAAAAA" FontSize="11" Margin="0,0,0,8">
+                File de liens. Akashic ne télécharge rien lui-même : il pilote votre propre outil (yt-dlp),
+                que vous installez et configurez, sous votre responsabilité et dans le respect des
+                conditions d'utilisation de chaque source.
+            </TextBlock>
+
+            <Expander Header="Réglages de l'outil" Foreground="#AAAAAA" FontSize="11" Margin="0,0,0,8">
+                <StackPanel Margin="0,6,0,0">
+                    <TextBlock Text="Chemin de yt-dlp (vide = détection auto : dossier tools puis PATH)"
+                               Foreground="#888888" FontSize="10" Margin="0,0,0,3"/>
+                    <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="ToolPathInput" Grid.Column="0" Background="#2A2A45" Foreground="White"
+                                 BorderBrush="#553B82F6" Padding="5,2" VerticalContentAlignment="Center"/>
+                        <Button Grid.Column="1" Content="Parcourir…" Style="{StaticResource DlSmallButton}"
+                                Margin="6,0,0,0" Click="BrowseToolButton_OnClick"/>
+                    </Grid>
+                    <TextBlock Text="Arguments" Foreground="#888888" FontSize="10" Margin="0,0,0,3"/>
+                    <TextBox x:Name="ArgumentsInput" Background="#2A2A45" Foreground="White" BorderBrush="#553B82F6"
+                             Padding="5,2" Margin="0,0,0,6"/>
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Enregistrer les réglages" Style="{StaticResource DlSmallButton}"
+                                Click="SaveSettingsButton_OnClick"/>
+                        <TextBlock x:Name="ToolStatusText" Foreground="#AAAAAA" FontSize="10" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <TextBlock TextWrapping="Wrap" Foreground="#888888" FontSize="10" Margin="0,6,0,0">
+                        Pas encore d'outil ? Lancez setup-tools.ps1 (à côté de l'application) pour installer
+                        yt-dlp et ffmpeg dans le dossier tools.
+                    </TextBlock>
+                </StackPanel>
+            </Expander>
+
+            <TextBox x:Name="LinksInput" AcceptsReturn="True" TextWrapping="Wrap"
+                     Height="60" Background="#2A2A45" Foreground="White" BorderBrush="#553B82F6"
+                     Padding="6" Margin="0,0,0,6"
+                     VerticalScrollBarVisibility="Auto"/>
+            <TextBlock Text="Un lien par ligne." Foreground="#888888" FontSize="10" Margin="0,0,0,6"/>
+
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                <Button Content="Ajouter à la file" Style="{StaticResource DlSmallButton}" Click="AddButton_OnClick"/>
+                <ToggleButton x:Name="AutoToggle" Content="Téléchargement auto" Style="{StaticResource DlToggle}"
+                              Click="AutoToggle_OnClick"/>
+                <TextBlock x:Name="StatusText" Foreground="#AAAAAA" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </StackPanel>
+
+            <ScrollViewer MaxHeight="260" VerticalScrollBarVisibility="Auto">
+                <StackPanel x:Name="QueuePanel"/>
+            </ScrollViewer>
+
+            <TextBlock x:Name="EmptyText" Text="La file est vide." Foreground="#888888" FontSize="11"
+                       Margin="0,4,0,0" Visibility="Collapsed"/>
+
+            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                <Button Content="Télécharger maintenant" Style="{StaticResource DlSmallButton}" Click="DownloadNowButton_OnClick"/>
+                <Button Content="Copier les liens en file" Style="{StaticResource DlSmallButton}" Click="CopyQueuedButton_OnClick"/>
+                <Button Content="Vider terminés" Style="{StaticResource DlSmallButton}" Click="ClearDoneButton_OnClick"/>
+                <Button Content="Vider la file" Style="{StaticResource DlSmallButton}" Click="ClearAllButton_OnClick"/>
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>

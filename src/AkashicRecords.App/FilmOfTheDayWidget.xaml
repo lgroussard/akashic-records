@@ -1,0 +1,83 @@
+<Window x:Class="AkashicRecords.App.FilmOfTheDayWidget"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:AkashicRecords.App"
+        mc:Ignorable="d"
+        Title="Film du jour"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize"
+        SizeToContent="WidthAndHeight"
+        WindowStartupLocation="Manual"
+        MouseLeftButtonDown="Root_OnMouseLeftButtonDown"
+        Closing="FilmOfTheDayWidget_OnClosing">
+    <Window.Resources>
+        <Style x:Key="WidgetIconButton" TargetType="Button">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Width" Value="22"/>
+            <Setter Property="Height" Value="22"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="#2A2A45" CornerRadius="11">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#3B82F6"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border Background="#EE1A1A2E" CornerRadius="10" BorderBrush="#553B82F6" BorderThickness="1" Padding="10" Width="180">
+        <StackPanel>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="FILM DU JOUR" Foreground="#8888AA" FontSize="9"
+                           FontWeight="Bold" VerticalAlignment="Center"/>
+                <Button Grid.Column="1" Content="✕" Style="{StaticResource WidgetIconButton}"
+                        Click="HideButton_OnClick" ToolTip="Masquer"/>
+            </Grid>
+
+            <!-- Poster (click flips between the film pick and the animated-film pick) -->
+            <Button x:Name="PosterButton" Click="PosterButton_OnClick" Cursor="Hand"
+                    Background="Transparent" BorderThickness="0" Padding="0" Margin="0,8,0,0"
+                    HorizontalContentAlignment="Stretch">
+                <Border Background="#2A2A45" CornerRadius="6" MinHeight="220">
+                    <Grid>
+                        <Image x:Name="PosterImage" Stretch="UniformToFill" Visibility="Collapsed"/>
+                        <TextBlock x:Name="PosterFallback" Text="" Foreground="White" FontSize="14"
+                                   FontWeight="SemiBold" TextWrapping="Wrap" TextAlignment="Center"
+                                   Margin="10" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Visibility="Collapsed"/>
+                    </Grid>
+                </Border>
+            </Button>
+
+            <!-- Info (title / category / priority) -->
+            <StackPanel Margin="0,8,0,0">
+                <TextBlock x:Name="InfoTitleText" Foreground="White" FontWeight="Bold" FontSize="13"
+                           TextWrapping="Wrap"/>
+                <TextBlock x:Name="InfoCategoryText" Foreground="#AAAAAA" FontSize="11" Margin="0,2,0,0"/>
+                <TextBlock x:Name="InfoPriorityText" Foreground="#3B82F6" FontSize="11" Margin="0,2,0,0"/>
+                <TextBlock x:Name="FlipHint" Text="Cliquez l'affiche pour alterner film / animation"
+                           Foreground="#8888AA" FontSize="9" TextWrapping="Wrap" Margin="0,6,0,0"
+                           Visibility="Collapsed"/>
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>
