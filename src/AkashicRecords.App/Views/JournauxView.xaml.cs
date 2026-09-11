@@ -1420,6 +1420,22 @@ public partial class JournauxView : UserControl, ISearchNavigable
             .OrderBy(category => category);
 
         RecipeCategoryFilterPanel.Children.Clear();
+
+        // "Toutes" chip (always first, always selected by default) - matches the mockup.
+        var allChip = new Button
+        {
+            Content = "Toutes",
+            Style = (Style)FindResource("ChipButtonStyle"),
+            Background = (Brush)Application.Current.FindResource("AccentSoftBrush"),
+            Foreground = (Brush)Application.Current.FindResource("TextBrush")
+        };
+        allChip.Click += (_, _) =>
+        {
+            _selectedRecipeCategoryFilter = null;
+            RefreshRecipesList();
+        };
+        RecipeCategoryFilterPanel.Children.Add(allChip);
+
         foreach (var category in categories)
         {
             var chip = new Button
@@ -1462,17 +1478,57 @@ public partial class JournauxView : UserControl, ISearchNavigable
 
     private void NewRecipeButton_OnClick(object sender, RoutedEventArgs e)
     {
-        var title = NewRecipeTitleInput.Text.Trim();
-        if (title.Length == 0) return;
+        var input = new Window
+        {
+            Title = "Nouvelle recette",
+            Width = 360,
+            Height = 180,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            ResizeMode = ResizeMode.NoResize,
+            Background = (Brush)FindResource("Surface1Brush")
+        };
 
-        var recipe = new Recipe { Title = title, CreatedAt = DateTime.Now };
-        recipe.Id = _recipeRepository.Add(recipe);
+        var textBox = new TextBox { Style = (Style)FindResource("DarkTextBoxStyle"), Margin = new Thickness(8) };
+        var okButton = new Button
+        {
+            Content = "Ajouter",
+            Style = (Style)FindResource("PrimaryButtonStyle"),
+            Width = 90,
+            Margin = new Thickness(8, 8, 8, 0)
+        };
+        okButton.Click += (_, _) =>
+        {
+            var title = textBox.Text.Trim();
+            if (title.Length == 0) return;
 
-        // Set before refreshing so RefreshRecipesList's "keep current selection" branch picks the
-        // new recipe up (it re-fetches from the db, so matching must happen by Id, not by reference).
-        _selectedRecipe = recipe;
-        NewRecipeTitleInput.Clear();
-        RefreshRecipesList();
+            var recipe = new Recipe { Title = title, CreatedAt = DateTime.Now };
+            recipe.Id = _recipeRepository.Add(recipe);
+
+            // Set before refreshing so RefreshRecipesList's "keep current selection" branch
+            // picks the new recipe up (it re-fetches from the db, so matching must happen by Id).
+            _selectedRecipe = recipe;
+            RefreshRecipesList();
+            input.Close();
+        };
+        var cancelButton = new Button
+        {
+            Content = "Annuler",
+            Style = (Style)FindResource("SecondaryButtonStyle"),
+            Width = 90,
+            Margin = new Thickness(8, 8, 8, 0)
+        };
+        cancelButton.Click += (_, _) => input.Close();
+
+        var stack = new StackPanel { Margin = new Thickness(8) };
+        stack.Children.Add(new TextBlock { Text = "Titre de la recette", Foreground = (Brush)FindResource("TextBrush"), Margin = new Thickness(0, 0, 0, 4) });
+        stack.Children.Add(textBox);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
+        buttons.Children.Add(okButton);
+        buttons.Children.Add(cancelButton);
+        stack.Children.Add(buttons);
+
+        input.Content = stack;
+        input.ShowDialog();
     }
 
     private void OpenRecipePage(Recipe? recipe)
@@ -1482,22 +1538,88 @@ public partial class JournauxView : UserControl, ISearchNavigable
 
         RecipePageTitleText.Text = recipe?.Title ?? "No recipe";
         RecipeTitleInput.Text = recipe?.Title ?? string.Empty;
-        RecipeCategoryInput.Text = recipe?.Category ?? string.Empty;
         RecipeIngredientsInput.Text = recipe?.Ingredients ?? string.Empty;
         RecipeInstructionsInput.Text = recipe?.Instructions ?? string.Empty;
         RecipeNotesInput.Text = recipe?.Notes ?? string.Empty;
         RecipeTagsInput.Text = recipe?.Tags ?? string.Empty;
+        UpdateRecipeCategoryChip(recipe);
         RefreshRecipeCoverImage();
 
         var isEnabled = recipe is not null;
         foreach (var input in new Control[]
                  {
-                     RecipeTitleInput, RecipeCategoryInput, RecipeIngredientsInput, RecipeInstructionsInput,
+                     RecipeTitleInput, RecipeIngredientsInput, RecipeInstructionsInput,
                      RecipeNotesInput, RecipeTagsInput, DeleteRecipeButton
                  })
         {
             input.IsEnabled = isEnabled;
         }
+        RecipeCategoryChip.IsEnabled = isEnabled;
+    }
+
+    // Renders the recipe's category as a chip on the page header. Clicking it opens a small
+    // inline editor (a prompt) so the user can rename the category - the chip is the source of
+    // truth for the list subtitle.
+    private void UpdateRecipeCategoryChip(Recipe? recipe)
+    {
+        var category = string.IsNullOrWhiteSpace(recipe?.Category) ? "Sans catégorie" : recipe!.Category;
+        RecipeCategoryChip.Content = category;
+    }
+
+    private void RecipeCategoryChip_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_selectedRecipe is null) return;
+
+        var current = _selectedRecipe.Category.Trim();
+        var input = new Window
+        {
+            Title = "Catégorie",
+            Width = 340,
+            Height = 160,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            ResizeMode = ResizeMode.NoResize,
+            Background = (Brush)FindResource("Surface1Brush")
+        };
+
+        var textBox = new TextBox
+        {
+            Text = current,
+            Style = (Style)FindResource("DarkTextBoxStyle"),
+            Margin = new Thickness(8)
+        };
+        var okButton = new Button
+        {
+            Content = "Enregistrer",
+            Style = (Style)FindResource("PrimaryButtonStyle"),
+            Width = 90,
+            Margin = new Thickness(8, 8, 8, 0)
+        };
+        okButton.Click += (_, _) =>
+        {
+            _selectedRecipe.Category = textBox.Text.Trim();
+            UpdateRecipeCategoryChip(_selectedRecipe);
+            RecipeField_OnLostFocus(null, null);
+            input.Close();
+        };
+        var cancelButton = new Button
+        {
+            Content = "Annuler",
+            Style = (Style)FindResource("SecondaryButtonStyle"),
+            Width = 90,
+            Margin = new Thickness(8, 8, 8, 0)
+        };
+        cancelButton.Click += (_, _) => input.Close();
+
+        var stack = new StackPanel { Margin = new Thickness(8) };
+        stack.Children.Add(new TextBlock { Text = "Catégorie", Foreground = (Brush)FindResource("TextBrush"), Margin = new Thickness(0, 0, 0, 4) });
+        stack.Children.Add(textBox);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
+        buttons.Children.Add(okButton);
+        buttons.Children.Add(cancelButton);
+        stack.Children.Add(buttons);
+
+        input.Content = stack;
+        input.ShowDialog();
     }
 
     private void PreviousRecipeButton_OnClick(object sender, RoutedEventArgs e)
@@ -1519,7 +1641,6 @@ public partial class JournauxView : UserControl, ISearchNavigable
         if (_selectedRecipe is null) return;
 
         _selectedRecipe.Title = RecipeTitleInput.Text.Trim();
-        _selectedRecipe.Category = RecipeCategoryInput.Text.Trim();
         _selectedRecipe.Ingredients = RecipeIngredientsInput.Text;
         _selectedRecipe.Instructions = RecipeInstructionsInput.Text;
         _selectedRecipe.Notes = RecipeNotesInput.Text;

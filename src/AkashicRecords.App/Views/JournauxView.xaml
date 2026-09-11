@@ -141,108 +141,139 @@
                  not a food-management system - filter by category chip, search, or ingredient text -->
             <Grid x:Name="RecipesRoot" Visibility="Collapsed">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="240"/>
+                    <ColumnDefinition Width="260"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
+                <!-- Sidebar: search, category filter chips, recipe list, "new recipe" CTA pinned bottom -->
                 <Border Grid.Column="0" Style="{StaticResource CardBorderStyle}" Padding="16" Margin="0,0,20,0">
-                    <Grid>
-                        <Grid.Resources>
-                            <Style TargetType="ScrollBar" BasedOn="{StaticResource ThinVerticalScrollBarStyle}"/>
-                        </Grid.Resources>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
-                        </Grid.RowDefinitions>
+                    <DockPanel LastChildFill="True">
+                        <TextBlock DockPanel.Dock="Top" Text="JOURNAL DE RECETTES" FontSize="15" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextBrush}" Margin="0,0,0,12"/>
 
-                        <TextBlock Grid.Row="0" Text="JOURNAL DE RECETTES" FontSize="15" FontWeight="SemiBold"
-                                   Foreground="{StaticResource TextBrush}" Margin="0,0,0,14"/>
+                        <!-- Search bar: 🔍 glyph overlaid on the text box -->
+                        <Border DockPanel.Dock="Top" Style="{StaticResource CardBorderStyle}" Padding="0">
+                            <Border.Background>
+                                <SolidColorBrush Color="#FF1E1E32"/>
+                            </Border.Background>
+                            <Grid Margin="4">
+                                <TextBlock Text="🔍" Foreground="{StaticResource TextMutedBrush}" FontSize="13" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                <TextBox x:Name="RecipeSearchInput" Background="Transparent" BorderThickness="0"
+                                         Foreground="{StaticResource TextBrush}" FontSize="13" Padding="30,8,8,8"
+                                         TextChanged="RecipeSearchInput_OnTextChanged" VerticalContentAlignment="Center"/>
+                            </Grid>
+                        </Border>
 
-                        <TextBox Grid.Row="1" x:Name="RecipeSearchInput" Style="{StaticResource DarkTextBoxStyle}" Margin="0,0,0,10"
-                                 TextChanged="RecipeSearchInput_OnTextChanged"/>
+                        <!-- Category filter chips -->
+                        <WrapPanel DockPanel.Dock="Top" x:Name="RecipeCategoryFilterPanel" Margin="0,12,0,10"/>
 
-                        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,12">
-                            <TextBox x:Name="NewRecipeTitleInput" Style="{StaticResource DarkTextBoxStyle}" Width="130" Margin="0,0,8,0"/>
-                            <Button Content="Nouvelle" Style="{StaticResource SecondaryButtonStyle}" Click="NewRecipeButton_OnClick"/>
-                        </StackPanel>
-
-                        <WrapPanel Grid.Row="3" x:Name="RecipeCategoryFilterPanel" Margin="0,0,0,10"/>
-
-                        <ListBox Grid.Row="4" x:Name="RecipeTitleList" DisplayMemberPath="Title"
+                        <!-- Recipe list -->
+                        <ListBox DockPanel.Dock="Top" x:Name="RecipeTitleList"
                                  Background="Transparent" Foreground="{StaticResource TextBrush}" BorderThickness="0"
-                                 SelectionChanged="RecipeTitleList_OnSelectionChanged"/>
-                    </Grid>
+                                 SelectionChanged="RecipeTitleList_OnSelectionChanged">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Border CornerRadius="8" Padding="10,8" Margin="0,0,0,6" Cursor="Hand"
+                                            Background="Transparent" BorderThickness="0">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsMouseOver}" Value="True">
+                                                        <Setter Property="Background" Value="#1FFFFFFF"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+                                            <TextBlock Grid.Row="0" Text="{Binding Title}" Foreground="{StaticResource TextBrush}"
+                                                       FontSize="13.5" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                            <TextBlock Grid.Row="1" Margin="0,2,0,0">
+                                                <TextBlock.Text>
+                                                    <MultiBinding Converter="{StaticResource RecipeSubtitleConverter}">
+                                                        <Binding Path="Category"/>
+                                                        <Binding Path="Ingredients"/>
+                                                    </MultiBinding>
+                                                </TextBlock.Text>
+                                            </TextBlock>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+
+                        <!-- "＋ Nouvelle recette" CTA pinned to the bottom -->
+                        <Button DockPanel.Dock="Bottom" x:Name="NewRecipeButton" Content="＋ Nouvelle recette"
+                                Style="{StaticResource PrimaryButtonStyle}" Height="40" HorizontalAlignment="Stretch"
+                                Margin="0,12,0,0" Click="NewRecipeButton_OnClick"/>
+                    </DockPanel>
                 </Border>
 
-                <Border Grid.Column="1" Style="{StaticResource CardBorderStyle}" Padding="20" MaxWidth="760" HorizontalAlignment="Left" VerticalAlignment="Top">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
-                        </Grid.RowDefinitions>
-
-                        <DockPanel Grid.Row="0" Margin="0,0,0,14">
+                <!-- Recipe page: cover, title, category chip, ingredients, preparation -->
+                <Border Grid.Column="1" Style="{StaticResource CardBorderStyle}" Padding="24" MaxWidth="760" HorizontalAlignment="Left" VerticalAlignment="Top">
+                    <DockPanel LastChildFill="True">
+                        <!-- Header: prev/next + title -->
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,16">
                             <Button DockPanel.Dock="Left" Content="◀ Précédent" Style="{StaticResource SecondaryButtonStyle}" Click="PreviousRecipeButton_OnClick"/>
                             <Button DockPanel.Dock="Right" Content="Suivant ▶" Style="{StaticResource SecondaryButtonStyle}" Click="NextRecipeButton_OnClick"/>
-                            <TextBlock x:Name="RecipePageTitleText" HorizontalAlignment="Center" Foreground="{StaticResource TextBrush}"
-                                       FontWeight="Bold" FontSize="16" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="RecipePageTitleText" DockPanel.Dock="Left" HorizontalAlignment="Center" Foreground="{StaticResource TextBrush}"
+                                       FontWeight="Bold" FontSize="18" TextWrapping="Wrap"/>
                         </DockPanel>
 
-                        <Image x:Name="RecipeCoverImage" Grid.Row="1" Height="140" Margin="0,0,0,8"
-                               Stretch="Uniform" HorizontalAlignment="Left" Visibility="Collapsed"/>
-                        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,16">
-                            <Button Content="Choisir une photo…" Style="{StaticResource SecondaryButtonStyle}" Click="SetRecipeCoverButton_OnClick"/>
-                            <Button x:Name="RemoveRecipeCoverButton" Content="Retirer la photo" Style="{StaticResource MiniButtonStyle}" Click="RemoveRecipeCoverButton_OnClick"
-                                    Margin="12,0,0,0" Visibility="Collapsed"/>
-                        </StackPanel>
-
-                        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,12">
-                            <StackPanel Margin="0,0,12,0">
-                                <TextBlock Text="Titre" Style="{StaticResource FieldLabelStyle}"/>
-                                <TextBox x:Name="RecipeTitleInput" Style="{StaticResource DarkTextBoxStyle}" Width="220" LostFocus="RecipeField_OnLostFocus"/>
-                            </StackPanel>
-                            <StackPanel>
-                                <TextBlock Text="Catégorie" Style="{StaticResource FieldLabelStyle}"/>
-                                <TextBox x:Name="RecipeCategoryInput" Style="{StaticResource DarkTextBoxStyle}" Width="160" LostFocus="RecipeField_OnLostFocus"/>
+                        <!-- Cover photo + choose/remove button -->
+                        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,16">
+                            <Image x:Name="RecipeCoverImage" Height="120" Margin="0,0,0,8"
+                                   Stretch="Uniform" HorizontalAlignment="Left" Visibility="Collapsed"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="Choisir une photo…" Style="{StaticResource SecondaryButtonStyle}" Click="SetRecipeCoverButton_OnClick"/>
+                                <Button x:Name="RemoveRecipeCoverButton" Content="Retirer la photo" Style="{StaticResource MiniButtonStyle}" Click="RemoveRecipeCoverButton_OnClick"
+                                        Margin="12,0,0,0" Visibility="Collapsed"/>
                             </StackPanel>
                         </StackPanel>
 
-                        <StackPanel Grid.Row="4" Margin="0,0,0,12">
+                        <!-- Title + category chip row -->
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,16">
+                            <TextBox x:Name="RecipeTitleInput" DockPanel.Dock="Left" LostFocus="RecipeField_OnLostFocus"
+                                     FontSize="20" FontWeight="Bold" Foreground="{StaticResource TextBrush}"
+                                     Background="Transparent" BorderThickness="0,0,0,1" BorderBrush="{StaticResource AppBorderBrush}"
+                                     Padding="0,6" Margin="0,0,12,0"/>
+                            <Button x:Name="RecipeCategoryChip" Content="" Style="{StaticResource ChipButtonStyle}"
+                                    Click="RecipeCategoryChip_OnClick" ToolTip="Cliquer pour changer la catégorie"/>
+                        </DockPanel>
+
+                        <!-- Ingredients -->
+                        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,14">
                             <TextBlock Text="Ingrédients" Style="{StaticResource FieldLabelStyle}"/>
                             <TextBox x:Name="RecipeIngredientsInput" Style="{StaticResource DarkTextBoxStyle}" Height="80" TextWrapping="Wrap" AcceptsReturn="True"
                                      LostFocus="RecipeField_OnLostFocus"/>
                         </StackPanel>
 
-                        <StackPanel Grid.Row="5" Margin="0,0,0,12">
+                        <!-- Preparation -->
+                        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,14">
                             <TextBlock Text="Préparation" Style="{StaticResource FieldLabelStyle}"/>
                             <TextBox x:Name="RecipeInstructionsInput" Style="{StaticResource DarkTextBoxStyle}" Height="100" TextWrapping="Wrap" AcceptsReturn="True"
                                      LostFocus="RecipeField_OnLostFocus"/>
                         </StackPanel>
 
-                        <StackPanel Grid.Row="6" Margin="0,0,0,12">
+                        <!-- Notes personnelles -->
+                        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,14">
                             <TextBlock Text="Notes personnelles" Style="{StaticResource FieldLabelStyle}"/>
                             <TextBox x:Name="RecipeNotesInput" Style="{StaticResource DarkTextBoxStyle}" Height="60" TextWrapping="Wrap" AcceptsReturn="True"
                                      LostFocus="RecipeField_OnLostFocus"/>
                         </StackPanel>
 
-                        <StackPanel Grid.Row="7" Margin="0,0,0,12">
+                        <!-- Tags -->
+                        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,14">
                             <TextBlock Text="Tags (séparés par des virgules)" Style="{StaticResource FieldLabelStyle}"/>
                             <TextBox x:Name="RecipeTagsInput" Style="{StaticResource DarkTextBoxStyle}" LostFocus="RecipeField_OnLostFocus"/>
                         </StackPanel>
 
-                        <Button Grid.Row="8" x:Name="DeleteRecipeButton" Content="Supprimer la recette" Style="{StaticResource MiniButtonStyle}" Click="DeleteRecipeButton_OnClick"
-                                HorizontalAlignment="Left" VerticalAlignment="Top"/>
-                    </Grid>
+                        <!-- Delete -->
+                        <Button DockPanel.Dock="Bottom" x:Name="DeleteRecipeButton" Content="Supprimer la recette" Style="{StaticResource MiniButtonStyle}" Click="DeleteRecipeButton_OnClick"/>
+                    </DockPanel>
                 </Border>
             </Grid>
 
