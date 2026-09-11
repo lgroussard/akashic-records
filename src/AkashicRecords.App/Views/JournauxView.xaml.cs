@@ -1542,31 +1542,21 @@ public partial class JournauxView : UserControl, ISearchNavigable
         RecipeInstructionsInput.Text = recipe?.Instructions ?? string.Empty;
         RecipeNotesInput.Text = recipe?.Notes ?? string.Empty;
         RecipeTagsInput.Text = recipe?.Tags ?? string.Empty;
-        UpdateRecipeCategoryChip(recipe);
+        RecipeCategoryInput.Text = recipe?.Category ?? string.Empty;
         RefreshRecipeCoverImage();
 
         var isEnabled = recipe is not null;
         foreach (var input in new Control[]
                  {
-                     RecipeTitleInput, RecipeIngredientsInput, RecipeInstructionsInput,
-                     RecipeNotesInput, RecipeTagsInput, DeleteRecipeButton
+                     RecipeTitleInput, RecipeCategoryInput, RecipeIngredientsInput,
+                     RecipeInstructionsInput, RecipeNotesInput, RecipeTagsInput, DeleteRecipeButton
                  })
         {
             input.IsEnabled = isEnabled;
         }
-        RecipeCategoryChip.IsEnabled = isEnabled;
     }
 
-    // Renders the recipe's category as a chip on the page header. Clicking it opens a small
-    // inline editor (a prompt) so the user can rename the category - the chip is the source of
-    // truth for the list subtitle.
-    private void UpdateRecipeCategoryChip(Recipe? recipe)
-    {
-        var category = string.IsNullOrWhiteSpace(recipe?.Category) ? "Sans catégorie" : recipe!.Category;
-        RecipeCategoryChip.Content = category;
-    }
-
-    private void RecipeCategoryChip_OnClick(object sender, RoutedEventArgs e)
+    private void RecipeCategoryInput_OnClick(object sender, RoutedEventArgs e)
     {
         if (_selectedRecipe is null) return;
 
@@ -1597,7 +1587,7 @@ public partial class JournauxView : UserControl, ISearchNavigable
         okButton.Click += (_, _) =>
         {
             _selectedRecipe.Category = textBox.Text.Trim();
-            UpdateRecipeCategoryChip(_selectedRecipe);
+            RecipeCategoryInput.Text = _selectedRecipe.Category;
             RecipeField_OnLostFocus(null, null);
             input.Close();
         };

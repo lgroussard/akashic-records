@@ -148,31 +148,25 @@
                 <!-- Sidebar: search, category filter chips, recipe list, "new recipe" CTA pinned bottom -->
                 <Border Grid.Column="0" Style="{StaticResource CardBorderStyle}" Padding="16" Margin="0,0,20,0">
                     <DockPanel LastChildFill="True">
-                    <!-- Search bar: 🔍 glyph overlaid on the text box -->
-                    <Border DockPanel.Dock="Top" Style="{StaticResource CardBorderStyle}" Padding="0">
-                        <Border.Background>
-                            <SolidColorBrush Color="#FF1E1E32"/>
-                        </Border.Background>
-                        <Grid Margin="4">
-                            <TextBox x:Name="RecipeSearchInput" Background="Transparent" BorderThickness="0"
-                                     Foreground="{StaticResource TextBrush}" FontSize="13" Padding="12,8,8,8"
-                                     TextChanged="RecipeSearchInput_OnTextChanged" VerticalContentAlignment="Center"/>
-                            <TextBlock x:Name="RecipeSearchPlaceholder" Text="Titre, ingrédient…"
-                                       Foreground="{StaticResource TextFaintBrush}" FontSize="13"
-                                       VerticalAlignment="Center" Margin="12,0,0,0">
-                                <TextBlock.Style>
-                                    <Style TargetType="TextBlock">
-                                        <Setter Property="Visibility" Value="Visible"/>
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding Text, ElementName=RecipeSearchInput}" Value="">
-                                                <Setter Property="Visibility" Value="Collapsed"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </TextBlock.Style>
-                            </TextBlock>
-                        </Grid>
-                    </Border>
+                    <!-- Search bar: plain input -->
+                    <TextBox DockPanel.Dock="Top" x:Name="RecipeSearchInput" Background="{StaticResource Surface2Brush}"
+                             Foreground="{StaticResource TextBrush}" FontSize="13" Padding="10,8,8,8"
+                             BorderThickness="1" BorderBrush="{StaticResource AppBorderBrush}"
+                             TextChanged="RecipeSearchInput_OnTextChanged" VerticalContentAlignment="Center"/>
+                    <TextBlock DockPanel.Dock="Top" x:Name="RecipeSearchPlaceholder" Text="Titre, ingrédient…"
+                               Foreground="{StaticResource TextFaintBrush}" FontSize="13"
+                               Margin="0,8,0,0">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Text, ElementName=RecipeSearchInput}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
 
                         <!-- Category filter chips -->
                         <WrapPanel DockPanel.Dock="Top" x:Name="RecipeCategoryFilterPanel" Margin="0,12,0,10"/>
@@ -246,7 +240,7 @@
                             <Button DockPanel.Dock="Left" Content="◀ Prédent" Style="{StaticResource SecondaryButtonStyle}" Click="PreviousRecipeButton_OnClick"/>
                             <Button DockPanel.Dock="Right" Content="Suivant ▶" Style="{StaticResource SecondaryButtonStyle}" Click="NextRecipeButton_OnClick"/>
                             <TextBlock x:Name="RecipePageTitleText" HorizontalAlignment="Center" Foreground="{StaticResource TextBrush}"
-                                       FontWeight="Bold" FontSize="18" TextWrapping="Wrap"/>
+                                       FontWeight="SemiBold" FontSize="14" TextWrapping="Wrap"/>
                         </DockPanel>
 
                         <!-- Cover photo + choose/remove button -->
@@ -264,13 +258,15 @@
                         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,16">
                             <DockPanel DockPanel.Dock="Right" Width="200">
                                 <TextBlock DockPanel.Dock="Top" Text="Catégorie" Style="{StaticResource FieldLabelStyle}"/>
-                                <Button x:Name="RecipeCategoryChip" Content="" Style="{StaticResource ChipButtonStyle}"
-                                        Click="RecipeCategoryChip_OnClick" ToolTip="Cliquer pour changer la catégorie"/>
+                                <TextBox x:Name="RecipeCategoryInput" LostFocus="RecipeField_OnLostFocus"
+                                         Background="{StaticResource Surface2Brush}"
+                                         BorderThickness="1" BorderBrush="{StaticResource AppBorderBrush}"
+                                         Padding="8,6"/>
                             </DockPanel>
                             <DockPanel DockPanel.Dock="Top">
                                 <TextBlock DockPanel.Dock="Top" Text="Titre" Style="{StaticResource FieldLabelStyle}"/>
                                 <TextBox x:Name="RecipeTitleInput" LostFocus="RecipeField_OnLostFocus"
-                                         FontSize="18" FontWeight="Bold" Foreground="{StaticResource TextBrush}"
+                                         FontSize="16" Foreground="{StaticResource TextBrush}"
                                          Background="{StaticResource Surface2Brush}"
                                          BorderThickness="1" BorderBrush="{StaticResource AppBorderBrush}"
                                          Padding="8,6"/>
