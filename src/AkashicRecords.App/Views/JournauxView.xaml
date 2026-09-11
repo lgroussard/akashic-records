@@ -34,12 +34,46 @@
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
-                <Border Grid.Column="0" Width="300" Style="{StaticResource CardBorderStyle}" Background="{StaticResource Surface2Brush}" BorderBrush="{StaticResource BorderStrongBrush}" Padding="16" Margin="0,0,20,0" VerticalAlignment="Stretch">
+                <!-- Calendar card: month header + prev/next + a compact 7-day grid, "＋ Aujourd'hui" pinned bottom -->
+                <Border Grid.Column="0" Width="300" Style="{StaticResource CardBorderStyle}" Padding="16" Margin="0,0,20,0" VerticalAlignment="Stretch">
                     <DockPanel LastChildFill="True">
-                        <Button DockPanel.Dock="Bottom" Content="＋ Aujourd'hui" Style="{StaticResource PrimaryPillButtonStyle}"
-                                HorizontalAlignment="Stretch" Margin="0,16,0,0" Click="GoToTodayButton_OnClick"/>
+                        <!-- Month header + prev/next (top) -->
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                            <TextBlock x:Name="MonthHeader" FontSize="14" FontWeight="Bold" Foreground="{StaticResource TextBrush}"
+                                       VerticalAlignment="Center"/>
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                <Button Content="‹" Style="{StaticResource SecondaryButtonStyle}" Width="26" Height="26" Padding="0"
+                                        Click="PreviousMonthButton_OnClick" Margin="0,0,4,0"/>
+                                <Button Content="›" Style="{StaticResource SecondaryButtonStyle}" Width="26" Height="26" Padding="0"
+                                        Click="NextMonthButton_OnClick"/>
+                            </StackPanel>
+                        </DockPanel>
+
+                        <!-- Calendar fills the remaining space (must be the last child so it doesn't overlap the header) -->
                         <Grid>
-                            <Calendar x:Name="EntryCalendar" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" FontSize="13"
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <Grid Grid.Row="0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="L" Foreground="{StaticResource TextFaintBrush}" FontSize="11" HorizontalAlignment="Center"/>
+                                <TextBlock Grid.Column="1" Text="M" Foreground="{StaticResource TextFaintBrush}" FontSize="11" HorizontalAlignment="Center"/>
+                                <TextBlock Grid.Column="2" Text="M" Foreground="{StaticResource TextFaintBrush}" FontSize="11" HorizontalAlignment="Center"/>
+                                <TextBlock Grid.Column="3" Text="J" Foreground="{StaticResource TextFaintBrush}" FontSize="11" HorizontalAlignment="Center"/>
+                                <TextBlock Grid.Column="4" Text="V" Foreground="{StaticResource TextFaintBrush}" FontSize="11" HorizontalAlignment="Center"/>
+                                <TextBlock Grid.Column="5" Text="S" Foreground="{StaticResource TextFaintBrush}" FontSize="11" HorizontalAlignment="Center"/>
+                                <TextBlock Grid.Column="6" Text="D" Foreground="{StaticResource TextFaintBrush}" FontSize="11" HorizontalAlignment="Center"/>
+                            </Grid>
+                            <Calendar x:Name="EntryCalendar" Grid.Row="1" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                                       SelectedDatesChanged="EntryCalendar_OnSelectedDatesChanged"
                                       CalendarDayButtonStyle="{StaticResource EntryDayButtonStyle}"
                                       Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}"/>
@@ -47,7 +81,8 @@
                     </DockPanel>
                 </Border>
 
-                <Border Grid.Column="1" Style="{StaticResource CardBorderStyle}" Background="{StaticResource Surface2Brush}" BorderBrush="{StaticResource BorderStrongBrush}" Padding="28" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                <!-- Entry page: title (underline) · date · body · tags (chips) · photos -->
+                <Border Grid.Column="1" Style="{StaticResource CardBorderStyle}" Padding="28" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
@@ -63,31 +98,40 @@
                                         Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextMutedBrush}" Cursor="Hand" FontSize="18"/>
                                 <Button Content="›" Click="NextEntryButton_OnClick" Width="30" Height="30"
                                         Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextMutedBrush}" Cursor="Hand" FontSize="18"/>
+                                <Button x:Name="DeleteEntryButton" Content="Supprimer cette entrée" Style="{StaticResource MiniButtonStyle}"
+                                        Click="DeleteEntryButton_OnClick" Margin="14,0,0,0" VerticalAlignment="Center"/>
                             </StackPanel>
                             <TextBox x:Name="EntryTitleInput" LostFocus="EntryTitleInput_OnLostFocus"
-                                     FontSize="26" FontWeight="Bold" Foreground="{StaticResource TextBrush}"
+                                     FontSize="20" FontWeight="Bold" Foreground="{StaticResource TextBrush}"
                                      Background="Transparent" BorderThickness="0,0,0,1" BorderBrush="{StaticResource AppBorderBrush}"
-                                     Padding="0,4" VerticalAlignment="Center"/>
+                                     Padding="0,6" VerticalAlignment="Center"/>
                         </DockPanel>
 
-                        <TextBlock Grid.Row="1" x:Name="PageDateText" Foreground="{StaticResource TextMutedBrush}" FontSize="13" Margin="0,6,0,16"/>
+                        <TextBlock Grid.Row="1" x:Name="PageDateText" Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,6,0,12"/>
 
                         <TextBox Grid.Row="2" x:Name="EntryTextInput" TextWrapping="Wrap" AcceptsReturn="True"
-                                 Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}" FontSize="15"
+                                 Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}" FontSize="14.5"
                                  VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" Margin="0,0,0,14" LostFocus="EntryTextInput_OnLostFocus"/>
 
-                        <StackPanel Grid.Row="3" Margin="0,0,0,16">
-                            <TextBlock Text="Tags (séparés par des virgules)" Style="{StaticResource FieldLabelStyle}"/>
-                            <TextBox x:Name="EntryTagsInput" Style="{StaticResource DarkTextBoxStyle}" LostFocus="EntryTagsInput_OnLostFocus"/>
+                        <StackPanel Grid.Row="3" Margin="0,0,0,12">
+                            <TextBlock Text="Tags" Style="{StaticResource PanelSectionHeaderStyle}" Margin="0,0,0,8"/>
+                            <StackPanel x:Name="EntryTagsPanel"/>
+                            <Grid>
+                                <TextBox x:Name="EntryTagsInput" LostFocus="EntryTagsInput_OnLostFocus"
+                                         Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}"
+                                         FontSize="12.5" Padding="2,4" TextChanged="EntryTagsInput_OnTextChanged"/>
+                                <TextBlock x:Name="EntryTagsPlaceholder" Text="+ tag" Foreground="{StaticResource TextFaintBrush}"
+                                           IsHitTestVisible="False" VerticalAlignment="Center" Margin="4,4,0,0"
+                                           Visibility="Collapsed"/>
+                            </Grid>
                         </StackPanel>
 
                         <StackPanel Grid.Row="4">
                             <TextBlock Text="PHOTOS" Style="{StaticResource PanelSectionHeaderStyle}" Margin="0,0,0,8"/>
                             <WrapPanel x:Name="EntryPhotosPanel" Margin="0,0,0,12"/>
-                            <StackPanel Orientation="Horizontal">
-                                <Button Content="Ajouter une photo…" Style="{StaticResource SecondaryButtonStyle}" Click="AddEntryPhotoButton_OnClick"/>
-                                <Button x:Name="DeleteEntryButton" Content="Supprimer cette entrée" Style="{StaticResource MiniButtonStyle}" Click="DeleteEntryButton_OnClick" Margin="12,0,0,0"/>
-                            </StackPanel>
+                            <Button x:Name="AddEntryPhotoButton" Content="+" Style="{StaticResource SecondaryButtonStyle}"
+                                    Click="AddEntryPhotoButton_OnClick" Width="48" Height="48" FontSize="24"
+                                    Padding="0" HorizontalAlignment="Left"/>
                         </StackPanel>
                     </Grid>
                 </Border>

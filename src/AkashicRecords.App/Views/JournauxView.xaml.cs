@@ -8,6 +8,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 using AkashicRecords.Domain;
 using AkashicRecords.Infrastructure.Configuration;
 using AkashicRecords.Infrastructure.Persistence;
@@ -116,12 +117,15 @@ public partial class JournauxView : UserControl, ISearchNavigable
 
             RefreshProjectsList();
             RefreshCalendarChips();
+            UpdateMonthHeader();
             NavigateToDate(DateTime.Today);
         };
         Loaded += JournauxView_OnLoaded;
         Unloaded += JournauxView_OnUnloaded;
         Loaded += (_, _) => ApplyPendingSearchResult();
         SetupCanvasPanning();
+
+        HideNativeCalendarHeader();
     }
 
     // --- Global search deep-link (ISearchNavigable) ---
@@ -1086,6 +1090,7 @@ public partial class JournauxView : UserControl, ISearchNavigable
         EntryTitleInput.Text = _selectedEntry?.Title ?? string.Empty;
         EntryTextInput.Text = _selectedEntry?.Text ?? string.Empty;
         EntryTagsInput.Text = _selectedEntry?.Tags ?? string.Empty;
+        RenderEntryTags();
         RefreshEntryPhotos();
 
         if (EntryCalendar.SelectedDate != _currentPageDate) EntryCalendar.SelectedDate = _currentPageDate;
@@ -1093,6 +1098,164 @@ public partial class JournauxView : UserControl, ISearchNavigable
         {
             EntryCalendar.DisplayDate = _currentPageDate;
         }
+    }
+
+    // Keeps the month label above the calendar in sync with the calendar's visible month.
+    private void UpdateMonthHeader()
+    {
+        var month = EntryCalendar.DisplayDate.ToString("MMMM yyyy", CultureInfo.CurrentCulture);
+        MonthHeader.Text = char.ToUpperInvariant(month[0]) + month.Substring(1);
+    }
+
+    // The default Calendar template renders its own month/year header + prev/next arrows, and
+    // wraps the day grid in a white PART_CalendarItemContainer Border. The app draws its own
+    // header above the grid, so we collapse the native ones. We hook PART_CalendarItem.Loaded
+    // (which fires after the CalendarItem's own template is applied) to reach the header.
+    private void HideNativeCalendarHeader()
+    {
+        EntryCalendar.Loaded += (_, _) =>
+        {
+            try
+            {
+                EntryCalendar.ApplyTemplate();
+                var calendarItem = FindChildByName(EntryCalendar, "PART_CalendarItem") as CalendarItem;
+                if (calendarItem is null) return;
+                calendarItem.ApplyTemplate();
+
+                // The CalendarItem's root Grid's first child is the white Border that wraps the
+                // header + day grid. Clear its background so the day grid sits on the card.
+                var rootGrid = FindChildByName(calendarItem, "PART_Root") as Grid;
+                if (rootGrid is not null && VisualTreeHelper.GetChild(rootGrid, 0) is Border whiteBorder)
+                {
+                    whiteBorder.Background = Brushes.Transparent;
+                    whiteBorder.BorderBrush = Brushes.Transparent;
+                    whiteBorder.BorderThickness = new Thickness(0);
+                }
+
+                // The CalendarItem and the Calendar root carry a solid white background that shows
+                // as the outer frame around the chips. Clear them, plus any nested white Border,
+                // so the day grid sits transparently on the card.
+                calendarItem.Background = Brushes.Transparent;
+                EntryCalendar.Background = Brushes.Transparent;
+                ClearWhiteBorders(EntryCalendar, new System.Text.StringBuilder());
+
+                // Hide the native month/year header button and the prev/next arrows inside the grid
+                // (the app draws its own month navigation above the grid).
+                foreach (var native in new[] { "PART_HeaderButton", "PART_PreviousButton", "PART_NextButton" })
+                {
+                    var el = FindChildByName(calendarItem, native) as FrameworkElement;
+                    if (el is not null) el.Visibility = Visibility.Collapsed;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.IO.File.WriteAllText(
+                    System.IO.Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                        "AkashicRecords", "calendar-error.log"),
+                    ex.ToString());
+            }
+        };
+    }
+
+    private static void ClearWhiteBorders(DependencyObject root, System.Text.StringBuilder log)
+    {
+        if (root is Border b)
+        {
+            var bg = b.Background as SolidColorBrush;
+            var bb = b.BorderBrush as SolidColorBrush;
+            var isWhite = (bg != null && bg.Color.R > 240 && bg.Color.G > 240 && bg.Color.B > 240)
+                       || (bb != null && bb.Color.R > 240 && bb.Color.G > 240 && bb.Color.B > 240);
+            if (isWhite)
+            {
+                log.AppendLine($"clearing white bg={(bg != null ? $"#{bg.Color.R:X2}{bg.Color.G:X2}{bg.Color.B:X2}" : "null")} bb={(bb != null ? $"#{bb.Color.R:X2}{bb.Color.G:X2}{bb.Color.B:X2}" : "null")} name={b.Name}");
+                b.Background = Brushes.Transparent;
+                b.BorderBrush = Brushes.Transparent;
+                b.BorderThickness = new Thickness(0);
+            }
+        }
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+            ClearWhiteBorders(VisualTreeHelper.GetChild(root, i), log);
+    }
+
+    private static FrameworkElement? FindChildByName(DependencyObject root, string name)
+    {
+        foreach (var child in Enumerable.Range(0, VisualTreeHelper.GetChildrenCount(root))
+                     .Select(i => VisualTreeHelper.GetChild(root, i)))
+        {
+            if (child is FrameworkElement el && el.Name == name) return el;
+            var found = FindChildByName(child, name);
+            if (found is not null) return found;
+        }
+        return null;
+    }
+
+    private void PreviousMonthButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        EntryCalendar.DisplayDate = EntryCalendar.DisplayDate.AddMonths(-1);
+        UpdateMonthHeader();
+    }
+
+    private void NextMonthButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        EntryCalendar.DisplayDate = EntryCalendar.DisplayDate.AddMonths(1);
+        UpdateMonthHeader();
+    }
+
+    // Renders the entry's tags as rounded chips, with a "+ tag" hint. The text box below is the
+    // live editor: its placeholder mirrors the current tags so the field reads as a tag input.
+    private void RenderEntryTags()
+    {
+        EntryTagsPanel.Children.Clear();
+
+        var tags = string.IsNullOrWhiteSpace(_selectedEntry?.Tags)
+            ? Array.Empty<string>()
+            : _selectedEntry!.Tags.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        foreach (var tag in tags)
+        {
+            var chip = new Button
+            {
+                Content = tag,
+                Style = (Style)Application.Current.FindResource("ChipButtonStyle"),
+                Background = (Brush)Application.Current.FindResource("Surface3Brush"),
+                Foreground = (Brush)Application.Current.FindResource("TextBrush"),
+                Cursor = Cursors.Hand,
+                Margin = new Thickness(0, 0, 6, 6)
+            };
+            chip.Click += (_, _) => RemoveTag(tag);
+            EntryTagsPanel.Children.Add(chip);
+        }
+
+        UpdateEntryTagsInputPlaceholder();
+    }
+
+    private void UpdateEntryTagsInputPlaceholder()
+    {
+        // WPF TextBox has no native PlaceholderText, so we toggle an overlay TextBlock.
+        EntryTagsPlaceholder.Visibility = EntryTagsPanel.Children.Count > 0
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+    }
+
+    private void RemoveTag(string tag)
+    {
+        if (_selectedEntry is null) return;
+
+        var tags = (_selectedEntry.Tags ?? string.Empty)
+            .Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(t => !string.Equals(t, tag, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        _selectedEntry.Tags = string.Join(", ", tags);
+        _journalEntryRepository.Update(_selectedEntry.Id, _selectedEntry.Title, _selectedEntry.Text, _selectedEntry.EntryDate, _selectedEntry.Tags);
+        RenderEntryTags();
+    }
+
+    // The tag editor is a plain TextBox; we just refresh the chips + placeholder live as the user
+    // types. The real save happens on lost focus (see EntryTagsInput_OnLostFocus).
+    private void EntryTagsInput_OnTextChanged(object sender, TextChangedEventArgs e)
+    {
+        UpdateEntryTagsInputPlaceholder();
     }
 
     private void EntryCalendar_OnSelectedDatesChanged(object sender, SelectionChangedEventArgs e)

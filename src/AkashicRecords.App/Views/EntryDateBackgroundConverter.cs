@@ -15,6 +15,7 @@ public sealed class EntryDateBackgroundConverter : IValueConverter
     {
         if (value is DateTime date && DatesWithEntries.Contains(date.Date))
         {
+            // Accent-soft tint (rgba(91,140,255,0.16)) for days that hold an entry.
             var brush = new SolidColorBrush(Color.FromArgb(0x29, 0x5B, 0x8C, 0xFF));
             brush.Freeze();
             return brush;

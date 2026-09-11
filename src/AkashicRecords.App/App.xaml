@@ -537,17 +537,47 @@
         </Style>
 
         <Style x:Key="EntryDayButtonStyle" TargetType="CalendarDayButton">
+            <!-- Compact, rounded day chips (no margins) matching the journaux mockup. The
+                 background is set from code-behind (selected = accent, has-entry = soft tint,
+                 today = accent outline) so the value converter only tints days that hold an entry. -->
             <Setter Property="MinWidth" Value="34"/>
             <Setter Property="MinHeight" Value="34"/>
-            <Setter Property="Margin" Value="2"/>
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontSize" Value="12.5"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Background">
+            <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="VerticalAlignment" Value="Stretch"/>
+            <Setter Property="Padding" Value="4"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
                 <Setter.Value>
-                    <Binding Converter="{StaticResource EntryDateBackgroundConverter}"/>
+                    <ControlTemplate TargetType="CalendarDayButton">
+                        <Border x:Name="DayBorder" Background="{Binding Converter={StaticResource EntryDateBackgroundConverter}}"
+                                BorderBrush="Transparent" BorderThickness="1"
+                                CornerRadius="8" Padding="{TemplateBinding Padding}">
+                            <TextBlock Text="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=Content}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="DayBorder" Property="Background" Value="#1AFFFFFF"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsToday" Value="True">
+                                <Setter TargetName="DayBorder" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="DayBorder" Property="Background" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="DayBorder" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
-    </Application.Resources>
+
+        </Application.Resources>
 </Application>
 
