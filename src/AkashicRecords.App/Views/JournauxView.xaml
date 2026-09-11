@@ -148,21 +148,31 @@
                 <!-- Sidebar: search, category filter chips, recipe list, "new recipe" CTA pinned bottom -->
                 <Border Grid.Column="0" Style="{StaticResource CardBorderStyle}" Padding="16" Margin="0,0,20,0">
                     <DockPanel LastChildFill="True">
-                        <TextBlock DockPanel.Dock="Top" Text="JOURNAL DE RECETTES" FontSize="15" FontWeight="SemiBold"
-                                   Foreground="{StaticResource TextBrush}" Margin="0,0,0,12"/>
-
-                        <!-- Search bar: 🔍 glyph overlaid on the text box -->
-                        <Border DockPanel.Dock="Top" Style="{StaticResource CardBorderStyle}" Padding="0">
-                            <Border.Background>
-                                <SolidColorBrush Color="#FF1E1E32"/>
-                            </Border.Background>
-                            <Grid Margin="4">
-                                <TextBlock Text="🔍" Foreground="{StaticResource TextMutedBrush}" FontSize="13" VerticalAlignment="Center" Margin="8,0,0,0"/>
-                                <TextBox x:Name="RecipeSearchInput" Background="Transparent" BorderThickness="0"
-                                         Foreground="{StaticResource TextBrush}" FontSize="13" Padding="30,8,8,8"
-                                         TextChanged="RecipeSearchInput_OnTextChanged" VerticalContentAlignment="Center"/>
-                            </Grid>
-                        </Border>
+                    <!-- Search bar: 🔍 glyph overlaid on the text box -->
+                    <Border DockPanel.Dock="Top" Style="{StaticResource CardBorderStyle}" Padding="0">
+                        <Border.Background>
+                            <SolidColorBrush Color="#FF1E1E32"/>
+                        </Border.Background>
+                        <Grid Margin="4">
+                            <TextBox x:Name="RecipeSearchInput" Background="Transparent" BorderThickness="0"
+                                     Foreground="{StaticResource TextBrush}" FontSize="13" Padding="12,8,8,8"
+                                     TextChanged="RecipeSearchInput_OnTextChanged" VerticalContentAlignment="Center"/>
+                            <TextBlock x:Name="RecipeSearchPlaceholder" Text="Titre, ingrédient…"
+                                       Foreground="{StaticResource TextFaintBrush}" FontSize="13"
+                                       VerticalAlignment="Center" Margin="12,0,0,0">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Text, ElementName=RecipeSearchInput}" Value="">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Grid>
+                    </Border>
 
                         <!-- Category filter chips -->
                         <WrapPanel DockPanel.Dock="Top" x:Name="RecipeCategoryFilterPanel" Margin="0,12,0,10"/>
@@ -171,19 +181,35 @@
                         <ListBox DockPanel.Dock="Top" x:Name="RecipeTitleList"
                                  Background="Transparent" Foreground="{StaticResource TextBrush}" BorderThickness="0"
                                  SelectionChanged="RecipeTitleList_OnSelectionChanged">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem">
+                                    <Setter Property="Padding" Value="0"/>
+                                    <Setter Property="Margin" Value="0,0,0,6"/>
+                                    <Setter Property="BorderThickness" Value="0"/>
+                                    <Setter Property="HorizontalAlignment" Value="Stretch"/>
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="ListBoxItem">
+                                                <Border x:Name="ItemBg" Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                                                    <ContentPresenter/>
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsSelected" Value="True">
+                                                        <Setter TargetName="ItemBg" Property="Background" Value="#2A3458"/>
+                                                    </Trigger>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="ItemBg" Property="Background" Value="#1FFFFFFF"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
-                                    <Border CornerRadius="8" Padding="10,8" Margin="0,0,0,6" Cursor="Hand"
-                                            Background="Transparent" BorderThickness="0">
-                                        <Border.Style>
-                                            <Style TargetType="Border">
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding IsMouseOver}" Value="True">
-                                                        <Setter Property="Background" Value="#1FFFFFFF"/>
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </Border.Style>
+                                    <Border Padding="10,8" Margin="0,0,0,6" Cursor="Hand"
+                                            Background="Transparent" BorderThickness="0" CornerRadius="8">
                                         <Grid>
                                             <Grid.RowDefinitions>
                                                 <RowDefinition Height="Auto"/>
@@ -191,7 +217,7 @@
                                             </Grid.RowDefinitions>
                                             <TextBlock Grid.Row="0" Text="{Binding Title}" Foreground="{StaticResource TextBrush}"
                                                        FontSize="13.5" FontWeight="SemiBold" TextWrapping="Wrap"/>
-                                            <TextBlock Grid.Row="1" Margin="0,2,0,0">
+                                            <TextBlock Grid.Row="1" Margin="0,2,0,0" Foreground="{StaticResource TextMutedBrush}">
                                                 <TextBlock.Text>
                                                     <MultiBinding Converter="{StaticResource RecipeSubtitleConverter}">
                                                         <Binding Path="Category"/>
@@ -215,11 +241,11 @@
                 <!-- Recipe page: cover, title, category chip, ingredients, preparation -->
                 <Border Grid.Column="1" Style="{StaticResource CardBorderStyle}" Padding="24" MaxWidth="760" HorizontalAlignment="Left" VerticalAlignment="Top">
                     <DockPanel LastChildFill="True">
-                        <!-- Header: prev/next + title -->
+                        <!-- Header: prev/next + centered title -->
                         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,16">
-                            <Button DockPanel.Dock="Left" Content="◀ Précédent" Style="{StaticResource SecondaryButtonStyle}" Click="PreviousRecipeButton_OnClick"/>
+                            <Button DockPanel.Dock="Left" Content="◀ Prédent" Style="{StaticResource SecondaryButtonStyle}" Click="PreviousRecipeButton_OnClick"/>
                             <Button DockPanel.Dock="Right" Content="Suivant ▶" Style="{StaticResource SecondaryButtonStyle}" Click="NextRecipeButton_OnClick"/>
-                            <TextBlock x:Name="RecipePageTitleText" DockPanel.Dock="Left" HorizontalAlignment="Center" Foreground="{StaticResource TextBrush}"
+                            <TextBlock x:Name="RecipePageTitleText" HorizontalAlignment="Center" Foreground="{StaticResource TextBrush}"
                                        FontWeight="Bold" FontSize="18" TextWrapping="Wrap"/>
                         </DockPanel>
 
@@ -234,14 +260,21 @@
                             </StackPanel>
                         </StackPanel>
 
-                        <!-- Title + category chip row -->
+                        <!-- Title + category row: two labeled input boxes side by side -->
                         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,16">
-                            <TextBox x:Name="RecipeTitleInput" DockPanel.Dock="Left" LostFocus="RecipeField_OnLostFocus"
-                                     FontSize="20" FontWeight="Bold" Foreground="{StaticResource TextBrush}"
-                                     Background="Transparent" BorderThickness="0,0,0,1" BorderBrush="{StaticResource AppBorderBrush}"
-                                     Padding="0,6" Margin="0,0,12,0"/>
-                            <Button x:Name="RecipeCategoryChip" Content="" Style="{StaticResource ChipButtonStyle}"
-                                    Click="RecipeCategoryChip_OnClick" ToolTip="Cliquer pour changer la catégorie"/>
+                            <DockPanel DockPanel.Dock="Right" Width="200">
+                                <TextBlock DockPanel.Dock="Top" Text="Catégorie" Style="{StaticResource FieldLabelStyle}"/>
+                                <Button x:Name="RecipeCategoryChip" Content="" Style="{StaticResource ChipButtonStyle}"
+                                        Click="RecipeCategoryChip_OnClick" ToolTip="Cliquer pour changer la catégorie"/>
+                            </DockPanel>
+                            <DockPanel DockPanel.Dock="Top">
+                                <TextBlock DockPanel.Dock="Top" Text="Titre" Style="{StaticResource FieldLabelStyle}"/>
+                                <TextBox x:Name="RecipeTitleInput" LostFocus="RecipeField_OnLostFocus"
+                                         FontSize="18" FontWeight="Bold" Foreground="{StaticResource TextBrush}"
+                                         Background="{StaticResource Surface2Brush}"
+                                         BorderThickness="1" BorderBrush="{StaticResource AppBorderBrush}"
+                                         Padding="8,6"/>
+                            </DockPanel>
                         </DockPanel>
 
                         <!-- Ingredients -->
