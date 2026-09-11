@@ -151,7 +151,7 @@
                     <!-- Search bar: plain input -->
                     <TextBox DockPanel.Dock="Top" x:Name="RecipeSearchInput" Background="{StaticResource Surface2Brush}"
                              Foreground="{StaticResource TextBrush}" FontSize="13" Padding="10,8,8,8"
-                             BorderThickness="1" BorderBrush="{StaticResource AppBorderBrush}"
+                             BorderThickness="0"
                              TextChanged="RecipeSearchInput_OnTextChanged" VerticalContentAlignment="Center"/>
                     <TextBlock DockPanel.Dock="Top" x:Name="RecipeSearchPlaceholder" Text="Titre, ingrédient…"
                                Foreground="{StaticResource TextFaintBrush}" FontSize="13"
