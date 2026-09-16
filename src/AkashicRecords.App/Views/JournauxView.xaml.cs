@@ -88,6 +88,7 @@ public partial class JournauxView : UserControl, ISearchNavigable
         InitializeComponent();
         _config = config;
         _activeTab = config.JournauxActiveTab;
+        PopulateFontFamilies();
         if (!string.IsNullOrEmpty(_activeTab))
         {
             var tab = _activeTab switch
@@ -1709,19 +1710,54 @@ public partial class JournauxView : UserControl, ISearchNavigable
     private enum PoetryPane { Bookshelf, Book, Editor }
     private Recueil? _openRecueil;
 
-    // A palette of cover colors, assigned deterministically by recueil id so a given
-    // recueil always keeps the same spine color.
-    private static readonly string[] CoverColors =
+    // A palette of gradient pairs for book spines, assigned deterministically by recueil id so a
+    // given recueil always keeps the same colour. Each pair is (top, bottom) so the spine reads
+    // darker at the head and lighter toward the foot, like the reference covers.
+    private static readonly (string Top, string Bottom)[] CoverGradients =
     {
-        "#8B5CF6", "#3B82F6", "#EC4899", "#F59E0B", "#10B981",
-        "#EF4444", "#6366F1", "#14B8A6", "#F97316", "#A855F7"
+        ("#2E3E6B", "#5B8CFF"), // blue        - Amour
+        ("#1E3A5F", "#2BD4EE"), // teal        - First poems
+        ("#3E2B5C", "#8B5CF6"), // purple      - Nature
+        ("#261C3F", "#5B3C8C"), // deep violet - Po sur
+        ("#3A2B52", "#7B5AA6"), // mauve
+        ("#5E2233", "#FF5B8C"), // rose
+        ("#2B3A5E", "#5BA0FF"), // sky
+        ("#1E4A3F", "#10B981"), // green
+        ("#5E3A1E", "#F59E0B"), // amber
+        ("#4A1E5E", "#F97316"), // orange
     };
 
-    // View-model for a cover on the bookshelf.
-    private sealed record RecueilCoverItem(Recueil? Recueil, string Title, string PoemCountText, Brush CoverBrush);
+    // A translucent brush for the "+ Nouveau recueil" card body; the dashed frame is drawn by
+    // the DashedBorder control layered on top.
+    private static readonly Brush DashedCardBackground = new SolidColorBrush(Color.FromRgb(0x1C, 0x1C, 0x34));
 
-    // View-model for a poem card inside an open book.
-    private sealed record PoemCardItem(Poem Poem, string Title, string Preview, string PoemCountText);
+    // A tiled diagonal-line pattern used for the "Sans recueil" cover, so it reads as the
+    // catch-all hatch rather than a real spine colour.
+    private static readonly DrawingBrush HatchedPatternBrush = CreateHatchedPattern();
+
+    private static DrawingBrush CreateHatchedPattern()
+    {
+        var geometry = new GeometryGroup();
+        geometry.Children.Add(new LineGeometry(new Point(0, 12), new Point(12, 0)));
+        geometry.Children.Add(new LineGeometry(new Point(0, 0), new Point(12, 12)));
+        var drawing = new GeometryDrawing(
+            null,
+            new Pen(new SolidColorBrush(Color.FromRgb(0x90, 0x90, 0xBB)), 1),
+            geometry);
+        return new DrawingBrush(drawing)
+        {
+            TileMode = TileMode.Tile,
+            Viewport = new Rect(0, 0, 12, 12),
+        };
+    }
+
+    // View-model for a cover on the bookshelf. IsDashed marks the "+ Nouveau recueil" card, which
+    // renders a translucent body + dashed frame instead of a spine.
+    private sealed record RecueilCoverItem(Recueil? Recueil, string Title, string PoemCountText, Brush CoverBrush, bool IsDashed);
+
+    // View-model for a poem row inside the open-book sidebar. RecueilName is the anthology the
+    // poem belongs to, shown as a muted subtitle ("Recueil : Amour").
+    private sealed record PoemCardItem(Poem Poem, string Title, string RecueilName, string Preview);
 
     private List<Poem> GetFilteredPoems()
     {
@@ -1788,8 +1824,11 @@ public partial class JournauxView : UserControl, ISearchNavigable
 
     private static Brush CoverBrushFor(int id)
     {
-        var color = (Color)ColorConverter.ConvertFromString(CoverColors[Math.Abs(id) % CoverColors.Length])!;
-        return new SolidColorBrush(color);
+        var (top, bottom) = CoverGradients[Math.Abs(id) % CoverGradients.Length];
+        var gradient = new LinearGradientBrush();
+        gradient.GradientStops.Add(new GradientStop((Color)ColorConverter.ConvertFromString(top), 0));
+        gradient.GradientStops.Add(new GradientStop((Color)ColorConverter.ConvertFromString(bottom), 1));
+        return gradient;
     }
 
     // Switches which of the three poetry panes is visible.
@@ -1806,11 +1845,19 @@ public partial class JournauxView : UserControl, ISearchNavigable
         var allPoems = _poemRepository.GetAll();
         var recueils = _recueilRepository.GetAll();
 
-        var covers = recueils.Select(r =>
+        var covers = new List<RecueilCoverItem>();
+        foreach (var r in recueils)
         {
             var count = allPoems.Count(p => p.RecueilId == r.Id);
-            return new RecueilCoverItem(r, r.Title, count == 1 ? "1 poème" : $"{count} poèmes", CoverBrushFor(r.Id));
-        }).ToList();
+            var isUnclassified = r.Title == UnclassifiedTitle;
+            covers.Add(new RecueilCoverItem(
+                r, r.Title, count == 1 ? "1 poème" : $"{count} poèmes",
+                isUnclassified ? HatchedPatternBrush : CoverBrushFor(r.Id),
+                isUnclassified));
+        }
+
+        // The "+ Nouveau recueil" card is always last, rendered as a dashed-outline placeholder.
+        covers.Add(new RecueilCoverItem(null, "+ Nouveau recueil", "", DashedCardBackground, IsDashed: true));
 
         RecueilCoverList.ItemsSource = covers;
         BookshelfCount.Text = covers.Count == 1 ? "1 recueil" : $"{covers.Count} recueils";
@@ -1831,15 +1878,26 @@ public partial class JournauxView : UserControl, ISearchNavigable
         PoemCardList.ItemsSource = poems.Select(p => new PoemCardItem(
             p,
             p.Title,
-            p.Text.Length > 160 ? p.Text[..160].Trim() + "…" : p.Text,
-            string.Empty)).ToList();
+            recueil.Title,
+            p.Text.Length > 160 ? p.Text[..160].Trim() + "…" : p.Text)).ToList();
 
         ShowPoetryPane(PoetryPane.Book);
     }
 
     private void RecueilCover_OnClick(object sender, MouseButtonEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: RecueilCoverItem { Recueil: { } recueil } }) OpenRecueilBook(recueil);
+        if (sender is not FrameworkElement { DataContext: RecueilCoverItem item }) return;
+
+        // The dashed card opens the "new recueil" inline editor instead of a book.
+        if (item.IsDashed)
+        {
+            RecueilManagePanel.Visibility = Visibility.Visible;
+            RecueilRenameInput.Text = string.Empty;
+            RecueilRenameInput.Focus();
+            return;
+        }
+
+        if (item.Recueil is { } recueil) OpenRecueilBook(recueil);
     }
 
     private void PoemCard_OnClick(object sender, MouseButtonEventArgs e)
@@ -1986,7 +2044,7 @@ public partial class JournauxView : UserControl, ISearchNavigable
     {
         var poems = GetFilteredPoems();
         PoemCardList.ItemsSource = poems.Select(p => new PoemCardItem(
-            p, p.Title, p.Text.Length > 160 ? p.Text[..160].Trim() + "…" : p.Text, string.Empty)).ToList();
+            p, p.Title, "Sans recueil", p.Text.Length > 160 ? p.Text[..160].Trim() + "…" : p.Text)).ToList();
         BookTitle.Text = "Sans recueil";
         BookRenameInput.IsEnabled = false;
         BookDeleteButton.IsEnabled = false;
@@ -2006,7 +2064,10 @@ public partial class JournauxView : UserControl, ISearchNavigable
         // current filter (recueil, "Sans recueil", or everything).
         var matches = GetFilteredPoems();
         PoemCardList.ItemsSource = matches.Select(p => new PoemCardItem(
-            p, p.Title, p.Text.Length > 160 ? p.Text[..160].Trim() + "…" : p.Text, string.Empty)).ToList();
+            p, p.Title, p.RecueilId is { } rid
+                ? _recueilRepository.GetAll().FirstOrDefault(r => r.Id == rid)?.Title ?? "Sans recueil"
+                : "Sans recueil",
+            p.Text.Length > 160 ? p.Text[..160].Trim() + "…" : p.Text)).ToList();
         BookTitle.Text = search.Length == 0 ? CurrentBookTitle() : $"Search: \"{search}\"";
         BookRenameInput.IsEnabled = false;
         BookDeleteButton.IsEnabled = false;
@@ -2105,31 +2166,53 @@ public partial class JournauxView : UserControl, ISearchNavigable
         PoemTextInput.Text = poem?.Text ?? string.Empty;
         PoemTagsInput.Text = poem?.Tags ?? string.Empty;
         PoemRecueilPicker.SelectedItem = recueils.FirstOrDefault(r => r?.Id == poem?.RecueilId);
-        ApplyPoemFormatting(poem?.TextAlignment ?? "Left", poem?.Margin ?? 0);
+        ApplyPoemFormatting(poem);
         RefreshPoemImage();
 
         var isEnabled = poem is not null;
-        foreach (var input in new Control[]
+        foreach (var control in new Control[]
                  {
                      PoemTitleInput, PoemTextInput, PoemTagsInput, PoemRecueilPicker, DeletePoemButton,
-                     PoemAlignLeftButton, PoemAlignCenterButton, PoemAlignRightButton, PoemAlignJustifyButton
+                     PoemAlignLeftButton, PoemAlignCenterButton, PoemAlignRightButton, PoemAlignJustifyButton,
+                     PoemFontFamilyCombo, PoemBoldButton, PoemItalicButton,
+                     PoemFontSizeDecreaseButton, PoemFontSizeIncreaseButton
                  })
         {
-            input.IsEnabled = isEnabled;
+            control.IsEnabled = isEnabled;
         }
 
         if (poem is not null) ShowPoetryPane(PoetryPane.Editor);
     }
 
-    private void ApplyPoemFormatting(string alignment, double margin)
+    private void ApplyPoemFormatting(Poem? poem)
     {
-        PoemTextInput.TextAlignment = Enum.Parse<TextAlignment>(alignment);
-        PoemTextInput.Margin = new Thickness(margin, 0, margin, 0);
+        if (poem is null) return;
+
+        PoemTextInput.TextAlignment = Enum.Parse<TextAlignment>(poem.TextAlignment);
+        PoemTextInput.Margin = new Thickness(poem.Margin, 0, poem.Margin, 0);
+        PoemTextInput.FontSize = poem.FontSize;
+        PoemTextInput.FontFamily = new FontFamily(poem.FontFamily);
+        PoemTextInput.FontStyle = poem.Italic ? FontStyles.Italic : FontStyles.Normal;
+        PoemTextInput.FontWeight = poem.Bold ? FontWeights.Bold : FontWeights.Normal;
 
         foreach (var button in new[] { PoemAlignLeftButton, PoemAlignCenterButton, PoemAlignRightButton, PoemAlignJustifyButton })
         {
-            button.IsChecked = (string)button.Tag == alignment;
+            button.IsChecked = (string)button.Tag == poem.TextAlignment;
         }
+
+        PoemFontFamilyCombo.SelectedItem = PoemFontFamilyCombo.Items.Cast<string>().FirstOrDefault(f => f == poem.FontFamily);
+        PoemBoldButton.IsChecked = poem.Bold;
+        PoemItalicButton.IsChecked = poem.Italic;
+        PoemFontSizeText.Text = $"{poem.FontSize:F0}";
+    }
+
+    private void PopulateFontFamilies()
+    {
+        var families = new[]
+        {
+            "Georgia", "Arial", "Times New Roman", "Calibri", "Verdana", "Trebuchet MS"
+        };
+        PoemFontFamilyCombo.ItemsSource = families;
     }
 
     private void PoemAlignButton_OnClick(object sender, RoutedEventArgs e)
@@ -2137,8 +2220,8 @@ public partial class JournauxView : UserControl, ISearchNavigable
         if (_selectedPoem is null || sender is not ToggleButton { Tag: string alignment }) return;
 
         _selectedPoem.TextAlignment = alignment;
-        ApplyPoemFormatting(_selectedPoem.TextAlignment, _selectedPoem.Margin);
-        _poemRepository.UpdateFormatting(_selectedPoem.Id, _selectedPoem.TextAlignment, _selectedPoem.Margin);
+        ApplyPoemFormatting(_selectedPoem);
+        _poemRepository.UpdateFormatting(_selectedPoem.Id, _selectedPoem.TextAlignment, _selectedPoem.Margin, _selectedPoem.FontSize, _selectedPoem.FontFamily, _selectedPoem.Bold, _selectedPoem.Italic);
     }
 
     private void PoemMarginIncreaseButton_OnClick(object sender, RoutedEventArgs e) => AdjustPoemMargin(20);
@@ -2149,8 +2232,47 @@ public partial class JournauxView : UserControl, ISearchNavigable
         if (_selectedPoem is null) return;
 
         _selectedPoem.Margin = Math.Clamp(_selectedPoem.Margin + delta, 0, 160);
-        ApplyPoemFormatting(_selectedPoem.TextAlignment, _selectedPoem.Margin);
-        _poemRepository.UpdateFormatting(_selectedPoem.Id, _selectedPoem.TextAlignment, _selectedPoem.Margin);
+        ApplyPoemFormatting(_selectedPoem);
+        _poemRepository.UpdateFormatting(_selectedPoem.Id, _selectedPoem.TextAlignment, _selectedPoem.Margin, _selectedPoem.FontSize, _selectedPoem.FontFamily, _selectedPoem.Bold, _selectedPoem.Italic);
+    }
+
+    private void PoemFontSizeIncreaseButton_OnClick(object sender, RoutedEventArgs e) => AdjustPoemFontSize(1);
+    private void PoemFontSizeDecreaseButton_OnClick(object sender, RoutedEventArgs e) => AdjustPoemFontSize(-1);
+
+    private void AdjustPoemFontSize(double delta)
+    {
+        if (_selectedPoem is null) return;
+
+        _selectedPoem.FontSize = Math.Clamp(_selectedPoem.FontSize + delta, 9, 72);
+        ApplyPoemFormatting(_selectedPoem);
+        _poemRepository.UpdateFormatting(_selectedPoem.Id, _selectedPoem.TextAlignment, _selectedPoem.Margin, _selectedPoem.FontSize, _selectedPoem.FontFamily, _selectedPoem.Bold, _selectedPoem.Italic);
+    }
+
+    private void PoemFontFamilyCombo_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_selectedPoem is null || PoemFontFamilyCombo.SelectedItem is not string family) return;
+
+        _selectedPoem.FontFamily = family;
+        ApplyPoemFormatting(_selectedPoem);
+        _poemRepository.UpdateFormatting(_selectedPoem.Id, _selectedPoem.TextAlignment, _selectedPoem.Margin, _selectedPoem.FontSize, _selectedPoem.FontFamily, _selectedPoem.Bold, _selectedPoem.Italic);
+    }
+
+    private void PoemBoldButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_selectedPoem is null || sender is not ToggleButton button) return;
+
+        _selectedPoem.Bold = button.IsChecked ?? false;
+        ApplyPoemFormatting(_selectedPoem);
+        _poemRepository.UpdateFormatting(_selectedPoem.Id, _selectedPoem.TextAlignment, _selectedPoem.Margin, _selectedPoem.FontSize, _selectedPoem.FontFamily, _selectedPoem.Bold, _selectedPoem.Italic);
+    }
+
+    private void PoemItalicButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_selectedPoem is null || sender is not ToggleButton button) return;
+
+        _selectedPoem.Italic = button.IsChecked ?? false;
+        ApplyPoemFormatting(_selectedPoem);
+        _poemRepository.UpdateFormatting(_selectedPoem.Id, _selectedPoem.TextAlignment, _selectedPoem.Margin, _selectedPoem.FontSize, _selectedPoem.FontFamily, _selectedPoem.Bold, _selectedPoem.Italic);
     }
 
     private void PreviousPoemButton_OnClick(object sender, RoutedEventArgs e)

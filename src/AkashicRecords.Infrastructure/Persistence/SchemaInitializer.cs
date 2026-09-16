@@ -121,7 +121,12 @@ public sealed class SchemaInitializer
                     ImagePath TEXT,
                     CreatedAt TEXT NOT NULL,
                     TextAlignment TEXT NOT NULL DEFAULT 'Left',
-                    Margin REAL NOT NULL DEFAULT 0
+                    Margin REAL NOT NULL DEFAULT 0,
+                    FontSize REAL NOT NULL DEFAULT 19,
+                    FontFamily TEXT NOT NULL DEFAULT 'Georgia',
+                    Bold INTEGER NOT NULL DEFAULT 0,
+                    Italic INTEGER NOT NULL DEFAULT 1,
+                    RichContent TEXT NOT NULL DEFAULT ''
                 );
 
                 CREATE TABLE IF NOT EXISTS PersonalProject (
@@ -242,6 +247,11 @@ public sealed class SchemaInitializer
         AddColumnIfMissing(connection, "Recipe", "Category", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing(connection, "Poem", "TextAlignment", "TEXT NOT NULL DEFAULT 'Left'");
         AddColumnIfMissing(connection, "Poem", "Margin", "REAL NOT NULL DEFAULT 0");
+        AddColumnIfMissing(connection, "Poem", "FontSize", "REAL NOT NULL DEFAULT 19");
+        AddColumnIfMissing(connection, "Poem", "FontFamily", "TEXT NOT NULL DEFAULT 'Georgia'");
+        AddColumnIfMissing(connection, "Poem", "Bold", "INTEGER NOT NULL DEFAULT 0");
+        AddColumnIfMissing(connection, "Poem", "Italic", "INTEGER NOT NULL DEFAULT 1");
+        AddColumnIfMissing(connection, "Poem", "RichContent", "TEXT NOT NULL DEFAULT ''");
     }
 
     // No migration framework yet - for a db created before a column existed, add it in place.

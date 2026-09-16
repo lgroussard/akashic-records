@@ -57,7 +57,31 @@ public sealed class MusicLibraryScanner
             // Folder access issues shouldn't crash the app; just return whatever is already known.
         }
 
+        // Prune rows whose files were deleted from disk, so the library never shows
+        // tracks pointing at missing files (the "Sans album" ghost tracks).
+        PruneMissingTracks();
+
         return _trackRepository.GetAll();
+    }
+
+    // Removes DB rows whose FilePath no longer exists under music/. The scanner only ever
+    // *adds* rows, so a file deleted from disk would otherwise linger forever.
+    private void PruneMissingTracks()
+    {
+        var present = new HashSet<string>(
+            Directory.EnumerateFiles(MusicFolder, "*.mp3", SearchOption.AllDirectories)
+                .Select(f => Path.Combine("music", Path.GetRelativePath(MusicFolder, f)))
+                .Select(p => p.Replace('\\', '/')),
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var track in _trackRepository.GetAll())
+        {
+            var rel = track.FilePath.Replace('\\', '/');
+            if (!present.Contains(rel))
+            {
+                _trackRepository.Delete(track.Id);
+            }
+        }
     }
 
     // The immediate parent folder under music/ is the album; files loose in music/ have none.

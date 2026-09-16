@@ -68,7 +68,7 @@ public sealed class PoemRepository
     }
 
     // Convenience overload used by the poem editor, which only changes alignment + margin.
-    // Font size, family, bold and italic are left untouched.
+    // Font size, family, bold, italic and line spacing are left untouched.
     public void UpdateFormatting(int id, string textAlignment, double margin)
     {
         using var connection = _connectionFactory.CreateOpenConnection();

@@ -3,6 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:System="clr-namespace:System;assembly=System.Private.CoreLib"
              mc:Ignorable="d">
     <Grid>
         <Grid.RowDefinitions>
@@ -544,12 +545,19 @@
                                                   Style="{StaticResource NavButtonStyle}" Padding="6,2" Margin="0,0,16,0"/>
                                     <TextBlock Text="Marges" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,4,0"/>
                                     <Button Content="−" Style="{StaticResource MiniButtonStyle}" Click="PoemMarginDecreaseButton_OnClick" Padding="8,2" Margin="0,0,2,0"/>
-                                    <Button Content="+" Style="{StaticResource MiniButtonStyle}" Click="PoemMarginIncreaseButton_OnClick" Padding="8,2"/>
+                                    <Button Content="+" Style="{StaticResource MiniButtonStyle}" Click="PoemMarginIncreaseButton_OnClick" Padding="8,2" Margin="0,0,12,0"/>
+                                    <TextBlock Text="Police" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                                    <Button Content="A−" x:Name="PoemFontSizeDecreaseButton" Style="{StaticResource MiniButtonStyle}" Click="PoemFontSizeDecreaseButton_OnClick" Margin="0,0,2,0"/>
+                                    <Button Content="A+" x:Name="PoemFontSizeIncreaseButton" Style="{StaticResource MiniButtonStyle}" Click="PoemFontSizeIncreaseButton_OnClick" Margin="0,0,12,0"/>
+                                    <ToggleButton Content="B" x:Name="PoemBoldButton" FontWeight="Bold" Click="PoemBoldButton_OnClick" Style="{StaticResource MiniToggleButtonStyle}" Margin="0,0,2,0"/>
+                                    <ToggleButton Content="I" x:Name="PoemItalicButton" FontStyle="Italic" Click="PoemItalicButton_OnClick" Style="{StaticResource MiniToggleButtonStyle}" Margin="0,0,2,0"/>
+                                    <ComboBox x:Name="PoemFontFamilyCombo" Width="100" Style="{StaticResource DarkComboBoxStyle}"
+                                              SelectionChanged="PoemFontFamilyCombo_OnSelectionChanged"/>
+                                    <TextBlock x:Name="PoemFontSizeText" VerticalAlignment="Center" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,0"/>
                                 </StackPanel>
 
                                 <!-- The poem text. -->
                                 <TextBox Grid.Row="4" x:Name="PoemTextInput" TextWrapping="Wrap" AcceptsReturn="True"
-                                         FontStyle="Italic" FontFamily="Georgia" FontSize="19"
                                          Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}"
                                          MinHeight="200" MaxHeight="360"
                                          VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"

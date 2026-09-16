@@ -3,10 +3,25 @@
 #   - ffmpeg  (https://github.com/yt-dlp/FFmpeg-Builds) - required for mp3 extraction / thumbnail embedding
 # Both are open-source. This script only downloads their official release builds into a local "tools" folder
 # next to the application. What you download with them, and respecting each source's terms of use, is up to you.
+#
+# Tools are installed into the build output directory (where the .exe lives), because the app resolves
+# yt-dlp/ffmpeg from <exe>/tools/. Run this from anywhere.
 
 $ErrorActionPreference = 'Stop'
 
-$tools = Join-Path $PSScriptRoot 'tools'
+# Resolve the build output directory (where AkashicRecords.App.exe is published).
+$scriptDir = $PSScriptRoot
+if ($scriptDir -like '*\src\AkashicRecords.App') {
+    $repoAppDir = $scriptDir
+} elseif ($scriptDir -like '*\AkashicRecords.App') {
+    $repoAppDir = $scriptDir
+} else {
+    $candidate = Join-Path (Split-Path $scriptDir -Parent) 'AkashicRecords.App'
+    $repoAppDir = if (Test-Path $candidate) { $candidate } else { Join-Path $scriptDir 'AkashicRecords.App' }
+}
+
+$buildOut = Join-Path $repoAppDir 'bin\Debug\net8.0-windows'
+$tools = if (Test-Path $buildOut) { $buildOut } else { Join-Path $repoAppDir 'tools' }
 New-Item -ItemType Directory -Force -Path $tools | Out-Null
 
 Write-Host 'Downloading yt-dlp...'
