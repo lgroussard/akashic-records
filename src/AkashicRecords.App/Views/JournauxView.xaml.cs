@@ -1477,59 +1477,29 @@ public partial class JournauxView : UserControl, ISearchNavigable
         if (RecipeTitleList.SelectedItem is Recipe recipe) OpenRecipePage(recipe);
     }
 
+    // Creates a recipe straight into the on-page editor (no separate popup window), the way the
+    // recipe book should feel: click -> a blank "Nouvelle recette" page opens in the detail card and
+    // the title is focused so you can start typing. Added to the db immediately so it can be flipped
+    // away to and returned to; edits persist in place via RecipeField_OnLostFocus.
     private void NewRecipeButton_OnClick(object sender, RoutedEventArgs e)
     {
-        var input = new Window
-        {
-            Title = "Nouvelle recette",
-            Width = 360,
-            Height = 180,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            ResizeMode = ResizeMode.NoResize,
-            Background = (Brush)FindResource("Surface1Brush")
-        };
+        // Drop any active search/category filter first so the freshly added recipe is guaranteed
+        // to be present in the list the selection branch below looks in.
+        RecipeSearchInput.Text = string.Empty;
+        _selectedRecipeCategoryFilter = null;
 
-        var textBox = new TextBox { Style = (Style)FindResource("DarkTextBoxStyle"), Margin = new Thickness(8) };
-        var okButton = new Button
-        {
-            Content = "Ajouter",
-            Style = (Style)FindResource("PrimaryButtonStyle"),
-            Width = 90,
-            Margin = new Thickness(8, 8, 8, 0)
-        };
-        okButton.Click += (_, _) =>
-        {
-            var title = textBox.Text.Trim();
-            if (title.Length == 0) return;
+        var recipe = new Recipe { Title = "Nouvelle recette", CreatedAt = DateTime.Now };
+        recipe.Id = _recipeRepository.Add(recipe);
 
-            var recipe = new Recipe { Title = title, CreatedAt = DateTime.Now };
-            recipe.Id = _recipeRepository.Add(recipe);
+        // Set the selection BEFORE refreshing: RefreshRecipesList re-fetches fresh instances from
+        // the db (so reference equality won't hold) and matches by Id to (re)open this recipe as the
+        // current page via OpenRecipePage.
+        _selectedRecipe = recipe;
+        RefreshRecipesList();
 
-            // Set before refreshing so RefreshRecipesList's "keep current selection" branch
-            // picks the new recipe up (it re-fetches from the db, so matching must happen by Id).
-            _selectedRecipe = recipe;
-            RefreshRecipesList();
-            input.Close();
-        };
-        var cancelButton = new Button
-        {
-            Content = "Annuler",
-            Style = (Style)FindResource("SecondaryButtonStyle"),
-            Width = 90,
-            Margin = new Thickness(8, 8, 8, 0)
-        };
-        cancelButton.Click += (_, _) => input.Close();
-
-        var stack = new StackPanel { Margin = new Thickness(8) };
-        stack.Children.Add(new TextBlock { Text = "Titre de la recette", Foreground = (Brush)FindResource("TextBrush"), Margin = new Thickness(0, 0, 0, 4) });
-        stack.Children.Add(textBox);
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
-        buttons.Children.Add(okButton);
-        buttons.Children.Add(cancelButton);
-        stack.Children.Add(buttons);
-
-        input.Content = stack;
-        input.ShowDialog();
+        // Land the caret in the title, pre-selected, so typing replaces the "Nouvelle recette" seed.
+        RecipeTitleInput.Focus();
+        RecipeTitleInput.SelectAll();
     }
 
     private void OpenRecipePage(Recipe? recipe)

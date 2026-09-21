@@ -147,27 +147,29 @@
                 </Grid.ColumnDefinitions>
 
                 <!-- Sidebar: search, category filter chips, recipe list, "new recipe" CTA pinned bottom -->
-                <Border Grid.Column="0" Style="{StaticResource CardBorderStyle}" Padding="16" Margin="0,0,20,0">
-                    <DockPanel LastChildFill="True">
-                    <!-- Search bar: plain input -->
-                    <TextBox DockPanel.Dock="Top" x:Name="RecipeSearchInput" Background="{StaticResource Surface2Brush}"
-                             Foreground="{StaticResource TextBrush}" FontSize="13" Padding="10,8,8,8"
-                             BorderThickness="0"
-                             TextChanged="RecipeSearchInput_OnTextChanged" VerticalContentAlignment="Center"/>
-                    <TextBlock DockPanel.Dock="Top" x:Name="RecipeSearchPlaceholder" Text="Titre, ingrédient…"
-                               Foreground="{StaticResource TextFaintBrush}" FontSize="13"
-                               Margin="0,8,0,0">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Setter Property="Visibility" Value="Visible"/>
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding Text, ElementName=RecipeSearchInput}" Value="">
+                <Border Grid.Column="0" Style="{StaticResource CardBorderStyle}" Padding="16" Margin="0,0,20,0" VerticalAlignment="Stretch">
+                    <DockPanel LastChildFill="False">
+                        <!-- Search bar: input with overlaid in-box placeholder (visible only while empty) -->
+                        <Grid DockPanel.Dock="Top">
+                            <TextBox x:Name="RecipeSearchInput" Background="{StaticResource Surface2Brush}"
+                                     Foreground="{StaticResource TextBrush}" FontSize="13" Padding="10,8,8,8" Height="36"
+                                     BorderThickness="0"
+                                     TextChanged="RecipeSearchInput_OnTextChanged" VerticalContentAlignment="Center"/>
+                            <TextBlock x:Name="RecipeSearchPlaceholder" Text="Titre, ingrédient…" IsHitTestVisible="False"
+                                       Foreground="{StaticResource TextFaintBrush}" FontSize="13" VerticalAlignment="Center"
+                                       Margin="11,0,0,0">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
                                         <Setter Property="Visibility" Value="Collapsed"/>
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Text, ElementName=RecipeSearchInput}" Value="">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Grid>
 
                         <!-- Category filter chips -->
                         <WrapPanel DockPanel.Dock="Top" x:Name="RecipeCategoryFilterPanel" Margin="0,12,0,10"/>
@@ -234,18 +236,35 @@
                 </Border>
 
                 <!-- Recipe page: cover, title, category chip, ingredients, preparation -->
-                <Border Grid.Column="1" Style="{StaticResource CardBorderStyle}" Padding="24" MaxWidth="760" HorizontalAlignment="Left" VerticalAlignment="Top">
-                    <DockPanel LastChildFill="True">
-                        <!-- Header: prev/next + centered title -->
-                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,16">
-                            <Button DockPanel.Dock="Left" Content="◀ Prédent" Style="{StaticResource SecondaryButtonStyle}" Click="PreviousRecipeButton_OnClick"/>
-                            <Button DockPanel.Dock="Right" Content="Suivant ▶" Style="{StaticResource SecondaryButtonStyle}" Click="NextRecipeButton_OnClick"/>
-                            <TextBlock x:Name="RecipePageTitleText" HorizontalAlignment="Center" Foreground="{StaticResource TextBrush}"
-                                       FontWeight="SemiBold" FontSize="14" TextWrapping="Wrap"/>
-                        </DockPanel>
+                <Border Grid.Column="1" Style="{StaticResource CardBorderStyle}" Padding="24" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="1.4*"/>
+                            <RowDefinition Height="1.4*"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Header: prev/next pinned to the edges + recipe title centered between them -->
+                        <Grid Grid.Row="0" Margin="0,0,0,16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0" Content="◀ Précédent" Style="{StaticResource SecondaryButtonStyle}" Click="PreviousRecipeButton_OnClick" HorizontalAlignment="Left"/>
+                            <TextBlock Grid.Column="1" x:Name="RecipePageTitleText" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="17" TextWrapping="Wrap" TextAlignment="Center"
+                                       Margin="16,0"/>
+                            <Button Grid.Column="2" Content="Suivant ▶" Style="{StaticResource SecondaryButtonStyle}" Click="NextRecipeButton_OnClick" HorizontalAlignment="Right"/>
+                        </Grid>
 
                         <!-- Cover photo + choose/remove button -->
-                        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,16">
+                        <StackPanel Grid.Row="1" Margin="0,0,0,16">
                             <Image x:Name="RecipeCoverImage" Height="120" Margin="0,0,0,8"
                                    Stretch="Uniform" HorizontalAlignment="Left" Visibility="Collapsed"/>
                             <StackPanel Orientation="Horizontal">
@@ -255,55 +274,64 @@
                             </StackPanel>
                         </StackPanel>
 
-                        <!-- Title + category row: two labeled input boxes side by side -->
-                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,16">
-                            <DockPanel DockPanel.Dock="Right" Width="200">
-                                <TextBlock DockPanel.Dock="Top" Text="Catégorie" Style="{StaticResource FieldLabelStyle}"/>
-                                <TextBox x:Name="RecipeCategoryInput" LostFocus="RecipeField_OnLostFocus"
-                                         Background="{StaticResource Surface2Brush}"
-                                         BorderThickness="1" BorderBrush="{StaticResource AppBorderBrush}"
-                                         Padding="8,6"/>
-                            </DockPanel>
-                            <DockPanel DockPanel.Dock="Top">
-                                <TextBlock DockPanel.Dock="Top" Text="Titre" Style="{StaticResource FieldLabelStyle}"/>
+                        <!-- Title + category row: two compact labeled inputs, left-aligned per the mockup -->
+                        <Grid Grid.Row="2" Margin="0,0,0,16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="258"/>
+                                <ColumnDefinition Width="248"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Titre" Style="{StaticResource FieldLabelStyle}"/>
                                 <TextBox x:Name="RecipeTitleInput" LostFocus="RecipeField_OnLostFocus"
-                                         FontSize="16" Foreground="{StaticResource TextBrush}"
+                                         FontSize="14" Foreground="{StaticResource TextBrush}"
                                          Background="{StaticResource Surface2Brush}"
                                          BorderThickness="1" BorderBrush="{StaticResource AppBorderBrush}"
                                          Padding="8,6"/>
-                            </DockPanel>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="37,0,0,0">
+                                <TextBlock Text="Catégorie" Style="{StaticResource FieldLabelStyle}"/>
+                                <TextBox x:Name="RecipeCategoryInput" LostFocus="RecipeField_OnLostFocus"
+                                         Foreground="{StaticResource TextBrush}"
+                                         Background="{StaticResource Surface2Brush}"
+                                         BorderThickness="1" BorderBrush="{StaticResource AppBorderBrush}"
+                                         Padding="8,6"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- Ingrédients: tall field, stretches to fill the card (mockup proportion) -->
+                        <DockPanel Grid.Row="3" Margin="0,0,0,14" LastChildFill="True">
+                            <TextBlock DockPanel.Dock="Top" Text="Ingrédients" Style="{StaticResource FieldLabelStyle}"/>
+                            <TextBox x:Name="RecipeIngredientsInput" Style="{StaticResource DarkTextBoxStyle}" TextWrapping="Wrap" AcceptsReturn="True"
+                                     VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" MinHeight="80"
+                                     LostFocus="RecipeField_OnLostFocus"/>
                         </DockPanel>
 
-                        <!-- Ingredients -->
-                        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,14">
-                            <TextBlock Text="Ingrédients" Style="{StaticResource FieldLabelStyle}"/>
-                            <TextBox x:Name="RecipeIngredientsInput" Style="{StaticResource DarkTextBoxStyle}" Height="80" TextWrapping="Wrap" AcceptsReturn="True"
+                        <!-- Préparation: tall field, stretches to fill the card -->
+                        <DockPanel Grid.Row="4" Margin="0,0,0,14" LastChildFill="True">
+                            <TextBlock DockPanel.Dock="Top" Text="Préparation" Style="{StaticResource FieldLabelStyle}"/>
+                            <TextBox x:Name="RecipeInstructionsInput" Style="{StaticResource DarkTextBoxStyle}" TextWrapping="Wrap" AcceptsReturn="True"
+                                     VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" MinHeight="100"
                                      LostFocus="RecipeField_OnLostFocus"/>
-                        </StackPanel>
-
-                        <!-- Preparation -->
-                        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,14">
-                            <TextBlock Text="Préparation" Style="{StaticResource FieldLabelStyle}"/>
-                            <TextBox x:Name="RecipeInstructionsInput" Style="{StaticResource DarkTextBoxStyle}" Height="100" TextWrapping="Wrap" AcceptsReturn="True"
-                                     LostFocus="RecipeField_OnLostFocus"/>
-                        </StackPanel>
+                        </DockPanel>
 
                         <!-- Notes personnelles -->
-                        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,14">
+                        <StackPanel Grid.Row="5" Margin="0,0,0,14">
                             <TextBlock Text="Notes personnelles" Style="{StaticResource FieldLabelStyle}"/>
                             <TextBox x:Name="RecipeNotesInput" Style="{StaticResource DarkTextBoxStyle}" Height="60" TextWrapping="Wrap" AcceptsReturn="True"
+                                     VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto"
                                      LostFocus="RecipeField_OnLostFocus"/>
                         </StackPanel>
 
                         <!-- Tags -->
-                        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,14">
+                        <StackPanel Grid.Row="6" Margin="0,0,0,14">
                             <TextBlock Text="Tags (séparés par des virgules)" Style="{StaticResource FieldLabelStyle}"/>
                             <TextBox x:Name="RecipeTagsInput" Style="{StaticResource DarkTextBoxStyle}" LostFocus="RecipeField_OnLostFocus"/>
                         </StackPanel>
 
                         <!-- Delete -->
-                        <Button DockPanel.Dock="Bottom" x:Name="DeleteRecipeButton" Content="Supprimer la recette" Style="{StaticResource MiniButtonStyle}" Click="DeleteRecipeButton_OnClick"/>
-                    </DockPanel>
+                        <Button Grid.Row="7" x:Name="DeleteRecipeButton" Content="Supprimer la recette" Style="{StaticResource MiniButtonStyle}" Click="DeleteRecipeButton_OnClick" HorizontalAlignment="Left"/>
+                    </Grid>
                 </Border>
             </Grid>
 
