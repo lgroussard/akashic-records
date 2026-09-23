@@ -109,7 +109,8 @@ public sealed class SchemaInitializer
                 CREATE TABLE IF NOT EXISTS Recueil (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     Title TEXT NOT NULL,
-                    CreatedAt TEXT NOT NULL
+                    CreatedAt TEXT NOT NULL,
+                    Summary TEXT NOT NULL DEFAULT ''
                 );
 
                 CREATE TABLE IF NOT EXISTS Poem (
@@ -245,6 +246,7 @@ public sealed class SchemaInitializer
         AddColumnIfMissing(connection, "CanvasElement", "Width", "REAL");
         AddColumnIfMissing(connection, "CanvasElement", "Height", "REAL");
         AddColumnIfMissing(connection, "Recipe", "Category", "TEXT NOT NULL DEFAULT ''");
+        AddColumnIfMissing(connection, "Recueil", "Summary", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing(connection, "Poem", "TextAlignment", "TEXT NOT NULL DEFAULT 'Left'");
         AddColumnIfMissing(connection, "Poem", "Margin", "REAL NOT NULL DEFAULT 0");
         AddColumnIfMissing(connection, "Poem", "FontSize", "REAL NOT NULL DEFAULT 19");

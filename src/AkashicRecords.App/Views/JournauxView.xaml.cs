@@ -120,6 +120,9 @@ public partial class JournauxView : UserControl, ISearchNavigable
             RefreshCalendarChips();
             UpdateMonthHeader();
             NavigateToDate(DateTime.Today);
+
+            // Last, so a requested book/editor capture overrides whatever RestoreActiveItem reopened.
+            ApplyPendingPoetryPane();
         };
         Loaded += JournauxView_OnLoaded;
         Unloaded += JournauxView_OnUnloaded;
@@ -195,6 +198,59 @@ public partial class JournauxView : UserControl, ISearchNavigable
         else if (tab == "Poetry") RefreshPoetry();
         else if (tab == "Artistic") RefreshProjectsList();
         else RefreshCalendarChips();
+    }
+
+    // Reaches the two poetry sub-panes the plain "Poetry" capture cannot (they are behind clicks on
+    // the shelf): the opened book and the poem page. Stored because the view is not Loaded yet when
+    // MainWindow routes the request; applied on Loaded, after RefreshPoetry/RestoreActiveItem have run.
+    private string? _pendingPoetryPane;
+
+    public void ShowPoetryPaneForScreenshot(string pane)
+    {
+        _pendingPoetryPane = pane;
+        if (IsLoaded) ApplyPendingPoetryPane();
+    }
+
+    private void ApplyPendingPoetryPane()
+    {
+        if (_pendingPoetryPane is not { } pane) return;
+        _pendingPoetryPane = null;
+
+        if (pane.Equals("Menu", StringComparison.OrdinalIgnoreCase))
+        {
+            // The ⋯ fly-out holds the re-homed recueil management; open a book first so it renders in context.
+            OpenFirstPoetryBookForScreenshot();
+            SetPoetryMenuOpen(true);
+            return;
+        }
+
+        if (pane.Equals("Editor", StringComparison.OrdinalIgnoreCase))
+        {
+            var poem = _poemRepository.GetAll().OrderByDescending(p => p.Id).FirstOrDefault();
+            _selectedPoem = poem;
+            _openRecueil = poem?.RecueilId is { } pid
+                ? _recueilRepository.GetAll().FirstOrDefault(r => r.Id == pid)
+                : null;
+            OpenPoemPage(poem);
+            ShowPoetryPane(PoetryPane.Editor);
+            return;
+        }
+
+        OpenFirstPoetryBookForScreenshot();
+        ShowPoetryPane(PoetryPane.Book);
+    }
+
+    // Opens the first recueil that holds poems (falling back to any recueil, then to the standalone list)
+    // so a headless capture can render the book spread without any clicking.
+    private void OpenFirstPoetryBookForScreenshot()
+    {
+        var recueils = _recueilRepository.GetAll();
+        var allPoems = _poemRepository.GetAll();
+        var target = recueils.FirstOrDefault(r => r.Title != UnclassifiedTitle && allPoems.Any(p => p.RecueilId == r.Id))
+                     ?? recueils.FirstOrDefault(r => r.Title != UnclassifiedTitle)
+                     ?? recueils.FirstOrDefault();
+        if (target is not null) OpenRecueilBook(target);
+        else ShowStandalonePoems();
     }
 
     // Mirrors JournalTypeTab_OnClick without needing the original event args, for deep-linking.
@@ -1707,27 +1763,52 @@ public partial class JournauxView : UserControl, ISearchNavigable
 
     private static DrawingBrush CreateHatchedPattern()
     {
+        // Single-direction thin diagonals ("/"), tiling edge-to-edge like the mockup's catch-all
+        // hatch, rather than a crosshatch grid. An absolute 12x12 Viewbox keeps each tile true-sized
+        // so a lone line can't stretch into a giant wedge across the whole cover.
         var geometry = new GeometryGroup();
         geometry.Children.Add(new LineGeometry(new Point(0, 12), new Point(12, 0)));
-        geometry.Children.Add(new LineGeometry(new Point(0, 0), new Point(12, 12)));
         var drawing = new GeometryDrawing(
             null,
-            new Pen(new SolidColorBrush(Color.FromRgb(0x90, 0x90, 0xBB)), 1),
+            new Pen(new SolidColorBrush(Color.FromRgb(0x6A, 0x6A, 0x99)), 1),
             geometry);
+        // Tile a small 12x12 cell as an absolute pattern. Without an explicit Viewbox + absolute
+        // mapping (defaulting to a single stretched tile) the lone diagonal blows up into one giant
+        // wedge over the whole cover, which is exactly the bug this guards against.
         return new DrawingBrush(drawing)
         {
             TileMode = TileMode.Tile,
+            Stretch = System.Windows.Media.Stretch.None,
+            Viewbox = new Rect(0, 0, 12, 12),
             Viewport = new Rect(0, 0, 12, 12),
+            ViewboxUnits = BrushMappingMode.Absolute,
+            ViewportUnits = BrushMappingMode.Absolute,
         };
     }
 
-    // View-model for a cover on the bookshelf. IsDashed marks the "+ Nouveau recueil" card, which
-    // renders a translucent body + dashed frame instead of a spine.
-    private sealed record RecueilCoverItem(Recueil? Recueil, string Title, string PoemCountText, Brush CoverBrush, bool IsDashed);
+    // View-model for a cover on the bookshelf. IsNewCard marks the "+ Nouveau recueil" card (routes the
+    // click to the inline create panel); it is otherwise drawn exactly like a hatched cover, as poe3 does.
+    // IsUnclassified italicises the title on the "Sans classement" catch-all cover, like the mockup's "Sans recueil".
+    private sealed record RecueilCoverItem(Recueil? Recueil, string Title, string PoemCountText, Brush CoverBrush, bool IsNewCard, bool IsUnclassified)
+    {
+        // Every card carries the flush spine strip, including the hatch cards — poe3 draws them all alike.
+        public System.Windows.Visibility SpineVisibility => Visibility.Visible;
+        public System.Windows.FontStyle TitleFontStyle => IsUnclassified ? FontStyles.Italic : FontStyles.Normal;
+
+        // The per-cover delete chip only ever shows on a real, user-owned recueil: the catch-all must
+        // always be there to receive unassigned poems, and the "+ Nouveau recueil" card is an action, not a row.
+        public System.Windows.Visibility DeleteButtonVisibility =>
+            IsNewCard || IsUnclassified ? Visibility.Collapsed : Visibility.Visible;
+    }
 
     // View-model for a poem row inside the open-book sidebar. RecueilName is the anthology the
-    // poem belongs to, shown as a muted subtitle ("Recueil : Amour").
-    private sealed record PoemCardItem(Poem Poem, string Title, string RecueilName, string Preview);
+    // poem belongs to, shown as a muted subtitle ("Recueil : Amour") under the bold serif title,
+    // exactly as poe8-book.png renders each row of the left list panel.
+    private sealed record PoemCardItem(Poem Poem, string Title, string RecueilName, string Preview)
+    {
+        // Bound by PoemRowTemplate — avoids StringFormat brace-escaping pitfalls in markup bindings.
+        public string RecueilLabel => $"Recueil : {RecueilName}";
+    }
 
     private List<Poem> GetFilteredPoems()
     {
@@ -1777,13 +1858,26 @@ public partial class JournauxView : UserControl, ISearchNavigable
         }
     }
 
-    // The always-present "Pas classé" recueil that catches unclassified poems.
-    private const string UnclassifiedTitle = "Pas classé";
+    // The always-present "Sans classement" recueil that catches unclassified poems.
+    private const string UnclassifiedTitle = "Sans classement";
+
+    // The catch-all used to be named "Pas classé". A stored row still carrying that legacy title is
+    // renamed in place, so the single catch-all is migrated instead of duplicated by the create below.
+    // Idempotent: once renamed, the lookup above already finds it and the update never runs again.
+    private const string LegacyUnclassifiedTitle = "Pas classé";
 
     private Recueil EnsureUnclassifiedRecueil()
     {
-        var existing = _recueilRepository.GetAll().FirstOrDefault(r => r.Title == UnclassifiedTitle);
+        var all = _recueilRepository.GetAll();
+        var existing = all.FirstOrDefault(r => r.Title == UnclassifiedTitle);
         if (existing is not null) return existing;
+
+        var legacy = all.FirstOrDefault(r => r.Title == LegacyUnclassifiedTitle);
+        if (legacy is not null)
+        {
+            _recueilRepository.Update(legacy.Id, UnclassifiedTitle);
+            return _recueilRepository.GetAll().First(r => r.Id == legacy.Id);
+        }
 
         var id = _recueilRepository.Add(new Recueil { Title = UnclassifiedTitle, CreatedAt = DateTime.Now });
         return _recueilRepository.GetAll().First(r => r.Id == id);
@@ -1801,13 +1895,31 @@ public partial class JournauxView : UserControl, ISearchNavigable
         return gradient;
     }
 
-    // Switches which of the three poetry panes is visible.
+    // Switches which of the poetry panes is visible. poe8 shows the poem list AND the poem page at once,
+    // so opening a poem keeps the book (and therefore its list) on screen — the page simply sits in the
+    // stage's right-hand column beside it. Only the shelf replaces the whole spread.
     private void ShowPoetryPane(PoetryPane pane)
     {
         PoetryBookshelf.Visibility = pane == PoetryPane.Bookshelf ? Visibility.Visible : Visibility.Collapsed;
-        PoetryBook.Visibility = pane == PoetryPane.Book ? Visibility.Visible : Visibility.Collapsed;
+        PoetryBook.Visibility = pane == PoetryPane.Bookshelf ? Visibility.Collapsed : Visibility.Visible;
         PoemEditor.Visibility = pane == PoetryPane.Editor ? Visibility.Visible : Visibility.Collapsed;
+        ClosePoetryMenu();
     }
+
+    // The ⋯ button on the book header folds the recueil-management fly-out open or shut. This dialect ships
+    // no Menu/ContextMenu control, so it is hand-built: a scrim plus a card, declared last in the poetry
+    // region so it paints over the spread. The same button closes it, and so does any change of pane.
+    private void SetPoetryMenuOpen(bool open)
+    {
+        PoetryMenuScrim.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        PoetryMenuButton.IsChecked = open;
+    }
+
+    private void ClosePoetryMenu() => SetPoetryMenuOpen(false);
+
+    // Click fires after the toggle has flipped its own state, so the new state is read back from the button.
+    private void PoetryMenuButton_OnToggle(object sender, RoutedEventArgs e)
+        => SetPoetryMenuOpen(PoetryMenuButton.IsChecked == true);
 
     // Builds the horizontal shelf of recueil covers.
     private void RefreshBookshelf()
@@ -1815,19 +1927,30 @@ public partial class JournauxView : UserControl, ISearchNavigable
         var allPoems = _poemRepository.GetAll();
         var recueils = _recueilRepository.GetAll();
 
+        // GetAl sorts by title, which would leave the catch-all standing among the real recueils (and, now
+        // that it reads "Sans classement", first of all). It is pulled out of the loop and appended last so
+        // it always reads as the overflow shelf it is, not as one of the user's own books.
+        RecueilCoverItem? unclassifiedCover = null;
         var covers = new List<RecueilCoverItem>();
         foreach (var r in recueils)
         {
             var count = allPoems.Count(p => p.RecueilId == r.Id);
             var isUnclassified = r.Title == UnclassifiedTitle;
-            covers.Add(new RecueilCoverItem(
-                r, r.Title, count == 1 ? "1 poème" : $"{count} poèmes",
+            var countLabel = count == 0 ? "Vide" : count == 1 ? "1 poème" : $"{count} poèmes";
+            var cover = new RecueilCoverItem(
+                r, r.Title, countLabel,
                 isUnclassified ? HatchedPatternBrush : CoverBrushFor(r.Id),
-                isUnclassified));
+                IsNewCard: false, isUnclassified);
+
+            if (isUnclassified) unclassifiedCover = cover;
+            else covers.Add(cover);
         }
 
-        // The "+ Nouveau recueil" card is always last, rendered as a dashed-outline placeholder.
-        covers.Add(new RecueilCoverItem(null, "+ Nouveau recueil", "", DashedCardBackground, IsDashed: true));
+        if (unclassifiedCover is not null) covers.Add(unclassifiedCover);
+
+        // The "+ Nouveau recueil" card sits last: poe3 draws it with the same hatch as the catch-all
+        // cover and no dashed frame — the centred label alone marks it.
+        covers.Add(new RecueilCoverItem(null, "+ Nouveau recueil", "", HatchedPatternBrush, IsNewCard: true, IsUnclassified: false));
 
         RecueilCoverList.ItemsSource = covers;
         BookshelfCount.Text = covers.Count == 1 ? "1 recueil" : $"{covers.Count} recueils";
@@ -1854,16 +1977,33 @@ public partial class JournauxView : UserControl, ISearchNavigable
         ShowPoetryPane(PoetryPane.Book);
     }
 
+    // True when a click was raised by a Button anywhere under the hit element, walking up the visual
+    // tree (a direct type test on OriginalSource is not enough: the source is often a template part).
+    private static bool OriginatesFromButton(DependencyObject? source)
+    {
+        while (source is not null)
+        {
+            if (source is ButtonBase) return true;
+            source = VisualTreeHelper.GetParent(source);
+        }
+        return false;
+    }
+
+    // Opens a recueil card. The ✕ chip on a cover raises its own Click; should that click also bubble to
+    // this handler, the book of the recueil being deleted would fling open underneath, so button-originated
+    // clicks are filtered out here rather than timed — a timestamp guard would lapse while the confirmation
+    // dialog blocks the thread.
     private void RecueilCover_OnClick(object sender, MouseButtonEventArgs e)
     {
+        if (OriginatesFromButton(e.OriginalSource as DependencyObject)) return;
+
         if (sender is not FrameworkElement { DataContext: RecueilCoverItem item }) return;
 
-        // The dashed card opens the "new recueil" inline editor instead of a book.
-        if (item.IsDashed)
+        // The "+ Nouveau recueil" card opens the fly-out on its inline create form instead of a book.
+        if (item.IsNewCard)
         {
-            RecueilManagePanel.Visibility = Visibility.Visible;
-            RecueilRenameInput.Text = string.Empty;
-            RecueilRenameInput.Focus();
+            SetPoetryMenuOpen(true);
+            NewRecueilTitleInput.Focus();
             return;
         }
 
@@ -1930,19 +2070,40 @@ public partial class JournauxView : UserControl, ISearchNavigable
         var poemsInRecueil = _poemRepository.GetAll().Where(p => p.RecueilId == _openRecueil.Id).ToList();
         var message = poemsInRecueil.Count == 0
             ? $"Supprimer le recueil « {_openRecueil.Title} » ? Cette action est irréversible."
-            : $"Supprimer le recueil « {_openRecueil.Title} » ? Ses {poemsInRecueil.Count} poème(s) seront déplacés vers « {UnclassifiedTitle} ».";
+            : $"Supprimer le recueil « {_openRecueil.Title} » ? Ses {poemsInRecueil.Count} poème(s) seront conservés mais désassignés.";
 
         if (MessageBox.Show(message, "Supprimer le recueil", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
 
-        // Move poems to the always-present unclassified recueil rather than orphaning them.
-        var unclassified = GetUnclassifiedRecueil();
-        foreach (var poem in poemsInRecueil)
-        {
-            _poemRepository.Update(poem.Id, unclassified.Id, poem.Title, poem.Text, poem.Tags);
-        }
+        // Keep the poems, just unassign them from the deleted recueil.
+        _poemRepository.ClearRecueilForRecueilId(_openRecueil.Id);
         _recueilRepository.Delete(_openRecueil.Id);
 
         _openRecueil = null;
+        RefreshRecueilFilterList();
+        RefreshBookshelf();
+        ShowPoetryPane(PoetryPane.Bookshelf);
+    }
+
+    // Deletes the recueil behind a shelf cover, from the ✕ chip on that cover. Same contract as the
+    // fly-out's delete for the open book: poems are kept and unassigned, never destroyed with the shelf.
+    // The catch-all and the "+ Nouveau recueil" card never surface this chip, so only user-created
+    // recueils can ever reach this handler.
+    private void DeleteRecueilCover_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: RecueilCoverItem { Recueil: { } recueil } }) return;
+
+        var poemsInRecueil = _poemRepository.GetAll().Where(p => p.RecueilId == recueil.Id).ToList();
+        var message = poemsInRecueil.Count == 0
+            ? $"Supprimer le recueil « {recueil.Title} » ? Cette action est irréversible."
+            : $"Supprimer le recueil « {recueil.Title} » ? Ses {poemsInRecueil.Count} poème(s) seront conservés mais désassignés.";
+
+        if (MessageBox.Show(message, "Supprimer le recueil", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+
+        _poemRepository.ClearRecueilForRecueilId(recueil.Id);
+        _recueilRepository.Delete(recueil.Id);
+
+        // A deleted recueil can no longer be the open book, nor a selected filter row.
+        if (_openRecueil?.Id == recueil.Id) _openRecueil = null;
         RefreshRecueilFilterList();
         RefreshBookshelf();
         ShowPoetryPane(PoetryPane.Bookshelf);
@@ -2006,6 +2167,19 @@ public partial class JournauxView : UserControl, ISearchNavigable
                 RefreshBookshelf();
                 ShowPoetryPane(PoetryPane.Bookshelf);
                 break;
+        }
+
+        // The fly-out's management row mirrors whichever recueil is picked here: rename and delete act on
+        // this same selection, so the row becomes visible with its title prefilled, and hides for the
+        // "Tout" / "Sans recueil" pseudo-filters, which name no editable recueil.
+        if (item.Kind == RecueilFilterKind.Recueil && item.Recueil is { } picked)
+        {
+            RecueilManagePanel.Visibility = Visibility.Visible;
+            RecueilRenameInput.Text = picked.Title;
+        }
+        else
+        {
+            RecueilManagePanel.Visibility = Visibility.Collapsed;
         }
     }
 
@@ -2116,7 +2290,7 @@ public partial class JournauxView : UserControl, ISearchNavigable
         var title = NewPoemTitleInput.Text.Trim();
         if (title.Length == 0) return;
 
-        // A new poem lands in the open recueil, or in the always-present "Pas classé" one.
+        // A new poem lands in the open recueil, or in the always-present "Sans classement" one.
         var recueilId = _openRecueil?.Id ?? GetUnclassifiedRecueil().Id;
         var poem = new Poem { Title = title, RecueilId = recueilId, CreatedAt = DateTime.Now };
         poem.Id = _poemRepository.Add(poem);

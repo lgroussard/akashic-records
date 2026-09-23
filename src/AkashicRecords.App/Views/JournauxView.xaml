@@ -342,180 +342,100 @@
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- Left rail: always-present controls. New poem here, plus a compact recueil picker
-                     so the user can jump straight to any anthology. -->
-                <Border Grid.Column="0" Style="{StaticResource CardBorderStyle}" Padding="16" Margin="0,0,20,0">
-                    <DockPanel Width="200">
-                        <DockPanel.Resources>
-                            <Style TargetType="ScrollBar" BasedOn="{StaticResource ThinVerticalScrollBarStyle}"/>
-                        </DockPanel.Resources>
-                        <TextBlock DockPanel.Dock="Top" Text="RECUEIL DE POÉSIE" FontSize="15" FontWeight="SemiBold"
-                                   Foreground="{StaticResource TextBrush}" Margin="0,0,0,14"/>
-
-                        <TextBox DockPanel.Dock="Top" x:Name="PoemSearchInput" Style="{StaticResource DarkTextBoxStyle}" Height="32" Margin="0,0,0,10"
-                                 TextChanged="PoemSearchInput_OnTextChanged"/>
-
-                        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
-                            <TextBox x:Name="NewPoemTitleInput" Style="{StaticResource DarkTextBoxStyle}" Width="110" Margin="0,0,6,0"/>
-                            <Button Content="+ Poème" Style="{StaticResource SecondaryButtonStyle}" Click="NewPoemButton_OnClick" ToolTip="Nouveau poème (dans le recueil sélectionné, ou « Sans recueil »)"/>
-                        </StackPanel>
-
-                        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
-                            <TextBox x:Name="NewRecueilTitleInput" Style="{StaticResource DarkTextBoxStyle}" Width="100" Margin="0,0,6,0"/>
-                            <Button Content="+ Recueil" Style="{StaticResource SecondaryButtonStyle}" Click="NewRecueilButton_OnClick"/>
-
-                        </StackPanel>
-
-                        <TextBlock DockPanel.Dock="Top" Text="Recueils" Style="{StaticResource FieldLabelStyle}" Margin="0,8,0,4"/>
-                        <ListBox x:Name="RecueilFilterList" DockPanel.Dock="Top"
-                                 Background="Transparent" Foreground="{StaticResource TextBrush}" BorderThickness="0"
-                                 MaxHeight="150"
-                                 SelectionChanged="RecueilFilterList_OnSelectionChanged">
-                            <ListBox.ItemTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding Title}" Foreground="{StaticResource TextBrush}"/>
-                                </DataTemplate>
-                            </ListBox.ItemTemplate>
-                        </ListBox>
-
-                        <!-- Recueil rename/delete: only shown while a real recueil is selected -->
-                        <StackPanel DockPanel.Dock="Top" x:Name="RecueilManagePanel" Orientation="Horizontal" Margin="0,8,0,0" Visibility="Collapsed">
-                            <TextBox x:Name="RecueilRenameInput" Style="{StaticResource DarkTextBoxStyle}" Width="80"
-                                     LostFocus="RecueilRenameInput_OnLostFocus"/>
-                            <Button Content="Rename" Style="{StaticResource MiniButtonStyle}" Click="RecueilRenameButton_OnClick" Margin="4,0,2,0"/>
-                            <Button x:Name="RecueilDeleteButton" Content="✕" Style="{StaticResource MiniButtonStyle}" Width="26"
-                                    Click="RecueilDeleteButton_OnClick"/>
-                        </StackPanel>
-
-                        <TextBlock DockPanel.Dock="Top" Text="Vue rapide" Style="{StaticResource FieldLabelStyle}" Margin="0,16,0,4"/>
-                        <Button DockPanel.Dock="Top" x:Name="RecueilBookshelfButton" Content="📚 Étagère" Style="{StaticResource SecondaryButtonStyle}"
-                                Click="RecueilBookshelfButton_OnClick" HorizontalAlignment="Stretch" Margin="0,0,0,6"/>
-                    </DockPanel>
-                </Border>
+                <!-- The former left rail is gone from the layout: poe3's shelf is full-bleed and poe8's book
+                     carries its own poem list, so no column may be held open. Its controls are re-homed — the
+                     search and the create action live in the book's left card, the recueil management in the ⋯
+                     fly-out declared at the bottom of this region. -->
+                <Grid Grid.Column="0" x:Name="PoetryRailHost" Width="0"/>
 
                 <!-- The main stage: either the bookshelf (covers) or the open book (recueil + poems). -->
                 <Grid Grid.Column="1">
+                    <!-- poe8's book is a two-panel spread: the poem list on the left, the poem page on the
+                         right, both visible at once. The stage's grid carries that split; the bookshelf spans
+                         all of it, the book's list card sits in column 0 and the poem page in column 2. -->
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="330"/>
+                        <ColumnDefinition Width="14"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
                     <!-- BOOKSHELF: horizontal scroll of recueil covers. -->
-                    <Grid x:Name="PoetryBookshelf">
+                    <Grid x:Name="PoetryBookshelf" Grid.RowSpan="2" Grid.ColumnSpan="3">
                         <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
 
-                        <DockPanel Grid.Row="0" Margin="0,0,0,12">
-                            <TextBlock DockPanel.Dock="Left" x:Name="BookshelfTitle" Text="Mes recueils" FontSize="20"
-                                       FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                        <DockPanel Grid.Row="0" Margin="0,0,0,14" LastChildFill="False">
+                            <TextBlock DockPanel.Dock="Left" x:Name="BookshelfTitle" Text="Bibliothèque" FontSize="20"
+                                       FontWeight="Bold" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                            <TextBlock DockPanel.Dock="Left" Text="Choisissez un recueil pour l'ouvrir" FontSize="13"
+                                       Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center"/>
                             <TextBlock DockPanel.Dock="Right" x:Name="BookshelfCount" Foreground="{StaticResource TextMutedBrush}"
-                                       VerticalAlignment="Center"/>
+                                       VerticalAlignment="Center" Visibility="Collapsed"/>
                         </DockPanel>
+
+                        <!-- The shelf itself: poe3 rules a thin baseline directly under the row of books, with
+                             all the free space left empty below. Declared before the covers, and pinned to the
+                             top of the filler row, so it lands right under them instead of at the page bottom. -->
+                        <Rectangle Grid.Row="2" Height="2" VerticalAlignment="Top" Margin="2,0,2,0"
+                                   Fill="{StaticResource BorderStrongBrush}" RadiusX="1" RadiusY="1"/>
 
                         <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
                                       Padding="0,8,0,16" MouseWheel="BookshelfScrollViewer_MouseWheel">
                             <ItemsControl x:Name="RecueilCoverList">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate>
-                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"/>
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left"/>
                                     </ItemsPanelTemplate>
                                 </ItemsControl.ItemsPanel>
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <!-- A cover: a standing card with the recueil title, a little poem count,
-                                             and a colored spine. Clicking it opens the book. -->
-                                        <Border Width="150" Margin="0,0,24,0" Cursor="Hand" MouseLeftButtonUp="RecueilCover_OnClick">
-                                            <Border Background="{Binding CoverBrush}" CornerRadius="8"
-                                                    BorderBrush="#33FFFFFF" BorderThickness="1"
-                                                    Padding="12" VerticalAlignment="Top" Height="180">
-                                                <Border.Child>
+                                        <!-- A cover, as poe3 draws every book: a flush dark spine strip pinned down
+                                             the whole left edge, then the cover face carrying the title and the poem
+                                             count centred together. Height pinned so the row of books stands alike. -->
+                                        <Border Width="190" Height="210" Margin="0,0,22,0" VerticalAlignment="Center" Cursor="Hand" MouseLeftButtonUp="RecueilCover_OnClick">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="9"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <Border Grid.Column="0" Background="#3F000000" CornerRadius="8,0,0,8"
+                                                        Visibility="{Binding SpineVisibility}"/>
+                                                <Border Grid.Column="1" Background="{Binding CoverBrush}" CornerRadius="0,8,8,0"
+                                                        BorderBrush="#33FFFFFF" BorderThickness="1" Padding="16,14">
                                                     <Grid>
                                                         <Grid.RowDefinitions>
                                                             <RowDefinition Height="*"/>
                                                             <RowDefinition Height="Auto"/>
-                                                            <RowDefinition Height="Auto"/>
                                                         </Grid.RowDefinitions>
                                                         <TextBlock Grid.Row="0" Text="{Binding Title}" Foreground="White"
-                                                                   FontFamily="Georgia" FontSize="15" FontWeight="Bold"
-                                                                   TextWrapping="Wrap" VerticalAlignment="Bottom"
-                                                                   MaxHeight="90"/>
-                                                        <TextBlock Grid.Row="1" Margin="0,20,0,0" Text="{Binding PoemCountText}"
-                                                                   Foreground="#CCFFFFFF" FontSize="11"/>
-                                                        <TextBlock Grid.Row="2" Margin="0,2,0,0" Text="Ouvrir ▸"
-                                                                   Foreground="#99FFFFFF" FontSize="10"/>
+                                                                   FontFamily="Georgia" FontSize="16" FontWeight="Bold"
+                                                                   FontStyle="{Binding TitleFontStyle}"
+                                                                   TextWrapping="Wrap" TextAlignment="Center"
+                                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                        <TextBlock Grid.Row="1" Text="{Binding PoemCountText}"
+                                                                   Foreground="#CCFFFFFF" FontSize="11" HorizontalAlignment="Center"/>
                                                     </Grid>
-                                                </Border.Child>
-                                            </Border>
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
-                    </Grid>
-
-                    <!-- OPEN BOOK: the selected recueil's summary + its poems. -->
-                    <Grid x:Name="PoetryBook" Visibility="Collapsed">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
-                        </Grid.RowDefinitions>
-
-                        <!-- Book header: back button + recueil title + rename/delete. -->
-                        <DockPanel Grid.Row="0" Margin="0,0,0,12">
-                            <Button DockPanel.Dock="Left" Content="◀ Retour" x:Name="BookshelfBackButton" Style="{StaticResource SecondaryButtonStyle}"
-                                    Click="BookshelfBackButton_OnClick" Margin="0,0,12,0"
-                                    ToolTip="Retour à l'étagère"/>
-                            <TextBlock DockPanel.Dock="Left" x:Name="BookTitle" Text="" FontSize="22"
-                                       FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"/>
-                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                <TextBox x:Name="BookRenameInput" Style="{StaticResource DarkTextBoxStyle}" Width="140" Margin="0,0,6,0"
-                                         LostFocus="BookRenameInput_OnLostFocus"/>
-                                <Button Content="Renommer" Style="{StaticResource MiniButtonStyle}" Click="BookRenameButton_OnClick" Margin="0,0,4,0"/>
-                                <Button x:Name="BookDeleteButton" Content="✕" Style="{StaticResource MiniButtonStyle}" Width="30"
-                                        Click="BookDeleteButton_OnClick" ToolTip="Supprimer le recueil"/>
-                            </StackPanel>
-                        </DockPanel>
-
-                        <!-- Summary: a short description of the recueil. -->
-                        <TextBox x:Name="BookSummaryInput" Grid.Row="1" Height="48" Margin="0,0,0,16"
-                                 TextWrapping="Wrap" AcceptsReturn="True"
-                                 FontFamily="Georgia" FontSize="13" FontStyle="Italic"
-                                 Background="{StaticResource Surface2Brush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1"
-                                 Foreground="{StaticResource TextBrush}" Padding="10,6" LostFocus="BookSummaryInput_OnLostFocus"/>
-
-                        <!-- Poems in this recueil, shown as a vertical list of cards. -->
-                        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                            <ScrollViewer.Resources>
-                                <Style TargetType="ScrollBar" BasedOn="{StaticResource ThinVerticalScrollBarStyle}"/>
-                            </ScrollViewer.Resources>
-                            <ItemsControl x:Name="PoemCardList">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <WrapPanel Orientation="Horizontal"/>
-                                    </ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <!-- A poem card: title, a preview of the text, and a click-to-open affordance. -->
-                                        <Border Width="280" Margin="0,0,20,16" Cursor="Hand"
-                                                Background="{StaticResource Surface2Brush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1"
-                                                CornerRadius="6" Padding="16"
-                                                MouseLeftButtonUp="PoemCard_OnClick">
-                                            <Grid>
-                                                <Grid.RowDefinitions>
-                                                    <RowDefinition Height="Auto"/>
-                                                    <RowDefinition Height="*"/>
-                                                    <RowDefinition Height="Auto"/>
-                                                </Grid.RowDefinitions>
-                                                <TextBlock Grid.Row="0" Text="{Binding Title}" Foreground="{StaticResource TextBrush}"
-                                                           FontFamily="Georgia" FontSize="16" FontWeight="Bold"
-                                                           TextWrapping="Wrap"/>
-                                                <TextBlock Grid.Row="1" Margin="0,6,0,0" Foreground="{StaticResource TextMutedBrush}"
-                                                           FontFamily="Georgia" FontSize="12" TextWrapping="Wrap"
-                                                       MaxHeight="120" Text="{Binding Preview}"/>
-                                                <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,0">
-                                                    <TextBlock Text="Ouvrir ▸" Foreground="{StaticResource TextMutedBrush}" FontSize="11"/>
-                                                    <TextBlock Text="  •  " Foreground="{StaticResource TextFaintBrush}"/>
-                                                    <TextBlock Text="{Binding PoemCountText}" Foreground="{StaticResource TextFaintBrush}" FontSize="11"/>
-                                                </StackPanel>
+                                                </Border>
+                                                <!-- Per-cover delete, floating on the cover face's top-right corner. Drawn
+                                                     muted at rest rather than hover-revealed: this dialect exposes no
+                                                     verified hover event on a data-template element, so a hover-only chip
+                                                     risks never appearing at all, which is worse than a discreet one.
+                                                     The view-model collapses it for the catch-all (which must always
+                                                     exist to receive unassigned poems) and for the action card. -->
+                                                <Button Grid.Column="1" Content="✕" Width="24" Height="24"
+                                                        HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,6,7,0"
+                                                        Style="{StaticResource MiniButtonStyle}"
+                                                        Foreground="{StaticResource TextMutedBrush}"
+                                                        Visibility="{Binding DeleteButtonVisibility}"
+                                                        Click="DeleteRecueilCover_OnClick"
+                                                        ToolTip="Supprimer ce recueil"/>
                                             </Grid>
                                         </Border>
                                     </DataTemplate>
@@ -524,15 +444,113 @@
                         </ScrollViewer>
                     </Grid>
 
-                    <!-- POEM EDITOR: the open poem page. A notebook page, styled like verse. -->
-                    <Grid x:Name="PoemEditor" Visibility="Collapsed">
+                    <!-- OPEN BOOK: the selected recueil's summary + its poems. -->
+                    <Grid x:Name="PoetryBook" Visibility="Collapsed" Grid.Row="0" Grid.Column="0" Grid.RowSpan="2" Grid.ColumnSpan="3">
+                        <!-- Same split as the stage: the list card owns column 0, the poem page column 2, so both
+                             stand at once the way poe8 draws them. -->
                         <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="330"/>
+                            <ColumnDefinition Width="14"/>
                             <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
 
-                        <!-- Left: the poem page itself. -->
-                        <Border Grid.Column="0" Style="{StaticResource CardBorderStyle}" Padding="24" MaxWidth="760" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,0,20,0">
+                        <!-- Book header, as poe8 rules it: a plain "← Bibliothèque" chip, then the recueil
+                             title in large serif, and at the far right a single ⋯ button that unfolds the
+                             recueil's own management (rename, summary, delete) — kept out of the way so the
+                             header stays as spare as the mockup's. -->
+                        <DockPanel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,0,0,14" LastChildFill="False">
+                            <Button DockPanel.Dock="Left" Content="← Bibliothèque" x:Name="BookshelfBackButton" Style="{StaticResource SecondaryButtonStyle}"
+                                    Click="BookshelfBackButton_OnClick" Margin="0,0,16,0"
+                                    ToolTip="Retour à l'étagère"/>
+                            <TextBlock DockPanel.Dock="Left" x:Name="BookTitle" Text="" FontSize="24" FontFamily="Georgia"
+                                       FontWeight="Bold" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"/>
+                            <ToggleButton DockPanel.Dock="Right" x:Name="PoetryMenuButton" Content="⋯" Width="34" Height="30"
+                                         Style="{StaticResource MiniToggleButtonStyle}" Click="PoetryMenuButton_OnToggle"
+                                         ToolTip="Gérer ce recueil"/>
+                        </DockPanel>
+
+                        <!-- The recueil's own management controls (rename, summary, delete) live in the ⋯
+                             fly-out below rather than in a header strip: poe8's header holds nothing but the
+                             back chip and the title, and the fly-out is the one place the user goes to manage. -->
+
+                        <!-- The book's left card: the recueil's poems as a vertical list, poe8-style (bold serif
+                             title over a muted "Recueil : …" line), with the create action pinned at its foot.
+                             The search box and the new-poem field moved here out of the dissolved rail. -->
+                        <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource CardBorderStyle}" Padding="16"
+                                HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                            <DockPanel LastChildFill="True">
+                                <!-- Search, with the in-box placeholder shown only while empty (the dialect's
+                                     TextBox has no PlaceholderText property). -->
+                                <Grid DockPanel.Dock="Top" Margin="0,0,0,14">
+                                    <TextBox x:Name="PoemSearchInput" Style="{StaticResource DarkTextBoxStyle}" Height="34"
+                                           TextChanged="PoemSearchInput_OnTextChanged" VerticalContentAlignment="Center"/>
+                                    <TextBlock Text="Chercher un poème…" IsHitTestVisible="False"
+                                             Foreground="{StaticResource TextFaintBrush}" FontSize="12" VerticalAlignment="Center"
+                                             Margin="11,0,0,0" FontStyle="Italic">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Text, ElementName=PoemSearchInput}" Value="">
+                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Grid>
+
+                                <!-- The create row, hidden by default: a poem is only ever created from inside an
+                                     open recueil, which is where this button lives. -->
+                                <StackPanel DockPanel.Dock="Bottom" x:Name="NewPoemPanel" Orientation="Vertical" Margin="0,12,0,0">
+                                    <TextBox x:Name="NewPoemTitleInput" Style="{StaticResource DarkTextBoxStyle}" Height="30"
+                                             Margin="0,0,0,8" ToolTip="Titre du nouveau poème"/>
+                                    <Button Content="+ Nouveau poème" Style="{StaticResource PrimaryButtonStyle}"
+                                          HorizontalAlignment="Stretch" Height="38" Click="NewPoemButton_OnClick"
+                                          ToolTip="Créer un poème dans ce recueil"/>
+                                </StackPanel>
+
+                                <ScrollViewer DockPanel.Dock="Top" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                    <ScrollViewer.Resources>
+                                        <Style TargetType="ScrollBar" BasedOn="{StaticResource ThinVerticalScrollBarStyle}"/>
+                                    </ScrollViewer.Resources>
+                                    <ItemsControl x:Name="PoemCardList">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <StackPanel Orientation="Vertical"/>
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <!-- One row of the list, exactly as poe8 draws it: the title in bold
+                                                     serif with the anthology named underneath in muted text. -->
+                                                <Border Padding="0,0,0,16" Cursor="Hand" Background="Transparent"
+                                                        MouseLeftButtonUp="PoemCard_OnClick">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding Title}" Foreground="{StaticResource TextBrush}"
+                                                                 FontFamily="Georgia" FontSize="14" FontWeight="Bold"
+                                                                 TextWrapping="Wrap"/>
+                                                        <TextBlock Margin="0,3,0,0" Text="{Binding RecueilLabel}"
+                                                                 Foreground="{StaticResource TextMutedBrush}" FontSize="11"/>
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </DockPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- POEM EDITOR: the open poem page, poe8's right-hand card. It lives in the stage's third
+                         column so it stands BESIDE the book's poem list instead of replacing it. -->
+                    <Grid x:Name="PoemEditor" Visibility="Collapsed" Grid.Row="1" Grid.Column="2">
+                        <Border Style="{StaticResource CardBorderStyle}" Padding="28,20"
+                                HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
@@ -606,12 +624,82 @@
                             </Grid>
                         </Border>
 
-                        <!-- Right: a slim back button to return to the book. -->
-                        <Button Grid.Column="1" Content="◀ Retour au recueil" x:Name="PoemEditorBackButton" Style="{StaticResource SecondaryButtonStyle}"
-                                Click="PoemEditorBackButton_OnClick" VerticalAlignment="Top"
-                                ToolTip="Retour au recueil"/>
+                        <!-- poe8 has no "back to the book" control: the poem list stays on screen at the left, so
+                             returning to the book means clicking another poem there, and returning to the shelf
+                             means "← Bibliothèque" in the header. The control is kept (other paths still route to
+                             it) but folded away, so the page reads like the mockup. -->
+                        <Button x:Name="PoemEditorBackButton" Content="◀ Retour au recueil" Style="{StaticResource SecondaryButtonStyle}"
+                                Click="PoemEditorBackButton_OnClick" HorizontalAlignment="Left" VerticalAlignment="Top"
+                                Visibility="Collapsed" ToolTip="Retour au recueil"/>
                     </Grid>
                 </Grid>
+
+                <!-- Recueil management fly-out, opened by the ⋯ button on the book header. Declared last so it
+                     paints over the stage. It re-homes everything the dissolved rail used to hold — the recueil
+                     filter list, renaming, deletion and the "new recueil" form — so no capability is lost to the
+                     redesign; it is simply folded behind one control instead of standing in a permanent column. -->
+                <Border x:Name="PoetryMenuScrim" Grid.Row="0" Grid.RowSpan="2" Grid.Column="0" Grid.ColumnSpan="3"
+                        Background="#6604060F" Visibility="Collapsed">
+                    <Border x:Name="PoetryRailMenu" Style="{StaticResource CardBorderStyle}" Background="{StaticResource AppBgBrush}"
+                            BorderBrush="{StaticResource BorderStrongBrush}" Width="330" MaxHeight="560"
+                            HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,72,26,0" Padding="18">
+                        <StackPanel>
+                            <TextBlock Text="RECUEILS" FontSize="13" FontWeight="Bold" Foreground="{StaticResource TextBrush}"
+                                       Margin="0,0,0,12"/>
+
+                            <!-- New recueil: the form the rail used to carry. -->
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                                <TextBox x:Name="NewRecueilTitleInput" Style="{StaticResource DarkTextBoxStyle}" HorizontalAlignment="Stretch"
+                                         Width="180" Margin="0,0,8,0" ToolTip="Titre du nouveau recueil"/>
+                                <Button Content="+ Recueil" Style="{StaticResource SecondaryButtonStyle}" Click="NewRecueilButton_OnClick"/>
+                            </StackPanel>
+
+                            <TextBlock Text="Filtrer" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,4"/>
+                            <ListBox x:Name="RecueilFilterList" Background="Transparent" Foreground="{StaticResource TextBrush}"
+                                     BorderThickness="0" MaxHeight="190" Margin="0,0,0,10"
+                                     SelectionChanged="RecueilFilterList_OnSelectionChanged">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Title}" Foreground="{StaticResource TextBrush}" FontSize="13"/>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+
+                            <TextBlock Text="Gérer le recueil sélectionné" Style="{StaticResource FieldLabelStyle}" Margin="0,6,0,4"/>
+                            <StackPanel x:Name="RecueilManagePanel" Orientation="Horizontal" Visibility="Collapsed">
+                                <TextBox x:Name="RecueilRenameInput" Style="{StaticResource DarkTextBoxStyle}" Width="130"
+                                         Margin="0,0,6,0" LostFocus="RecueilRenameInput_OnLostFocus"/>
+                                <Button Content="Renommer" Style="{StaticResource MiniButtonStyle}" Click="RecueilRenameButton_OnClick" Margin="0,0,4,0"/>
+                                <Button x:Name="RecueilDeleteButton" Content="✕" Style="{StaticResource MiniButtonStyle}" Width="26"
+                                        Click="RecueilDeleteButton_OnClick" ToolTip="Supprimer le recueil"/>
+                            </StackPanel>
+
+                            <Rectangle Height="1" Margin="0,14,0,10" Fill="{StaticResource AppBorderBrush}"/>
+
+                            <!-- The recueil currently open as a book: renamed, summarised and deleted from here.
+                                 poe8 keeps the header bare, so the book's own controls live behind ⋯ along with
+                                 the rest of the recueil management. -->
+                            <TextBlock Text="CE RECUEIL OUVERT" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,4"/>
+                            <StackPanel x:Name="BookManagePanel" Orientation="Vertical">
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                    <TextBox x:Name="BookRenameInput" Style="{StaticResource DarkTextBoxStyle}" Width="150" Margin="0,0,6,0"
+                                             LostFocus="BookRenameInput_OnLostFocus"/>
+                                    <Button Content="Renommer" Style="{StaticResource MiniButtonStyle}" Click="BookRenameButton_OnClick"/>
+                                </StackPanel>
+                                <TextBox x:Name="BookSummaryInput" Style="{StaticResource DarkTextBoxStyle}" Height="56" Margin="0,0,0,8"
+                                         TextWrapping="Wrap" AcceptsReturn="True" FontFamily="Georgia" FontSize="12" FontStyle="Italic"
+                                         Foreground="{StaticResource TextBrush}" Padding="10,6"
+                                         ToolTip="Résumé du recueil" LostFocus="BookSummaryInput_OnLostFocus"/>
+                                <Button x:Name="BookDeleteButton" Content="Supprimer le recueil" Style="{StaticResource MiniButtonStyle}"
+                                        HorizontalAlignment="Left" Click="BookDeleteButton_OnClick" ToolTip="Supprimer le recueil"/>
+                            </StackPanel>
+
+                            <Rectangle Height="1" Margin="0,14,0,10" Fill="{StaticResource AppBorderBrush}"/>
+                            <Button x:Name="RecueilBookshelfButton" Content="Vue de l'étagère" Style="{StaticResource SecondaryButtonStyle}"
+                                    Click="RecueilBookshelfButton_OnClick" HorizontalAlignment="Stretch"/>
+                        </StackPanel>
+                    </Border>
+                </Border>
             </Grid>
 
             <!-- Archive artistique: free-form canvas linking Observations into projects -->

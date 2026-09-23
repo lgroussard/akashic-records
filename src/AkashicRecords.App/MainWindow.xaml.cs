@@ -676,6 +676,12 @@ public partial class MainWindow : Window
                 case CollectionsView coll when tab is "Film" or "FilmAnimation" or "Anime" or "Livre" or "VideoGame" or "Watchlist":
                     coll.ShowTabForScreenshot(tab);
                     break;
+                case JournauxView jour when tab.StartsWith("Poetry:"):
+                    // Reaches the two poetry sub-panes the plain "Poetry" capture cannot: the opened
+                    // book and the poem page (see JournauxView.ShowPoetryPaneForScreenshot).
+                    jour.ShowTabForScreenshot("Poetry");
+                    jour.ShowPoetryPaneForScreenshot(tab["Poetry:".Length..]);
+                    break;
             }
         }
     }
