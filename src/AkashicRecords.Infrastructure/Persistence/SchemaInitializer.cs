@@ -254,6 +254,36 @@ public sealed class SchemaInitializer
         AddColumnIfMissing(connection, "Poem", "Bold", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing(connection, "Poem", "Italic", "INTEGER NOT NULL DEFAULT 1");
         AddColumnIfMissing(connection, "Poem", "RichContent", "TEXT NOT NULL DEFAULT ''");
+        AddColumnIfMissing(connection, "Poem", "EditorWidth", "REAL NOT NULL DEFAULT 900");
+
+        // The typing-window width opened at a 300 base before settling at 900. Rows seeded under that first
+        // default carry 300, and ALTER's column default never rewrites existing rows — so they are lifted
+        // once. A one-time flag guards it: a reader who later narrows a poem back to exactly 300 (base 900
+        // minus 15 steps) is not reverted by it on the next launch.
+        using (var ensure = connection.CreateCommand())
+        {
+            ensure.CommandText = "CREATE TABLE IF NOT EXISTS SchemaFlag (Key TEXT PRIMARY KEY, Value TEXT NOT NULL);";
+            ensure.ExecuteNonQuery();
+        }
+
+        var bumped = false;
+        using (var check = connection.CreateCommand())
+        {
+            check.CommandText = "SELECT 1 FROM SchemaFlag WHERE Key = 'poem_editor_width_900';";
+            using var reader = check.ExecuteReader();
+            bumped = reader.Read();
+        }
+
+        if (!bumped)
+        {
+            using var bump = connection.CreateCommand();
+            bump.CommandText = "UPDATE Poem SET EditorWidth = 900 WHERE EditorWidth = 300;";
+            bump.ExecuteNonQuery();
+
+            using var mark = connection.CreateCommand();
+            mark.CommandText = "INSERT OR REPLACE INTO SchemaFlag (Key, Value) VALUES ('poem_editor_width_900', '1');";
+            mark.ExecuteNonQuery();
+        }
     }
 
     // No migration framework yet - for a db created before a column existed, add it in place.

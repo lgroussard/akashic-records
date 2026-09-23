@@ -18,8 +18,8 @@ public sealed class PoemRepository
         using var command = connection.CreateCommand();
         command.CommandText =
             """
-            INSERT INTO Poem (RecueilId, Title, Text, Tags, ImagePath, CreatedAt, TextAlignment, Margin, FontSize, FontFamily, Bold, Italic, RichContent)
-            VALUES ($recueilId, $title, $text, $tags, $imagePath, $createdAt, $textAlignment, $margin, $fontSize, $fontFamily, $bold, $italic, $richContent);
+            INSERT INTO Poem (RecueilId, Title, Text, Tags, ImagePath, CreatedAt, TextAlignment, Margin, FontSize, FontFamily, Bold, Italic, RichContent, EditorWidth)
+            VALUES ($recueilId, $title, $text, $tags, $imagePath, $createdAt, $textAlignment, $margin, $fontSize, $fontFamily, $bold, $italic, $richContent, $editorWidth);
             SELECT last_insert_rowid();
             """;
         AddParameters(command, poem);
@@ -30,7 +30,7 @@ public sealed class PoemRepository
     {
         using var connection = _connectionFactory.CreateOpenConnection();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, RecueilId, Title, Text, Tags, ImagePath, CreatedAt, TextAlignment, Margin, FontSize, FontFamily, Bold, Italic, RichContent FROM Poem ORDER BY Title;";
+        command.CommandText = "SELECT Id, RecueilId, Title, Text, Tags, ImagePath, CreatedAt, TextAlignment, Margin, FontSize, FontFamily, Bold, Italic, RichContent, EditorWidth FROM Poem ORDER BY Title;";
 
         var results = new List<Poem>();
         using var reader = command.ExecuteReader();
@@ -100,6 +100,19 @@ public sealed class PoemRepository
         command.ExecuteNonQuery();
     }
 
+    // The two editor layout axes — window width and inner page margin — live apart from the font/alignment
+    // update, so nudging either rewrites only these two columns.
+    public void UpdateLayout(int id, double margin, double editorWidth)
+    {
+        using var connection = _connectionFactory.CreateOpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE Poem SET Margin = $margin, EditorWidth = $editorWidth WHERE Id = $id;";
+        command.Parameters.AddWithValue("$margin", margin);
+        command.Parameters.AddWithValue("$editorWidth", editorWidth);
+        command.Parameters.AddWithValue("$id", id);
+        command.ExecuteNonQuery();
+    }
+
     // Persists the poem body: plain Text (for search) + the XAML-serialized rich content (per-letter styling).
     public void UpdateRichContent(int id, string text, string richContent)
     {
@@ -146,6 +159,7 @@ public sealed class PoemRepository
         command.Parameters.AddWithValue("$bold", poem.Bold ? 1 : 0);
         command.Parameters.AddWithValue("$italic", poem.Italic ? 1 : 0);
         command.Parameters.AddWithValue("$richContent", poem.RichContent);
+        command.Parameters.AddWithValue("$editorWidth", poem.EditorWidth);
     }
 
     private static Poem ReadPoem(SqliteDataReader reader) => new()
@@ -163,6 +177,7 @@ public sealed class PoemRepository
         FontFamily = reader.GetString(10),
         Bold = reader.GetInt32(11) != 0,
         Italic = reader.GetInt32(12) != 0,
-        RichContent = reader.GetString(13)
+        RichContent = reader.GetString(13),
+        EditorWidth = reader.GetDouble(14)
     };
 }

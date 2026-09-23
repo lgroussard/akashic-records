@@ -336,7 +336,7 @@
             </Grid>
 
             <!-- Recueil de poésie: a notebook, not a canvas - poems optionally grouped into recueils -->
-            <Grid x:Name="PoetryRoot" Visibility="Collapsed">
+            <Grid x:Name="PoetryRoot" Visibility="Collapsed" PreviewKeyDown="PoetryRoot_OnPreviewKeyDown">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
@@ -371,14 +371,47 @@
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
 
-                        <DockPanel Grid.Row="0" Margin="0,0,0,14" LastChildFill="False">
+                        <!-- Header and the per-cover management bar share the shelf's first row as a stack, so the bar
+                             pushes the covers down when it appears instead of overlapping them. -->
+                        <StackPanel Grid.Row="0">
+                        <DockPanel Margin="0,0,0,14" LastChildFill="False">
                             <TextBlock DockPanel.Dock="Left" x:Name="BookshelfTitle" Text="Bibliothèque" FontSize="20"
                                        FontWeight="Bold" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" Margin="0,0,12,0"/>
                             <TextBlock DockPanel.Dock="Left" Text="Choisissez un recueil pour l'ouvrir" FontSize="13"
                                        Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center"/>
-                            <TextBlock DockPanel.Dock="Right" x:Name="BookshelfCount" Foreground="{StaticResource TextMutedBrush}"
-                                       VerticalAlignment="Center" Visibility="Collapsed"/>
+                            <!-- Creating a recueil belongs on the shelf itself, not behind the fly-out: the new cover
+                                 appears the moment it is committed, so the action is visible where its result lives.
+                                 Same shape as the create rows in the other journals (input + one button). -->
+                            <StackPanel DockPanel.Dock="Right" x:Name="ShelfNewRecueilPanel" Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBox x:Name="ShelfNewRecueilInput" Style="{StaticResource DarkTextBoxStyle}" Width="160" Height="32"
+                                         Margin="0,0,8,0" VerticalContentAlignment="Center" ToolTip="Nom du nouveau recueil"
+                                         PreviewKeyDown="ShelfNewRecueilInput_OnPreviewKeyDown"/>
+                                <!-- A MinWidth and explicit padding keep the label clear of the button's edges: sized to
+                                     its bare content it read as clipped, the text vanishing into the padding. -->
+                                <Button Content="+ Recueil" Style="{StaticResource SecondaryButtonStyle}" Height="32" MinWidth="100"
+                                        Padding="16,0" HorizontalAlignment="Center" HorizontalContentAlignment="Center"
+                                        Click="NewRecueilButton_OnClick" ToolTip="Créer le recueil sur l'étagère"/>
+                            </StackPanel>
                         </DockPanel>
+
+                        <!-- Per-cover management, revealed by the ✎ chip on a cover. Deliberately NOT part of the
+                             create control and NOT part of the fly-out: renaming and deleting a book are actions on
+                             that book, so they appear on the book, prefilled with its own title. -->
+                        <Border x:Name="ShelfManageBar" Visibility="Collapsed" Style="{StaticResource CardBorderStyle}"
+                                Background="{StaticResource Surface2Brush}" Padding="12,8" Margin="0,0,0,14"
+                                HorizontalAlignment="Left">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="Renommer" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <TextBox x:Name="ShelfRenameInput" Style="{StaticResource DarkTextBoxStyle}" Width="200" Height="28"
+                                         Margin="0,0,8,0" VerticalContentAlignment="Center"
+                                         PreviewKeyDown="ShelfRenameInput_OnPreviewKeyDown"/>
+                                <Button Content="Renommer" Style="{StaticResource MiniButtonStyle}" Margin="0,0,6,0"
+                                        Click="ShelfRenameButton_OnClick"/>
+                                <Button Content="Annuler" Style="{StaticResource MiniButtonStyle}" Margin="0,0,0,0"
+                                        Click="ShelfManageCancel_OnClick"/>
+                            </StackPanel>
+                        </Border>
+                        </StackPanel>
 
                         <!-- The shelf itself: poe3 rules a thin baseline directly under the row of books, with
                              all the free space left empty below. Declared before the covers, and pinned to the
@@ -423,19 +456,26 @@
                                                                    Foreground="#CCFFFFFF" FontSize="11" HorizontalAlignment="Center"/>
                                                     </Grid>
                                                 </Border>
-                                                <!-- Per-cover delete, floating on the cover face's top-right corner. Drawn
-                                                     muted at rest rather than hover-revealed: this dialect exposes no
-                                                     verified hover event on a data-template element, so a hover-only chip
-                                                     risks never appearing at all, which is worse than a discreet one.
-                                                     The view-model collapses it for the catch-all (which must always
-                                                     exist to receive unassigned poems) and for the action card. -->
-                                                <Button Grid.Column="1" Content="✕" Width="24" Height="24"
-                                                        HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,6,7,0"
-                                                        Style="{StaticResource MiniButtonStyle}"
-                                                        Foreground="{StaticResource TextMutedBrush}"
-                                                        Visibility="{Binding DeleteButtonVisibility}"
-                                                        Click="DeleteRecueilCover_OnClick"
-                                                        ToolTip="Supprimer ce recueil"/>
+                                                <!-- Per-cover management, floating on the cover face's top-right corner.
+                                                     Drawn muted at rest rather than hover-revealed: this dialect exposes
+                                                     no verified hover event on a data-template element, so a hover-only
+                                                     chip risks never appearing at all, which is worse than a discreet
+                                                     one. The view-model collapses both chips for the catch-all (which
+                                                     must always exist to receive unassigned poems) and for the action card. -->
+                                                <StackPanel Grid.Column="1" Orientation="Horizontal"
+                                                          HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,6,7,0"
+                                                          Visibility="{Binding ManageButtonVisibility}">
+                                                    <Button Content="✎" Width="24" Height="24"
+                                                            Style="{StaticResource MiniButtonStyle}"
+                                                            Foreground="{StaticResource TextMutedBrush}"
+                                                            Click="RenameRecueilCover_OnClick"
+                                                            ToolTip="Renommer ce recueil"/>
+                                                    <Button Content="✕" Width="24" Height="24" Margin="4,0,0,0"
+                                                            Style="{StaticResource MiniButtonStyle}"
+                                                            Foreground="{StaticResource TextMutedBrush}"
+                                                            Click="DeleteRecueilCover_OnClick"
+                                                            ToolTip="Supprimer ce recueil"/>
+                                                </StackPanel>
                                             </Grid>
                                         </Border>
                                     </DataTemplate>
@@ -506,13 +546,13 @@
 
                                 <!-- The create row, hidden by default: a poem is only ever created from inside an
                                      open recueil, which is where this button lives. -->
-                                <StackPanel DockPanel.Dock="Bottom" x:Name="NewPoemPanel" Orientation="Vertical" Margin="0,12,0,0">
-                                    <TextBox x:Name="NewPoemTitleInput" Style="{StaticResource DarkTextBoxStyle}" Height="30"
-                                             Margin="0,0,0,8" ToolTip="Titre du nouveau poème"/>
-                                    <Button Content="+ Nouveau poème" Style="{StaticResource PrimaryButtonStyle}"
-                                          HorizontalAlignment="Stretch" Height="38" Click="NewPoemButton_OnClick"
-                                          ToolTip="Créer un poème dans ce recueil"/>
-                                </StackPanel>
+                                <!-- One control, no field above it: a new poem is created straight away under the
+                                     placeholder title "Nouveau poème" and opens for editing, where the title is typed.
+                                     A blank title field above a button asked for a name before the thing existed. -->
+                                <Button DockPanel.Dock="Bottom" x:Name="NewPoemPanel" Content="+ Nouveau poème"
+                                        Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Stretch" Height="38"
+                                        Margin="0,12,0,0" Click="NewPoemButton_OnClick"
+                                        ToolTip="Créer un poème dans ce recueil"/>
 
                                 <ScrollViewer DockPanel.Dock="Top" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                                     <ScrollViewer.Resources>
@@ -548,8 +588,16 @@
 
                     <!-- POEM EDITOR: the open poem page, poe8's right-hand card. It lives in the stage's third
                          column so it stands BESIDE the book's poem list instead of replacing it. -->
+                    <!-- The card keeps its full stage width — the toolbar and the organisational row need that room.
+                         Only the verse itself is bounded and centred below, for legibility: the complaint was the text
+                         column running too wide, not the card. -->
                     <Grid x:Name="PoemEditor" Visibility="Collapsed" Grid.Row="1" Grid.Column="2">
-                        <Border Style="{StaticResource CardBorderStyle}" Padding="28,20"
+                        <!-- The whole card is the typing surface, not just the glyphs already written:
+                             the verse box only stretches over its own bounds, so the empty page below the
+                             text used to swallow clicks. The card takes the click and drops the caret in
+                             the verse, unless it was raised by a real control (button, combo, another field). -->
+                        <Border Style="{StaticResource CardBorderStyle}" Padding="28,20" x:Name="PoemEditorCard"
+                                MouseLeftButtonDown="PoemEditorCard_OnClick"
                                 HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
                             <Grid>
                                 <Grid.RowDefinitions>
@@ -572,6 +620,7 @@
 
                                 <!-- Title, as a heading. -->
                                 <TextBox Grid.Row="1" x:Name="PoemTitleInput" LostFocus="PoemField_OnLostFocus"
+                                         TextChanged="PoemTitleInput_OnTextChanged"
                                          FontFamily="Georgia" FontSize="26" FontWeight="Bold" TextAlignment="Center"
                                          Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}"
                                          TextWrapping="Wrap" Margin="0,0,0,4"/>
@@ -589,9 +638,19 @@
                                                   Style="{StaticResource NavButtonStyle}" Padding="6,2" Margin="0,0,2,0"/>
                                     <ToggleButton x:Name="PoemAlignJustifyButton" Content="☰" Tag="Justify" Click="PoemAlignButton_OnClick"
                                                   Style="{StaticResource NavButtonStyle}" Padding="6,2" Margin="0,0,16,0"/>
+                                    <!-- Two independent layout axes: the window WIDTH (the column the typing box
+                                         occupies, base 300, ±40) and the inner page MARGIN below. One control could
+                                         not carry both, which is what made the old single margin feel broken. -->
+                                    <TextBlock Text="Largeur" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                                    <Button Content="−" ToolTip="Rétrécir la fenetre" Style="{StaticResource MiniButtonStyle}" Click="PoemWidthDecreaseButton_OnClick" Padding="8,2" Margin="0,0,2,0"/>
+                                    <TextBlock x:Name="PoemWidthText" VerticalAlignment="Center" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,2,0"/>
+                                    <Button Content="+" ToolTip="Élargir la fenetre" Style="{StaticResource MiniButtonStyle}" Click="PoemWidthIncreaseButton_OnClick" Padding="8,2" Margin="0,0,4,0"/>
+                                    <Button Content="0" ToolTip="Revenir à 900" Style="{StaticResource MiniButtonStyle}" Click="PoemWidthResetButton_OnClick" Padding="8,2" Margin="0,0,12,0"/>
                                     <TextBlock Text="Marges" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,4,0"/>
                                     <Button Content="−" Style="{StaticResource MiniButtonStyle}" Click="PoemMarginDecreaseButton_OnClick" Padding="8,2" Margin="0,0,2,0"/>
-                                    <Button Content="+" Style="{StaticResource MiniButtonStyle}" Click="PoemMarginIncreaseButton_OnClick" Padding="8,2" Margin="0,0,12,0"/>
+                                    <Button Content="+" Style="{StaticResource MiniButtonStyle}" Click="PoemMarginIncreaseButton_OnClick" Padding="8,2" Margin="0,0,4,0"/>
+                                    <TextBlock x:Name="PoemMarginText" VerticalAlignment="Center" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,12,0"/>
+                                    <Button Content="0" Style="{StaticResource MiniButtonStyle}" Click="PoemMarginResetButton_OnClick" Padding="8,2" Margin="0,0,12,0"/>
                                     <TextBlock Text="Police" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,4,0"/>
                                     <Button Content="A−" x:Name="PoemFontSizeDecreaseButton" Style="{StaticResource MiniButtonStyle}" Click="PoemFontSizeDecreaseButton_OnClick" Margin="0,0,2,0"/>
                                     <Button Content="A+" x:Name="PoemFontSizeIncreaseButton" Style="{StaticResource MiniButtonStyle}" Click="PoemFontSizeIncreaseButton_OnClick" Margin="0,0,12,0"/>
@@ -602,18 +661,44 @@
                                     <TextBlock x:Name="PoemFontSizeText" VerticalAlignment="Center" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,0"/>
                                 </StackPanel>
 
-                                <!-- The poem text. -->
+                                <!-- The poem text. Tab must insert a tabulation (a verse indent) rather than move the
+                                     focus away: this dialect ships no AcceptsTab on TextBox (same absent member as the
+                                     PlaceholderText trap), so the key is routed through PreviewKeyDown, the same way
+                                     CanvasRoot and the reference overlay already take their keys in this file. -->
+                                <!-- The reading column. Stretch on BOTH axes so it fills exactly the room the card
+                                     leaves between the toolbar and the bottom row: Center would size the width to the
+                                     (often empty) text — a sliver — and a fixed centred Height left dead bands. The
+                                     painted Surface2 background is what makes the whole rectangle hit-testable (a
+                                     Transparent one followed only the glyphs). MinHeight 300 is the floor it never
+                                     sinks below. The "Marges" toolbar control drives the INTERNAL padding (see
+                                     ApplyPoemFormatting): it breathes the verse away from the frame — its page
+                                     margin — over a 14/12 base, rather than resizing the rectangle itself. -->
                                 <TextBox Grid.Row="4" x:Name="PoemTextInput" TextWrapping="Wrap" AcceptsReturn="True"
-                                         Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}"
-                                         MinHeight="200" MaxHeight="360"
+                                         Background="{StaticResource Surface2Brush}" CaretBrush="#FFFFFFFF"
+                                         BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1"
+                                         Padding="14,12" MinHeight="300" Width="900"
+                                         HorizontalAlignment="Center" VerticalAlignment="Stretch"
+                                         Foreground="{StaticResource TextBrush}" FontSize="15"
                                          VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"
+                                         PreviewKeyDown="PoemTextInput_OnPreviewKeyDown"
                                          LostFocus="PoemField_OnLostFocus"/>
 
                                 <!-- Organizational row. -->
                                 <StackPanel Grid.Row="5" Orientation="Horizontal" Margin="0,12,0,0" VerticalAlignment="Center">
                                     <TextBlock Text="Recueil" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                                    <ComboBox x:Name="PoemRecueilPicker" Style="{StaticResource DarkComboBoxStyle}" Width="150" DisplayMemberPath="Title" FontSize="11"
-                                              SelectionChanged="PoemRecueilPicker_OnSelectionChanged" Margin="0,0,12,0"/>
+                                    <!-- An explicit item template, not DisplayMemberPath: the closed box of a
+                                         DarkComboBoxStyle combo is templated off SelectionBoxItemTemplate, which a
+                                         DisplayMemberPath does not propagate, so the selection fell back to the
+                                         POCO's ToString() ("AkashicRecords.Domain.Re…"). An ItemTemplate is forwarded. -->
+                                    <ComboBox x:Name="PoemRecueilPicker" Style="{StaticResource DarkComboBoxStyle}" Width="170" FontSize="11"
+                                              SelectionChanged="PoemRecueilPicker_OnSelectionChanged" Margin="0,0,12,0">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Title}" Foreground="{StaticResource TextBrush}"
+                                                         FontSize="11" TextWrapping="Wrap"/>
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
                                     <TextBlock Text="Tags" Style="{StaticResource FieldLabelStyle}" VerticalAlignment="Center" Margin="0,0,4,0"/>
                                     <TextBox x:Name="PoemTagsInput" Style="{StaticResource DarkTextBoxStyle}" Width="160" FontSize="11" LostFocus="PoemField_OnLostFocus" Margin="0,0,12,0"/>
                                     <Button Content="Image…" Style="{StaticResource MiniButtonStyle}" Click="SetPoemImageButton_OnClick" FontSize="11" Margin="0,0,4,0"/>
@@ -647,12 +732,9 @@
                             <TextBlock Text="RECUEILS" FontSize="13" FontWeight="Bold" Foreground="{StaticResource TextBrush}"
                                        Margin="0,0,0,12"/>
 
-                            <!-- New recueil: the form the rail used to carry. -->
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
-                                <TextBox x:Name="NewRecueilTitleInput" Style="{StaticResource DarkTextBoxStyle}" HorizontalAlignment="Stretch"
-                                         Width="180" Margin="0,0,8,0" ToolTip="Titre du nouveau recueil"/>
-                                <Button Content="+ Recueil" Style="{StaticResource SecondaryButtonStyle}" Click="NewRecueilButton_OnClick"/>
-                            </StackPanel>
+                            <!-- No create form here any longer: creating a recueil belongs on the shelf, beside the
+                                 covers it produces. Two entrances to the same action only made the fly-out read as the
+                                 place where creating lived, and it was the thing you could not leave with Escape. -->
 
                             <TextBlock Text="Filtrer" Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,4"/>
                             <ListBox x:Name="RecueilFilterList" Background="Transparent" Foreground="{StaticResource TextBrush}"
@@ -665,16 +747,7 @@
                                 </ListBox.ItemTemplate>
                             </ListBox>
 
-                            <TextBlock Text="Gérer le recueil sélectionné" Style="{StaticResource FieldLabelStyle}" Margin="0,6,0,4"/>
-                            <StackPanel x:Name="RecueilManagePanel" Orientation="Horizontal" Visibility="Collapsed">
-                                <TextBox x:Name="RecueilRenameInput" Style="{StaticResource DarkTextBoxStyle}" Width="130"
-                                         Margin="0,0,6,0" LostFocus="RecueilRenameInput_OnLostFocus"/>
-                                <Button Content="Renommer" Style="{StaticResource MiniButtonStyle}" Click="RecueilRenameButton_OnClick" Margin="0,0,4,0"/>
-                                <Button x:Name="RecueilDeleteButton" Content="✕" Style="{StaticResource MiniButtonStyle}" Width="26"
-                                        Click="RecueilDeleteButton_OnClick" ToolTip="Supprimer le recueil"/>
-                            </StackPanel>
-
-                            <Rectangle Height="1" Margin="0,14,0,10" Fill="{StaticResource AppBorderBrush}"/>
+                            <Rectangle Height="1" Margin="0,6,0,10" Fill="{StaticResource AppBorderBrush}"/>
 
                             <!-- The recueil currently open as a book: renamed, summarised and deleted from here.
                                  poe8 keeps the header bare, so the book's own controls live behind ⋯ along with

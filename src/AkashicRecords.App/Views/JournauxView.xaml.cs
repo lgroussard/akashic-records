@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
 using System.Windows;
@@ -231,6 +232,8 @@ public partial class JournauxView : UserControl, ISearchNavigable
             _openRecueil = poem?.RecueilId is { } pid
                 ? _recueilRepository.GetAll().FirstOrDefault(r => r.Id == pid)
                 : null;
+            if (_openRecueil is not null) OpenRecueilBook(_openRecueil);
+            else ShowStandalonePoems();
             OpenPoemPage(poem);
             ShowPoetryPane(PoetryPane.Editor);
             return;
@@ -1731,6 +1734,9 @@ public partial class JournauxView : UserControl, ISearchNavigable
     // The currently selected filter row (null while nothing meaningful is selected).
     private RecueilFilterItem? _selectedRecueilFilterItem;
 
+    // The recueil whose cover asked for the inline rename bar; null while the bar is hidden.
+    private int? _shelfManagedRecueilId;
+
     // Which of the three poetry panes is showing: the bookshelf (covers), an open book
     // (a recueil's poems), or the poem editor. The recueil currently open as a "book".
     private enum PoetryPane { Bookshelf, Book, Editor }
@@ -1795,19 +1801,48 @@ public partial class JournauxView : UserControl, ISearchNavigable
         public System.Windows.Visibility SpineVisibility => Visibility.Visible;
         public System.Windows.FontStyle TitleFontStyle => IsUnclassified ? FontStyles.Italic : FontStyles.Normal;
 
-        // The per-cover delete chip only ever shows on a real, user-owned recueil: the catch-all must
-        // always be there to receive unassigned poems, and the "+ Nouveau recueil" card is an action, not a row.
-        public System.Windows.Visibility DeleteButtonVisibility =>
+        // Both per-cover chips (rename, delete) share one container and the same guard: the catch-all
+        // must always be there to receive unassigned poems, and the "+ Nouveau recueil" card is an action, not a row.
+        public System.Windows.Visibility ManageButtonVisibility =>
             IsNewCard || IsUnclassified ? Visibility.Collapsed : Visibility.Visible;
     }
 
     // View-model for a poem row inside the open-book sidebar. RecueilName is the anthology the
     // poem belongs to, shown as a muted subtitle ("Recueil : Amour") under the bold serif title,
     // exactly as poe8-book.png renders each row of the left list panel.
-    private sealed record PoemCardItem(Poem Poem, string Title, string RecueilName, string Preview)
+    // A mutable class, not a record: typing the title on the page renames the row beside it as one types,
+    // and an immutable record has no way to signal that. Only Title moves, the rest of the row is fixed.
+    private sealed class PoemCardItem : INotifyPropertyChanged
     {
+        private string _title;
+
+        public PoemCardItem(Poem poem, string title, string recueilName, string preview)
+        {
+            Poem = poem;
+            _title = title;
+            RecueilName = recueilName;
+            Preview = preview;
+        }
+
+        public Poem Poem { get; }
+        public string RecueilName { get; }
+        public string Preview { get; }
+
+        public string Title
+        {
+            get => _title;
+            set
+            {
+                if (_title == value) return;
+                _title = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Title)));
+            }
+        }
+
         // Bound by PoemRowTemplate — avoids StringFormat brace-escaping pitfalls in markup bindings.
         public string RecueilLabel => $"Recueil : {RecueilName}";
+
+        public event PropertyChangedEventHandler? PropertyChanged;
     }
 
     private List<Poem> GetFilteredPoems()
@@ -1845,11 +1880,16 @@ public partial class JournauxView : UserControl, ISearchNavigable
         RefreshBookshelf();
 
         // If a poem was selected (e.g. restored or deep-linked), open straight to its editor.
+        // The book must be opened first: the card list is fed by OpenRecueilBook/ShowStandalonePoems,
+        // and the restore path used to jump to the page alone — leaving the spread's left column
+        // bound to nothing, so a reopened session showed an empty book beside the poem.
         if (_selectedPoem is not null)
         {
             _openRecueil = _selectedPoem.RecueilId is { } rid
                 ? _recueilRepository.GetAll().FirstOrDefault(r => r.Id == rid)
                 : null;
+            if (_openRecueil is not null) OpenRecueilBook(_openRecueil);
+            else ShowStandalonePoems();
             OpenPoemPage(_selectedPoem);
         }
         else
@@ -1921,15 +1961,86 @@ public partial class JournauxView : UserControl, ISearchNavigable
     private void PoetryMenuButton_OnToggle(object sender, RoutedEventArgs e)
         => SetPoetryMenuOpen(PoetryMenuButton.IsChecked == true);
 
+    // Escape inside the notebook steps back through what is open — the fly-out, then the rename bar, then
+    // the page to the book, then the book to the shelf — and stops there. Without this the key reaches the
+    // window's own handler and the whole section closes, which is what made the ⋯ menu feel inescapable.
+    private void PoetryRoot_OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape) return;
+
+        if (PoetryMenuScrim.Visibility == Visibility.Visible)
+        {
+            ClosePoetryMenu();
+            e.Handled = true;
+            return;
+        }
+
+        if (ShelfManageBar.Visibility == Visibility.Visible)
+        {
+            CancelShelfManage();
+            e.Handled = true;
+            return;
+        }
+
+        if (PoemEditor.Visibility == Visibility.Visible)
+        {
+            ShowPoetryPane(_openRecueil is not null ? PoetryPane.Book : PoetryPane.Bookshelf);
+            e.Handled = true;
+            return;
+        }
+
+        if (_openRecueil is not null)
+        {
+            ShowPoetryPane(PoetryPane.Bookshelf);
+            e.Handled = true;
+        }
+    }
+
+    // Tab in the verse box indents a line rather than throwing the caret away. This TextBox has no
+    // AcceptsTab member (same absent property as PlaceholderText — MC3072), so the key is taken on the
+    // tunnel, before the focus manager can move the caret out of the poem.
+    private void PoemTextInput_OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Tab) return;
+
+        e.Handled = true;
+        var box = PoemTextInput;
+        var start = box.SelectionStart;
+        var taken = box.SelectionLength;
+        box.Text = box.Text.Remove(start, taken).Insert(start, "\t");
+        box.Select(start + 1, 0);
+    }
+
+    // The verse TextBox only hit-tests over the text it already holds — its height follows the glyphs, so
+    // the empty lower half of the page was inert and the caret could only be placed by striking an existing
+    // letter. A click on the card that does not rise from a real control (Button/ComboBox/another field all
+    // derive from Control and keep their own click) now focuses the verse and parks the caret at its end,
+    // making the whole card the typing zone.
+    private void PoemEditorCard_OnClick(object sender, MouseButtonEventArgs e)
+    {
+        if (_selectedPoem is null) return;
+
+        // Walk up from the hit element only as far as the card itself: the view's root is a UserControl,
+        // which is a Control, so an unbounded walk would bail at the top and never route the click.
+        var cardRoot = sender as DependencyObject;
+        for (var s = e.OriginalSource as DependencyObject; s is not null && !ReferenceEquals(s, cardRoot); s = VisualTreeHelper.GetParent(s))
+        {
+            if (s is Control) return;
+        }
+
+        PoemTextInput.Focus();
+        PoemTextInput.Select(PoemTextInput.Text.Length, 0);
+    }
+
     // Builds the horizontal shelf of recueil covers.
     private void RefreshBookshelf()
     {
         var allPoems = _poemRepository.GetAll();
         var recueils = _recueilRepository.GetAll();
 
-        // GetAl sorts by title, which would leave the catch-all standing among the real recueils (and, now
-        // that it reads "Sans classement", first of all). It is pulled out of the loop and appended last so
-        // it always reads as the overflow shelf it is, not as one of the user's own books.
+        // GetAl sorts by title, which would leave the catch-all standing among the real recueils. It is
+        // pulled out of that order and pinned at the head of the row: the overflow shelf reads first, then
+        // the user's own books, then the create card.
         RecueilCoverItem? unclassifiedCover = null;
         var covers = new List<RecueilCoverItem>();
         foreach (var r in recueils)
@@ -1946,14 +2057,15 @@ public partial class JournauxView : UserControl, ISearchNavigable
             else covers.Add(cover);
         }
 
-        if (unclassifiedCover is not null) covers.Add(unclassifiedCover);
+        if (unclassifiedCover is not null) covers.Insert(0, unclassifiedCover);
 
         // The "+ Nouveau recueil" card sits last: poe3 draws it with the same hatch as the catch-all
         // cover and no dashed frame — the centred label alone marks it.
         covers.Add(new RecueilCoverItem(null, "+ Nouveau recueil", "", HatchedPatternBrush, IsNewCard: true, IsUnclassified: false));
 
+        // No shelf-wide count label: poe3 lets each cover carry its own state ("Vide", "3 poèmes") and
+        // the header stays spare, so there is no count element to write to.
         RecueilCoverList.ItemsSource = covers;
-        BookshelfCount.Text = covers.Count == 1 ? "1 recueil" : $"{covers.Count} recueils";
     }
 
     // Opens a recueil as a "book": shows its summary and all its poems as cards.
@@ -1999,11 +2111,11 @@ public partial class JournauxView : UserControl, ISearchNavigable
 
         if (sender is not FrameworkElement { DataContext: RecueilCoverItem item }) return;
 
-        // The "+ Nouveau recueil" card opens the fly-out on its inline create form instead of a book.
+        // The "+ Nouveau recueil" card is the shelf's own create affordance: it drops the caret into the
+        // field beside the title, where the name is typed, instead of hiding the form behind the fly-out.
         if (item.IsNewCard)
         {
-            SetPoetryMenuOpen(true);
-            NewRecueilTitleInput.Focus();
+            ShelfNewRecueilInput.Focus();
             return;
         }
 
@@ -2169,18 +2281,6 @@ public partial class JournauxView : UserControl, ISearchNavigable
                 break;
         }
 
-        // The fly-out's management row mirrors whichever recueil is picked here: rename and delete act on
-        // this same selection, so the row becomes visible with its title prefilled, and hides for the
-        // "Tout" / "Sans recueil" pseudo-filters, which name no editable recueil.
-        if (item.Kind == RecueilFilterKind.Recueil && item.Recueil is { } picked)
-        {
-            RecueilManagePanel.Visibility = Visibility.Visible;
-            RecueilRenameInput.Text = picked.Title;
-        }
-        else
-        {
-            RecueilManagePanel.Visibility = Visibility.Collapsed;
-        }
     }
 
     // Shows every poem that has no recueil assigned, in the book pane.
@@ -2228,76 +2328,138 @@ public partial class JournauxView : UserControl, ISearchNavigable
         _ => "Tout"
     };
 
-    private void NewRecueilButton_OnClick(object sender, RoutedEventArgs e)
+    // The shelf's inline create. Comitting refreshes the covers at once, so the new book appears the
+    // moment it exists: the fly-out form left the complaint that a created recueil showed nowhere,
+    // because the only shelf that could show it had to be reopened first.
+    private void NewRecueilButton_OnClick(object sender, RoutedEventArgs e) => CreateRecueilFromShelf();
+
+    private void ShelfNewRecueilInput_OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        var title = NewRecueilTitleInput.Text.Trim();
+        if (e.Key != Key.Enter) return;
+
+        e.Handled = true;
+        CreateRecueilFromShelf();
+    }
+
+    private void CreateRecueilFromShelf()
+    {
+        var title = ShelfNewRecueilInput.Text.Trim();
         if (title.Length == 0) return;
 
         _recueilRepository.Add(new Recueil { Title = title, CreatedAt = DateTime.Now });
-        NewRecueilTitleInput.Clear();
+        ShelfNewRecueilInput.Clear();
+        ShelfNewRecueilInput.Focus();
+
+        RefreshBookshelf();
         RefreshRecueilFilterList();
     }
 
-    private void RecueilRenameButton_OnClick(object sender, RoutedEventArgs e) => ApplyRecueilRename();
-
-    private void RecueilRenameInput_OnLostFocus(object sender, RoutedEventArgs e) => ApplyRecueilRename();
-
-    private void ApplyRecueilRename()
+    // The ✎ chip on a cover opens the rename bar prefilled with that cover's own title. Renaming is an
+    // action on a book, so it belongs on the book's cover — no longer coupled to the create control, and
+    // no longer reachable only after opening some other book and walking back out.
+    private void RenameRecueilCover_OnClick(object sender, RoutedEventArgs e)
     {
-        if (_selectedRecueilFilterItem?.Kind is not RecueilFilterKind.Recueil || _selectedRecueilFilterItem.Recueil is not { } recueil) return;
+        if (sender is not FrameworkElement { DataContext: RecueilCoverItem { Recueil: { } recueil } }) return;
 
-        var title = RecueilRenameInput.Text.Trim();
-        if (title.Length == 0)
+        _shelfManagedRecueilId = recueil.Id;
+        ShelfManageBar.Visibility = Visibility.Visible;
+        ShelfRenameInput.Text = recueil.Title;
+        ShelfRenameInput.Focus();
+        ShelfRenameInput.SelectAll();
+    }
+
+    private void ShelfRenameButton_OnClick(object sender, RoutedEventArgs e) => ApplyShelfRename();
+
+    private void ShelfRenameInput_OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        switch (e.Key)
         {
-            RecueilRenameInput.Text = recueil.Title;
-            return;
+            case Key.Enter:
+                e.Handled = true;
+                ApplyShelfRename();
+                break;
+            case Key.Escape:
+                e.Handled = true;
+                CancelShelfManage();
+                break;
         }
-
-        if (title != recueil.Title)
-        {
-            _recueilRepository.Update(recueil.Id, title);
-            _selectedRecueilFilterItem!.Recueil!.Title = title;
-        }
-
-        RecueilRenameInput.Text = title;
-        RefreshRecueilFilterList();
-        RecueilFilterList.SelectedItem = _selectedRecueilFilterItem;
     }
 
-    private void RecueilDeleteButton_OnClick(object sender, RoutedEventArgs e)
+    private void ShelfManageCancel_OnClick(object sender, RoutedEventArgs e) => CancelShelfManage();
+
+    private void CancelShelfManage()
     {
-        if (_selectedRecueilFilterItem?.Kind is not RecueilFilterKind.Recueil || _selectedRecueilFilterItem.Recueil is not { } recueil) return;
-
-        var poemsInRecueil = _poemRepository.GetAll().Where(p => p.RecueilId == recueil.Id).ToList();
-        var message = poemsInRecueil.Count == 0
-            ? $"Supprimer le recueil « {recueil.Title} » ? Cette action est irréversible."
-            : $"Supprimer le recueil « {recueil.Title} » ? Ses {poemsInRecueil.Count} poème(s) seront conservés mais désassignés.";
-
-        if (MessageBox.Show(message, "Supprimer le recueil", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-
-        // Keep the poems, just unassign them from the deleted recueil.
-        _poemRepository.ClearRecueilForRecueilId(recueil.Id);
-        _recueilRepository.Delete(recueil.Id);
-
-        _selectedRecueilFilterItem = null;
-        RecueilFilterList.SelectedItem = null;
-        RecueilManagePanel.Visibility = Visibility.Collapsed;
-        RefreshRecueilFilterList();
+        _shelfManagedRecueilId = null;
+        ShelfManageBar.Visibility = Visibility.Collapsed;
     }
 
-    private void NewPoemButton_OnClick(object sender, RoutedEventArgs e)
+    private void ApplyShelfRename()
     {
-        var title = NewPoemTitleInput.Text.Trim();
+        if (_shelfManagedRecueilId is not { } id) return;
+
+        var title = ShelfRenameInput.Text.Trim();
         if (title.Length == 0) return;
 
+        _recueilRepository.Update(id, title);
+
+        if (_openRecueil?.Id == id)
+        {
+            _openRecueil.Title = title;
+            BookTitle.Text = title;
+            BookRenameInput.Text = title;
+        }
+
+        CancelShelfManage();
+        RefreshBookshelf();
+        RefreshRecueilFilterList();
+    }
+
+    // No title field above the button: the poem is created straight away under a placeholder title and
+    // opens for editing, where a title belongs. Asking for a name before the poem existed read as a
+    // hurdle to clear, not as creation.
+    private void NewPoemButton_OnClick(object sender, RoutedEventArgs e)
+    {
         // A new poem lands in the open recueil, or in the always-present "Sans classement" one.
         var recueilId = _openRecueil?.Id ?? GetUnclassifiedRecueil().Id;
-        var poem = new Poem { Title = title, RecueilId = recueilId, CreatedAt = DateTime.Now };
+        var poem = new Poem { Title = "Nouveau poème", RecueilId = recueilId, CreatedAt = DateTime.Now };
         poem.Id = _poemRepository.Add(poem);
 
-        NewPoemTitleInput.Clear();
         _openRecueil = _recueilRepository.GetAll().First(r => r.Id == recueilId);
+        AddPoemCardToList(poem, _openRecueil.Title);
         OpenPoemPage(poem);
+
+        PoemTitleInput.Focus();
+        PoemTitleInput.SelectAll();
+    }
+
+    // A created poem must stand in the list the moment it exists. The ItemsControl does not watch the List
+    // it was handed, so adding to the bound list after the fact paints nothing — the list is rebuilt from
+    // the repository (which already holds the new poem) and reassigned, the same way every other site does it.
+    private void AddPoemCardToList(Poem poem, string recueilName)
+    {
+        var poems = _openRecueil is null
+            ? _poemRepository.GetAll().ToList()
+            : _poemRepository.GetAll().Where(p => p.RecueilId == _openRecueil.Id).ToList();
+
+        PoemCardList.ItemsSource = poems.Select(p => new PoemCardItem(
+            p, p.Title, recueilName,
+            p.Text.Length > 160 ? p.Text[..160].Trim() + "…" : p.Text)).ToList();
+    }
+
+    // Typing the title on the page renames the row beside it as one types.
+    private void PoemTitleInput_OnTextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_selectedPoem is null) return;
+
+        _selectedPoem.Title = PoemTitleInput.Text;
+        if (PoemCardList.ItemsSource is not IEnumerable<PoemCardItem> cards) return;
+
+        foreach (var card in cards)
+        {
+            if (card.Poem.Id != _selectedPoem.Id) continue;
+            card.Title = PoemTitleInput.Text;
+            break;
+        }
     }
 
     private void OpenPoemPage(Poem? poem)
@@ -2333,7 +2495,15 @@ public partial class JournauxView : UserControl, ISearchNavigable
         if (poem is null) return;
 
         PoemTextInput.TextAlignment = Enum.Parse<TextAlignment>(poem.TextAlignment);
-        PoemTextInput.Margin = new Thickness(poem.Margin, 0, poem.Margin, 0);
+        // "Marges" is a page/reading margin: it must breathe the verse away from the frame from the INSIDE, over a
+        // 14/12 base padding, so it can never shrink the box itself. Driving the OUTER Margin instead scaled the
+        // whole painted rectangle (and, the box now being full-bleed, looked like it did nothing to the text) —
+        // that is exactly what took the control its baseline purpose. Padding is what a page margin acts on.
+        PoemTextInput.Padding = new Thickness(14 + poem.Margin, 12, 14 + poem.Margin, 12);
+        // The typing box is a centred reading column whose WIDTH the reader controls (base 300); the box
+        // stretches to fill the card's height so no vertical band is ever wasted.
+        PoemTextInput.Width = Math.Clamp(poem.EditorWidth, 220, 1400);
+        PoemWidthText.Text = $"{poem.EditorWidth:F0}";
         PoemTextInput.FontSize = poem.FontSize;
         PoemTextInput.FontFamily = new FontFamily(poem.FontFamily);
         PoemTextInput.FontStyle = poem.Italic ? FontStyles.Italic : FontStyles.Normal;
@@ -2348,6 +2518,7 @@ public partial class JournauxView : UserControl, ISearchNavigable
         PoemBoldButton.IsChecked = poem.Bold;
         PoemItalicButton.IsChecked = poem.Italic;
         PoemFontSizeText.Text = $"{poem.FontSize:F0}";
+        PoemMarginText.Text = $"{poem.Margin:F0}";
     }
 
     private void PopulateFontFamilies()
@@ -2368,16 +2539,55 @@ public partial class JournauxView : UserControl, ISearchNavigable
         _poemRepository.UpdateFormatting(_selectedPoem.Id, _selectedPoem.TextAlignment, _selectedPoem.Margin, _selectedPoem.FontSize, _selectedPoem.FontFamily, _selectedPoem.Bold, _selectedPoem.Italic);
     }
 
-    private void PoemMarginIncreaseButton_OnClick(object sender, RoutedEventArgs e) => AdjustPoemMargin(20);
-    private void PoemMarginDecreaseButton_OnClick(object sender, RoutedEventArgs e) => AdjustPoemMargin(-20);
+    // The step was too coarse to place a verse and the range too short to be of any use; the readout now
+    // shows where the margin stands and "0" drops it back in one press.
+    private void PoemMarginIncreaseButton_OnClick(object sender, RoutedEventArgs e) => AdjustPoemMargin(10);
+    private void PoemMarginDecreaseButton_OnClick(object sender, RoutedEventArgs e) => AdjustPoemMargin(-10);
+    private void PoemMarginResetButton_OnClick(object sender, RoutedEventArgs e) => SetPoemMargin(0);
+
+    // The window width is the second, separate axis: base 900, widened/narrowed by ±40, floored so the
+    // column never collapses to a sliver and capped so it stays inside the card.
+    private const double DefaultEditorWidth = 900;
+    private void PoemWidthIncreaseButton_OnClick(object sender, RoutedEventArgs e) => AdjustPoemWidth(40);
+    private void PoemWidthDecreaseButton_OnClick(object sender, RoutedEventArgs e) => AdjustPoemWidth(-40);
+    private void PoemWidthResetButton_OnClick(object sender, RoutedEventArgs e) => SetPoemWidth(DefaultEditorWidth);
 
     private void AdjustPoemMargin(double delta)
     {
         if (_selectedPoem is null) return;
+        SetPoemMargin(_selectedPoem.Margin + delta);
+    }
 
-        _selectedPoem.Margin = Math.Clamp(_selectedPoem.Margin + delta, 0, 160);
+    private void AdjustPoemWidth(double delta)
+    {
+        if (_selectedPoem is null) return;
+        SetPoemWidth(_selectedPoem.EditorWidth + delta);
+    }
+
+    private void SetPoemMargin(double margin)
+    {
+        if (_selectedPoem is null) return;
+
+        _selectedPoem.Margin = Math.Clamp(margin, 0, 400);
         ApplyPoemFormatting(_selectedPoem);
-        _poemRepository.UpdateFormatting(_selectedPoem.Id, _selectedPoem.TextAlignment, _selectedPoem.Margin, _selectedPoem.FontSize, _selectedPoem.FontFamily, _selectedPoem.Bold, _selectedPoem.Italic);
+        PersistEditorLayout();
+    }
+
+    private void SetPoemWidth(double width)
+    {
+        if (_selectedPoem is null) return;
+
+        _selectedPoem.EditorWidth = Math.Clamp(width, 220, 1400);
+        ApplyPoemFormatting(_selectedPoem);
+        PersistEditorLayout();
+    }
+
+    // Both layout axes are stored together; nudging one rewrites the two layout columns and leaves the
+    // font/alignment row untouched.
+    private void PersistEditorLayout()
+    {
+        if (_selectedPoem is null) return;
+        _poemRepository.UpdateLayout(_selectedPoem.Id, _selectedPoem.Margin, _selectedPoem.EditorWidth);
     }
 
     private void PoemFontSizeIncreaseButton_OnClick(object sender, RoutedEventArgs e) => AdjustPoemFontSize(1);

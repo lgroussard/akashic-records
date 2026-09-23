@@ -13,8 +13,12 @@ public sealed class Poem
     public DateTime CreatedAt { get; set; }
     // "Left", "Center", "Right" or "Justify" - stored as a string to keep this project WPF-independent.
     public string TextAlignment { get; set; } = "Center";
-    // Left/right margin in pixels applied to the poem text.
+    // Left/right margin in pixels applied to the poem text (the INTERNAL padding, how far the verse
+    // breathes from the frame). Independent of the window width.
     public double Margin { get; set; }
+    // The width of the typing window itself, in pixels. Base 900; the user widens/narrows it from the
+    // toolbar. Held per-poem so each returns to the column the reader left it at.
+    public double EditorWidth { get; set; } = 900;
     // Per-poem text styling.
     public double FontSize { get; set; } = 19;
     public string FontFamily { get; set; } = "Georgia";
