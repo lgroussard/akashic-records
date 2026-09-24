@@ -13,7 +13,8 @@
         WindowStartupLocation="Manual"
         Closing="SettingsView_OnClosing">
     <Border Background="#F21A1A2E" BorderBrush="#553B82F6" BorderThickness="1"
-            CornerRadius="8" Padding="0" Width="560" Height="520" Margin="0,0,24,0">
+            CornerRadius="8" Padding="0" Width="560" Height="560" Margin="0,0,24,0">
+        <Grid>
         <ScrollViewer VerticalScrollBarVisibility="Auto" PanningMode="VerticalOnly">
             <StackPanel Margin="24,20">
                 <TextBlock Text="PARAMÈTRES" FontSize="20" FontWeight="Bold" Foreground="White" Margin="0,0,0,4"/>
@@ -55,13 +56,26 @@
                 <StackPanel Orientation="Horizontal" Margin="0,12,0,4">
                     <Button x:Name="SaveButton" Content="Enregistrer"
                             Style="{StaticResource ChipButtonStyle}" Padding="16,6" Click="SaveButton_OnClick"/>
-                    <Button x:Name="TestButton" Content="Tester" Margin="8,0,0,0"
-                            Style="{StaticResource MiniButtonStyle}" Click="TestButton_OnClick"/>
+                    <Button x:Name="TestTmdbButton" Content="Tester TMDB" Margin="8,0,0,0"
+                            Style="{StaticResource MiniButtonStyle}" Click="TestTmdbButton_OnClick"/>
+                    <Button x:Name="TestRawgButton" Content="Tester RAWG" Margin="8,0,0,0"
+                            Style="{StaticResource MiniButtonStyle}" Click="TestRawgButton_OnClick"/>
                 </StackPanel>
 
                 <TextBlock x:Name="StatusText" TextWrapping="Wrap" Foreground="#7FB0FF"
                            LineHeight="16" Margin="0,10,0,0" FontSize="12"/>
+                <TextBlock x:Name="TmdbStatusText" TextWrapping="Wrap" Foreground="#7FB0FF"
+                           LineHeight="16" Margin="0,6,0,0" FontSize="12"/>
+                <TextBlock x:Name="RawgStatusText" TextWrapping="Wrap" Foreground="#7FB0FF"
+                           LineHeight="16" Margin="0,4,0,0" FontSize="12"/>
             </StackPanel>
         </ScrollViewer>
+        <!-- WindowStyle="None" means there is no OS title-bar close box; pin one top-right over the
+             scrolling content. Uses the x glyph (multiplication sign), which the app font renders. -->
+        <Button x:Name="CloseButton" Content="&#215;" ToolTip="Fermer" HorizontalAlignment="Right"
+                VerticalAlignment="Top" Margin="0,8,12,0" Width="28" Height="28" Padding="0"
+                Background="Transparent" BorderThickness="0" Foreground="#AAFFFFFF" FontSize="18"
+                Cursor="Hand" Click="CloseButton_OnClick"/>
+        </Grid>
     </Border>
 </Window>

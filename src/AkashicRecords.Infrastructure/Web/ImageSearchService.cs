@@ -180,30 +180,46 @@ public sealed class ImageSearchService
         return (data, extension);
     }
 
-    // Verifies that the configured TMDB key works, returning a human-readable status.
-    //    // Returns one of:
-    //    //   "ok"        - TMDB returned a usable poster URL
-    //    //   "no-result" - TMDB is reachable but found nothing for this title
-    //    //   "error:..." - TMDB is configured but rejected the request (e.g. bad key)
-    public async Task<string> TestTmdbAsync(string title, ImageSearchKind kind)
+    // Verifies that a media key actually yields a downloadable cover, mirroring production: the
+    // API-specific resolver (no silent Wikipedia fallback) finds the source, then the bytes are
+    // really fetched. Unlike a reachability ping this only returns "ok" when real image bytes came
+    // back, so it never reports a working key that still finds nothing inside the app.
+    // Returns "ok" | "no-result" | "error: ...".
+    public async Task<string> TestImageLookupAsync(string title, ImageSearchKind kind)
     {
-        if (string.IsNullOrWhiteSpace(_tmdbApiKey))
-            return "error: no TMDB key configured";
+        if (!NetworkInterface.GetIsNetworkAvailable()) return "error: réseau indisponible";
+
+        if (kind is ImageSearchKind.Film or ImageSearchKind.AnimatedFilm or ImageSearchKind.Anime
+            && string.IsNullOrWhiteSpace(_tmdbApiKey))
+            return "error: aucune clé TMDB configurée";
+
+        if (kind is ImageSearchKind.VideoGame && string.IsNullOrWhiteSpace(_rawgApiKey))
+            return "error: aucune clé RAWG configurée";
 
         try
         {
-            var searchType = kind is ImageSearchKind.Anime ? "tv" : "movie";
-            var hit = await FindTmdbMovieAsync(title, searchType, default);
-            if (hit is null) return "no-result";
-
-            if (hit.PosterPath is not null) return "ok";
-
-            if (!string.IsNullOrWhiteSpace(hit.OriginalTitle))
+            var ct = default(CancellationToken);
+            // Call the exact per-API resolver the app uses, so a valid key that finds nothing cannot
+            // be masked by the generic no-key Wikipedia fallback.
+            var imageUrl = kind switch
             {
-                var hit2 = await FindTmdbMovieAsync(hit.OriginalTitle, searchType, default);
-                if (hit2?.PosterPath is not null) return "ok";
-            }
-            return "no-result";
+                ImageSearchKind.Film or ImageSearchKind.AnimatedFilm or ImageSearchKind.Anime
+                    => await TryFindTmdbImageUrlAsync(title, kind, ct),
+                ImageSearchKind.VideoGame => await RawgImageUrlAsync(title, ct),
+                _ => await FindImageUrlAsync(title, kind, ct)
+            };
+            if (imageUrl is null) return "no-result";
+
+            using var response = await Http.GetAsync(imageUrl, ct);
+            if (!response.IsSuccessStatusCode)
+                return $"error: téléchargement HTTP {(int)response.StatusCode}";
+
+            var contentType = response.Content.Headers.ContentType?.MediaType;
+            if (contentType is null || !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+                return "no-result";
+
+            var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+            return bytes.Length > 1000 ? "ok" : "no-result";
         }
         catch (Exception ex)
         {

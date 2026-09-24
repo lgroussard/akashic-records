@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using AkashicRecords.Infrastructure.Configuration;
 
 namespace AkashicRecords.App;
 
@@ -40,6 +41,27 @@ public partial class App : Application
         var parts = target.Split(':', 2);
         var section = parts[0];
         var subTab = parts.Length > 1 ? parts[1] : null;
+
+        // The settings window is a top-level Window, not a section hosted inside MainWindow, so it
+        // renders itself and is captured whole (the generic path below only renders MainWindow.Content).
+        if (section.Equals("Settings", StringComparison.OrdinalIgnoreCase))
+        {
+            var settings = new Views.SettingsView(new ConfigService().Load(), new ConfigService());
+            settings.WindowStartupLocation = WindowStartupLocation.Manual;
+            settings.Left = 0;
+            settings.Top = 0;
+            settings.Show();
+            var settingsSettle = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(900) };
+            settingsSettle.Tick += (_, _) =>
+            {
+                settingsSettle.Stop();
+                try { CaptureElement((FrameworkElement)settings.Content, outputPath); }
+                catch (Exception ex) { LogCrash(ex); }
+                finally { Shutdown(); }
+            };
+            settingsSettle.Start();
+            return;
+        }
 
         var window = new MainWindow(screenshotMode: true)
         {

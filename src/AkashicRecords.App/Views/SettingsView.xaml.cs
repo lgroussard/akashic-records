@@ -35,38 +35,80 @@ public partial class SettingsView : Window
         StatusText.Foreground = System.Windows.Media.Brushes.ForestGreen;
     }
 
-    private async void TestButton_OnClick(object sender, RoutedEventArgs e)
+    private async void TestTmdbButton_OnClick(object sender, RoutedEventArgs e)
     {
-        StatusText.Text = "Test de TMDB en cours…";
-        StatusText.Foreground = System.Windows.Media.Brushes.LightGoldenrodYellow;
-
-        if (string.IsNullOrWhiteSpace(_config.TmdbApiKey))
+        var key = TmdbKeyInput.Text.Trim();
+        if (key.Length == 0)
         {
-            StatusText.Text = "Entrez d'abord une clé TMDB, puis testez.";
-            StatusText.Foreground = System.Windows.Media.Brushes.OrangeRed;
+            TmdbStatusText.Text = "TMDB : entrez d'abord une clé.";
+            TmdbStatusText.Foreground = System.Windows.Media.Brushes.OrangeRed;
             return;
         }
 
-        var service = new ImageSearchService(_config.TmdbApiKey);
-        var status = await service.TestTmdbAsync("Your Name", ImageSearchKind.Anime);
-
-        if (status == "ok")
+        TestTmdbButton.IsEnabled = false;
+        TmdbStatusText.Text = "TMDB : test en cours…";
+        TmdbStatusText.Foreground = System.Windows.Media.Brushes.LightGoldenrodYellow;
+        try
         {
-            StatusText.Text = "TMDB fonctionne : une affiche a été trouvée. Les couvertures de films s'ajouteront automatiquement.";
-            StatusText.Foreground = System.Windows.Media.Brushes.ForestGreen;
+            // Tests the TMDB path in isolation (no Wikipedia fallback) with a real download,
+            // reading the field, so it verifies what is typed and not only what was saved.
+            var status = await new ImageSearchService(key).TestImageLookupAsync("Inception", ImageSearchKind.Film);
+            ApplyTestStatus(TmdbStatusText, status, "TMDB");
         }
-        else if (status == "no-result")
+        finally
         {
-            StatusText.Text = "TMDB est actif mais n'a rien trouvé pour ce titre. Essayez un autre titre.";
-            StatusText.Foreground = System.Windows.Media.Brushes.OrangeRed;
-        }
-        else
-        {
-            // status starts with "error:" — TMDB rejected the request (clé invalide, etc.).
-            StatusText.Text = $"TMDB ne répond pas : {status}";
-            StatusText.Foreground = System.Windows.Media.Brushes.OrangeRed;
+            TestTmdbButton.IsEnabled = true;
         }
     }
+
+    private async void TestRawgButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var key = RawgKeyInput.Text.Trim();
+        if (key.Length == 0)
+        {
+            RawgStatusText.Text = "RAWG : entrez d'abord une clé.";
+            RawgStatusText.Foreground = System.Windows.Media.Brushes.OrangeRed;
+            return;
+        }
+
+        TestRawgButton.IsEnabled = false;
+        RawgStatusText.Text = "RAWG : test en cours…";
+        RawgStatusText.Foreground = System.Windows.Media.Brushes.LightGoldenrodYellow;
+        try
+        {
+            var status = await new ImageSearchService(null, key).TestImageLookupAsync("Celeste", ImageSearchKind.VideoGame);
+            ApplyTestStatus(RawgStatusText, status, "RAWG");
+        }
+        finally
+        {
+            TestRawgButton.IsEnabled = true;
+        }
+    }
+
+    // Shared rendering for the two API tests. The service returns "ok" | "no-result" | "error: ...";
+    // "ok" already proves a real image was downloaded, so it is the only green state.
+    private static void ApplyTestStatus(TextBlock target, string status, string api)
+    {
+        switch (status)
+        {
+            case "ok":
+                target.Text = $"{api} : OK — une couverture réelle a été téléchargée, la clé fonctionne.";
+                target.Foreground = System.Windows.Media.Brushes.ForestGreen;
+                break;
+            case "no-result":
+                target.Text = $"{api} : clé acceptée mais AUCUNE couverture trouvée pour le titre d'essai.";
+                target.Foreground = System.Windows.Media.Brushes.OrangeRed;
+                break;
+            default:
+                target.Text = $"{api} : {status}";
+                target.Foreground = System.Windows.Media.Brushes.OrangeRed;
+                break;
+        }
+    }
+
+    // The window has WindowStyle="None" (no OS chrome), so its only close affordance is the pinned
+    // top-right x. Matches the hide-on-close behaviour of SettingsView_OnClosing.
+    private void CloseButton_OnClick(object sender, RoutedEventArgs e) => Hide();
 
     // Lets MainWindow truly close the window on real app exit.
     public void ForceClose()
