@@ -346,8 +346,7 @@ public partial class CollectionsView : UserControl, ISearchNavigable
         }
     }
 
-    // A work card: cover on top (or a placeholder), title always visible below it, plus a
-    // rating/observation-count preview badge row - never cover-OR-title like the previous design.
+    // A work card: cover on top (or a placeholder), title, then a star rating and observation-count row.
     private Button CreateChip(Artwork film, IReadOnlyDictionary<int, double> ratings, IReadOnlyDictionary<int, int> observationCounts)
     {
         var chip = new Button
@@ -378,12 +377,14 @@ public partial class CollectionsView : UserControl, ISearchNavigable
             HorizontalAlignment = HorizontalAlignment.Center
         };
 
+        // Cover + title + a star rating / observation-count row, as the mockup shows. The count uses
+        // plain text ("N obs.") not an emoji, which renders as tofu in this app's font.
         var meta = new StackPanel { Margin = new Thickness(8, 7, 8, 9), HorizontalAlignment = HorizontalAlignment.Stretch };
         meta.Children.Add(title);
 
         var badges = new List<string>();
-        if (ratings.TryGetValue(film.Id, out var avg)) badges.Add($"★ {avg:0.0}");
-        if (observationCounts.TryGetValue(film.Id, out var obsCount) && obsCount > 0) badges.Add($"📝 {obsCount}");
+        if (ratings.TryGetValue(film.Id, out var avg)) badges.Add($"\u2605 {avg:0.0}");
+        if (observationCounts.TryGetValue(film.Id, out var obsCount) && obsCount > 0) badges.Add($"{obsCount} obs.");
 
         if (badges.Count > 0)
         {
@@ -421,11 +422,11 @@ public partial class CollectionsView : UserControl, ISearchNavigable
     {
         var menu = new ContextMenu();
 
-        var rename = new MenuItem { Header = "Rename" };
+        var rename = new MenuItem { Header = "Renommer" };
         rename.Click += (_, _) => RenameItem(film);
         menu.Items.Add(rename);
 
-        var delete = new MenuItem { Header = "Delete" };
+        var delete = new MenuItem { Header = "Supprimer" };
         delete.Click += (_, _) => DeleteItem(film);
         menu.Items.Add(delete);
 
@@ -434,7 +435,7 @@ public partial class CollectionsView : UserControl, ISearchNavigable
 
     private void RenameItem(Artwork film)
     {
-        var newTitle = PromptForText("Rename", $"New name for \"{film.Title}\":", film.Title);
+        var newTitle = PromptForText("Renommer", $"Nouveau nom pour « {film.Title} » :", film.Title);
         if (newTitle is null) return;
 
         newTitle = newTitle.Trim();
@@ -448,7 +449,7 @@ public partial class CollectionsView : UserControl, ISearchNavigable
 
     private void DeleteItem(Artwork film)
     {
-        if (MessageBox.Show($"Delete \"{film.Title}\"? This cannot be undone.", "Delete item",
+        if (MessageBox.Show($"Supprimer « {film.Title} » ? Cette action est irreversible.", "Supprimer une oeuvre",
                 MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
 
         if (film.CoverImagePath is { } path) MediaStorage.DeleteFile(path);
@@ -473,7 +474,7 @@ public partial class CollectionsView : UserControl, ISearchNavigable
         var textBox = new TextBox { Text = initial, Margin = new Thickness(0, 0, 0, 8) };
         var okButton = new Button { Content = "OK", Width = 80, IsDefault = true };
         okButton.Click += (_, _) => window.DialogResult = true;
-        var cancelButton = new Button { Content = "Cancel", Width = 80, Margin = new Thickness(8, 0, 0, 0), IsCancel = true };
+        var cancelButton = new Button { Content = "Annuler", Width = 80, Margin = new Thickness(8, 0, 0, 0), IsCancel = true };
         window.Content = new StackPanel
         {
             Margin = new Thickness(16),
@@ -809,7 +810,11 @@ public partial class CollectionsView : UserControl, ISearchNavigable
         };
 
         var item = new WatchlistItem { Title = title, Category = category, Priority = priority, AddedAt = DateTime.Now };
-        _watchlistRepository.Add(item);
+        // Back-fill the generated id: Add returns it but does not write it onto the object, and the cover
+        // fetch below keys on item.Id. Dropping the return (as here used to) left Id=0, so the web poster
+        // was downloaded yet UpdateCover hit "WHERE Id = 0" — zero rows — leaving the row coverless with no
+        // error and no log. Mirrors the artwork path (ConfirmAddButton_OnClick) which captures the id.
+        item.Id = _watchlistRepository.Add(item);
         WatchlistTitleInput.Clear();
         RefreshWatchlist();
 

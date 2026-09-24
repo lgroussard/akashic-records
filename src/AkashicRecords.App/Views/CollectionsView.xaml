@@ -306,8 +306,9 @@
             </ScrollViewer>
         </Grid>
 
-        <!-- Add modal: title + tier pills + optional cover -->
-        <Border x:Name="AddOverlay" Background="Transparent" Visibility="Collapsed" Focusable="True"
+        <!-- Add modal: title + tier pills + optional cover. Grid.RowSpan=3 so the scrim covers the whole
+             window (header + tabs + tiers) and the card centres over everything, not just row 0. -->
+        <Border x:Name="AddOverlay" Grid.Row="0" Grid.RowSpan="3" Background="Transparent" Visibility="Collapsed" Focusable="True"
                 PreviewKeyDown="AddOverlay_OnPreviewKeyDown">
             <Grid>
                 <Border Background="{StaticResource OverlayBrush}" MouseLeftButtonDown="AddScrim_OnMouseLeftButtonDown"/>
@@ -347,7 +348,7 @@
 
                                 <TextBlock Text="COUVERTURE (OPTIONNEL)" Style="{StaticResource PanelSectionHeaderStyle}"/>
                                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                    <Button Content="📁 Choisir une image…" Click="ChooseAddCoverButton_OnClick"
+                                    <Button Content="Choisir une image…" Click="ChooseAddCoverButton_OnClick"
                                             Style="{StaticResource SecondaryButtonStyle}"/>
                                     <TextBlock x:Name="AddCoverPathText" Text="Aucune (recherche automatique)"
                                                Foreground="{StaticResource TextFaintBrush}" FontSize="11"
