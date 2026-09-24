@@ -391,12 +391,12 @@ public partial class OrganisationView : UserControl, ISearchNavigable
         SaveCurrentProject();
     }
 
-    // Hides the "Sélectionner une date" watermark once a deadline is set.
+    // The free "Echeance a definir" watermark element was dropped: the DatePicker carries its own
+    // "Selectionner une date" placeholder, so keeping a second label produced an overprinted jumble. With the
+    // control gone this is a no-op, retained at its call sites (load, date-change, clear) so those paths stay
+    // intact; nothing else reads the removed element.
     private void UpdateDeadlineWatermark()
     {
-        DeadlineWatermark.Visibility = ProjectDeadlineInput.SelectedDate is null
-            ? Visibility.Visible
-            : Visibility.Collapsed;
     }
 
     private void DeleteProjectButton_OnClick(object sender, RoutedEventArgs e)
