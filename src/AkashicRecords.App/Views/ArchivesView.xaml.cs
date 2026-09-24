@@ -1,3 +1,4 @@
+using System.IO;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
@@ -211,6 +212,15 @@ public partial class ArchivesView : UserControl, ISearchNavigable
         {
             ThumbnailPanel.Children.Add(CreateThumbnail(photo));
         }
+
+        // A blank white slab reads as a broken view; name the reason instead (empty album, no favorites,
+        // or nothing imported yet).
+        EmptyState.Visibility = _filteredPhotos.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        EmptyHintText.Text = _favoritesOnly
+            ? "Aucun favori pour l'instant. Ouvrez une photo et touchez l'etoile pour la garder ici."
+            : _albumFilterId is not null
+                ? "Cet album est vide. Importez des photos ou changez d'album."
+                : "Importez vos souvenirs pour les retrouver ici.";
     }
 
     private Button CreateThumbnail(Photo photo)
@@ -275,7 +285,9 @@ public partial class ArchivesView : UserControl, ISearchNavigable
         return button;
     }
 
-    private static readonly SolidColorBrush BorderStrong = new(Color.FromRgb(0x24, 0xFF, 0xFF));
+    // Dark card outline. The old value (0x24,0xFF,0xFF) painted a near-white cyan frame on every
+    // thumbnail; the intent (matching the card fill) is the dark slate tone below.
+    private static readonly SolidColorBrush BorderStrong = new(Color.FromRgb(0x24, 0x2A, 0x45));
 
     // Small modal text prompt; returns null if cancelled.
     private string? PromptForText(string title, string label, string initial)
@@ -495,6 +507,12 @@ public partial class ArchivesView : UserControl, ISearchNavigable
         if (string.IsNullOrEmpty(name)) return;
 
         name = name.Trim();
+        if (_albumRepo.GetAll().Any(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase)))
+        {
+            MessageBox.Show($"Un album « {name} » existe déja.", "Nouvel album", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
         _albumRepo.Add(new PhotoAlbum { Name = name, CreatedAt = DateTime.Now });
         BuildAlbumList();
         RefreshGrid();
@@ -511,15 +529,32 @@ public partial class ArchivesView : UserControl, ISearchNavigable
         };
         if (dialog.ShowDialog() != true) return;
 
+        // One unreadable file used to abort the whole batch mid-way, leaving a half-imported set with no
+        // message (the global handler swallows it). Skip the bad file, keep the rest, report at the end.
+        var failed = new List<string>();
         foreach (var fileName in dialog.FileNames)
         {
-            var relativePath = _mediaStorage.ImportArchivePhoto(fileName);
-            _photoRepo.Add(new Photo
+            try
             {
-                ImagePath = relativePath,
-                AlbumId = _albumFilterId,
-                ImportedAt = DateTime.Now
-            });
+                var relativePath = _mediaStorage.ImportArchivePhoto(fileName);
+                _photoRepo.Add(new Photo
+                {
+                    ImagePath = relativePath,
+                    AlbumId = _albumFilterId,
+                    ImportedAt = DateTime.Now
+                });
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                failed.Add(Path.GetFileName(fileName));
+            }
+        }
+
+        if (failed.Count > 0)
+        {
+            MessageBox.Show(
+                $"{failed.Count} fichier(s) n'ont pas pu être importés : {string.Join(", ", failed)}",
+                "Import partiel", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
         RefreshGrid();
@@ -555,6 +590,7 @@ public partial class ArchivesView : UserControl, ISearchNavigable
         ViewerCounterText.Text = $"{_viewerIndex + 1} / {_filteredPhotos.Count}";
 
         _isRebuildingCombos = true;
+        RebuildViewerAlbums();
         ViewerTitleInput.Text = photo.Title;
         ViewerDescriptionInput.Text = photo.Description;
         ViewerDatePicker.SelectedDate = photo.TakenDate;
@@ -564,6 +600,19 @@ public partial class ArchivesView : UserControl, ISearchNavigable
             .FindIndex(i => (int?)i.Tag == photo.AlbumId);
         if (ViewerAlbumCombo.SelectedIndex < 0) ViewerAlbumCombo.SelectedIndex = 0;
         _isRebuildingCombos = false;
+    }
+
+    // The viewer's album picker was declared but never filled, so moving a photo between albums was
+    // dead. Items hold ComboBoxItem (the selection handler and the index lookup both cast to it), so
+    // they are built here instead of via ItemsSource, which would hand back the raw objects.
+    private void RebuildViewerAlbums()
+    {
+        ViewerAlbumCombo.Items.Clear();
+        ViewerAlbumCombo.Items.Add(new ComboBoxItem { Content = "Aucun album", Tag = (int?)null });
+        foreach (var album in _albumRepo.GetAll().OrderBy(a => a.Name))
+        {
+            ViewerAlbumCombo.Items.Add(new ComboBoxItem { Content = album.Name, Tag = (int?)album.Id });
+        }
     }
 
     private Photo? CurrentPhoto =>
