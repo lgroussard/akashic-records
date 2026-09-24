@@ -606,7 +606,7 @@
                                                        VerticalAlignment="Center">
                                         <DatePickerTextBox.Style>
                                             <Style TargetType="DatePickerTextBox">
-                                                <Setter Property="Text" Value=""/>
+                                                <Setter Property="Text" Value=" "/>
                                             </Style>
                                         </DatePickerTextBox.Style>
                                     </DatePickerTextBox>
@@ -672,7 +672,7 @@
                         <Border x:Name="DayBorder" Background="{Binding Converter={StaticResource EntryDateBackgroundConverter}}"
                                 BorderBrush="Transparent" BorderThickness="1"
                                 CornerRadius="8" Padding="{TemplateBinding Padding}">
-                            <TextBlock Text="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=Content}"
+                            <TextBlock x:Name="DayText" Text="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=Content}"
                                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
@@ -688,6 +688,13 @@
                                 <Setter TargetName="DayBorder" Property="Background" Value="{StaticResource AccentBrush}"/>
                                 <Setter TargetName="DayBorder" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
                                 <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                            <!-- Days spilling from the adjacent months (the leading 31, the trailing 1-11) read as noise
+                                 next to the mockup's clean single-month grid: blank the cell, keep it for alignment. -->
+                            <Trigger Property="IsInactive" Value="True">
+                                <Setter TargetName="DayBorder" Property="Background" Value="Transparent"/>
+                                <Setter TargetName="DayBorder" Property="BorderBrush" Value="Transparent"/>
+                                <Setter TargetName="DayText" Property="Visibility" Value="Collapsed"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>

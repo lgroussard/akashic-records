@@ -50,35 +50,12 @@
                             </StackPanel>
                         </DockPanel>
 
-                        <!-- Calendar fills the remaining space (must be the last child so it doesn't overlap the header) -->
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="*"/>
-                            </Grid.RowDefinitions>
-                            <Grid Grid.Row="0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="L" Foreground="{StaticResource TextFaintBrush}" FontSize="11" HorizontalAlignment="Center"/>
-                                <TextBlock Grid.Column="1" Text="M" Foreground="{StaticResource TextFaintBrush}" FontSize="11" HorizontalAlignment="Center"/>
-                                <TextBlock Grid.Column="2" Text="M" Foreground="{StaticResource TextFaintBrush}" FontSize="11" HorizontalAlignment="Center"/>
-                                <TextBlock Grid.Column="3" Text="J" Foreground="{StaticResource TextFaintBrush}" FontSize="11" HorizontalAlignment="Center"/>
-                                <TextBlock Grid.Column="4" Text="V" Foreground="{StaticResource TextFaintBrush}" FontSize="11" HorizontalAlignment="Center"/>
-                                <TextBlock Grid.Column="5" Text="S" Foreground="{StaticResource TextFaintBrush}" FontSize="11" HorizontalAlignment="Center"/>
-                                <TextBlock Grid.Column="6" Text="D" Foreground="{StaticResource TextFaintBrush}" FontSize="11" HorizontalAlignment="Center"/>
-                            </Grid>
-                            <Calendar x:Name="EntryCalendar" Grid.Row="1" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
-                                      SelectedDatesChanged="EntryCalendar_OnSelectedDatesChanged"
-                                      CalendarDayButtonStyle="{StaticResource EntryDayButtonStyle}"
-                                      Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}"/>
-                        </Grid>
+                        <!-- Calendar fills the remaining space. The WPF Calendar already paints its own
+                             weekday header (L M M J V S D), so a manual one here was a duplicate row. -->
+                        <Calendar x:Name="EntryCalendar" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                                  SelectedDatesChanged="EntryCalendar_OnSelectedDatesChanged"
+                                  CalendarDayButtonStyle="{StaticResource EntryDayButtonStyle}"
+                                  Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}"/>
                     </DockPanel>
                 </Border>
 
@@ -111,8 +88,8 @@
                         <TextBlock Grid.Row="1" x:Name="PageDateText" Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,6,0,12"/>
 
                         <TextBox Grid.Row="2" x:Name="EntryTextInput" TextWrapping="Wrap" AcceptsReturn="True"
-                                 Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}" FontSize="14.5"
-                                 VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" Margin="0,0,0,14" LostFocus="EntryTextInput_OnLostFocus"/>
+                                 Background="{StaticResource Surface2Brush}" BorderThickness="0" Foreground="{StaticResource TextBrush}" FontSize="14.5"
+                                 VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" Padding="12,10" Margin="0,0,0,14" LostFocus="EntryTextInput_OnLostFocus"/>
 
                         <StackPanel Grid.Row="3" Margin="0,0,0,12">
                             <TextBlock Text="Tags" Style="{StaticResource PanelSectionHeaderStyle}" Margin="0,0,0,8"/>

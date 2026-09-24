@@ -81,6 +81,15 @@ public partial class JournauxView : UserControl, ISearchNavigable
     // reopening Journaux returns them there instead of always defaulting to the personal diary.
     private string? _activeTab;
 
+    // True while the sidebar is showing the standalone ("Sans recueil") list, so the persisted pointer can
+    // distinguish that view from the bookshelf (both leave _selectedPoem/_openRecueil null).
+    private bool _poetryStandaloneActive;
+
+    // Owns the on-disk write of the "last viewed item" pointer, so returning to the shelf sticks across
+    // sessions and not only within one run. The shared _config lives in MainWindow's memory otherwise, so
+    // a reopen that never tripped a section-save would keep replaying the stale poem.
+    private readonly ConfigService _configService = new();
+
     private static readonly SolidColorBrush NormalBorderBrush = new(Color.FromArgb(0x55, 0x3B, 0x82, 0xF6));
     private static readonly SolidColorBrush PendingConnectBrush = Brushes.Gold;
 
@@ -283,14 +292,19 @@ public partial class JournauxView : UserControl, ISearchNavigable
         {
             "Personal" => $"Personal:Personal:",
             "Recipes" => _selectedRecipe is null ? null : $"Recipes:Recipe:{_selectedRecipe.Id}",
-            "Poetry" => _selectedPoem is null ? null : $"Poetry:Poem:{_selectedPoem.Id}",
+            "Poetry" => _selectedPoem is not null ? $"Poetry:Poem:{_selectedPoem.Id}"
+                       : _openRecueil is not null ? $"Poetry:Recueil:{_openRecueil.Id}"
+                       : _poetryStandaloneActive ? "Poetry:Standalone:"
+                       : "Poetry:Shelf:",
             "Artistic" => _currentProject is null ? null : $"Artistic:Project:{_currentProject.Id}",
             _ => null
         };
         _config.JournauxActiveItem = payload;
     }
 
-    // Reopens the exact item the user last viewed (after the tab), mirroring ApplySearchResult.
+    // Reopens the exact item the user last viewed (after the tab), mirroring ApplySearchResult. The pointer
+    // is replayed on every Loaded, which is now correct: it always tracks the real screen (see SaveActiveItem),
+    // so returning from another section lands the user back on the very book/page they left, not the shelf.
     private void RestoreActiveItem()
     {
         if (string.IsNullOrEmpty(_config.JournauxActiveItem)) return;
@@ -314,11 +328,32 @@ public partial class JournauxView : UserControl, ISearchNavigable
                 }
                 break;
             case "Poem":
-                if (id >= 0)
+                if (id >= 0 && _poemRepository.GetById(id) is { } poem)
                 {
-                    _selectedPoem = _poemRepository.GetById(id);
+                    _selectedPoem = poem;
+                    LandOnPoetryTab();
                     RefreshPoetry();
+                    ShowPoetryPane(PoetryPane.Editor);
                 }
+                break;
+            case "Recueil":
+                if (id > 0 && _recueilRepository.GetAll().FirstOrDefault(r => r.Id == id) is { } book)
+                {
+                    _selectedPoem = null;
+                    LandOnPoetryTab();
+                    RefreshRecueilFilterList();
+                    OpenRecueilBook(book);
+                }
+                else
+                {
+                    RestorePoetryShelf();
+                }
+                break;
+            case "Standalone":
+                _selectedPoem = null;
+                LandOnPoetryTab();
+                RefreshRecueilFilterList();
+                ShowStandalonePoems();
                 break;
             case "Project":
                 if (id >= 0)
@@ -327,7 +362,30 @@ public partial class JournauxView : UserControl, ISearchNavigable
                     if (project is not null) OpenProject(project);
                 }
                 break;
+            default: // "Shelf"
+                RestorePoetryShelf();
+                break;
         }
+    }
+
+    // Ensures the poetry tab is the live one (pointer deep-links must not respect a stale JournauxActiveTab).
+    private void LandOnPoetryTab()
+    {
+        _activeTab = "Poetry";
+        _config.JournauxActiveTab = "Poetry";
+        SwitchJournalTab(PoetryJournalTab, "Poetry");
+    }
+
+    // Restores the bookshelf itself: no book open, no page open, the shelf grid in front.
+    private void RestorePoetryShelf()
+    {
+        _selectedPoem = null;
+        _openRecueil = null;
+        _poetryStandaloneActive = false;
+        LandOnPoetryTab();
+        RefreshRecueilFilterList();
+        RefreshBookshelf();
+        ShowPoetryPane(PoetryPane.Bookshelf);
     }
 
     private void JournalTypeTab_OnClick(object sender, RoutedEventArgs e)
@@ -2086,7 +2144,10 @@ public partial class JournauxView : UserControl, ISearchNavigable
             recueil.Title,
             p.Text.Length > 160 ? p.Text[..160].Trim() + "…" : p.Text)).ToList();
 
+        _poetryStandaloneActive = false;
         ShowPoetryPane(PoetryPane.Book);
+        // Remember the book so a round-trip to another section returns here, not to the shelf.
+        SaveActiveItem();
     }
 
     // True when a click was raised by a Button anywhere under the hit element, walking up the visual
@@ -2127,22 +2188,28 @@ public partial class JournauxView : UserControl, ISearchNavigable
         if (sender is FrameworkElement { DataContext: PoemCardItem { Poem: { } poem } }) OpenPoemPage(poem);
     }
 
-    private void RecueilBookshelfButton_OnClick(object sender, RoutedEventArgs e)
+    // Landing back on the shelf is an explicit "leave the book/page" gesture: the pointer must be rewritten
+    // to the shelf and persisted, otherwise the next round-trip through RestoreActiveItem would replay the
+    // book or editor that was open when the user navigated away.
+    private void GoBackToShelf()
     {
+        _selectedPoem = null;
+        _openRecueil = null;
+        _poetryStandaloneActive = false;
+        SaveActiveItem();
+        _configService.Save(_config);
         RefreshBookshelf();
         ShowPoetryPane(PoetryPane.Bookshelf);
     }
 
-    private void BookshelfBackButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        RefreshBookshelf();
-        ShowPoetryPane(PoetryPane.Bookshelf);
-    }
+    private void RecueilBookshelfButton_OnClick(object sender, RoutedEventArgs e) => GoBackToShelf();
+
+    private void BookshelfBackButton_OnClick(object sender, RoutedEventArgs e) => GoBackToShelf();
 
     private void PoemEditorBackButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (_openRecueil is not null) OpenRecueilBook(_openRecueil);
-        else { RefreshBookshelf(); ShowPoetryPane(PoetryPane.Bookshelf); }
+        else GoBackToShelf();
     }
 
     // Horizontal shelf: let the mouse wheel scroll sideways.
@@ -2294,7 +2361,10 @@ public partial class JournauxView : UserControl, ISearchNavigable
         BookDeleteButton.IsEnabled = false;
         BookSummaryInput.Text = string.Empty;
         _openRecueil = null;
+        _poetryStandaloneActive = true;
         ShowPoetryPane(PoetryPane.Book);
+        // The standalone view is a destination too: persist it so returning reopens it, not the shelf.
+        SaveActiveItem();
     }
 
     private void PoemSearchInput_OnTextChanged(object sender, TextChangedEventArgs e)
