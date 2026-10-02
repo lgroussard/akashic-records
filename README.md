@@ -62,3 +62,15 @@ src/
 ```
 
 See [HANDOFF.md](HANDOFF.md) for full architecture notes, what's implemented, and known gotchas.
+
+## Privacy Policy
+Akashic Records stores everything locally in the folder next to the executable (`data\akashic.db`, `config\config.json`, `media\`, `music\`). No account, no cloud sync.
+
+Network calls are minimal and stateless, made only when a key is configured:
+- **The Movie Database (TMDB)** — fetch film/series metadata and cover images by title.
+- **Pinterest** — fetch cover images for artworks/objects, via a per-user token.
+- **MusicBrainz + iTunes Search** — suggest similar tracks from the current title.
+
+No cookies are set by the app. Data is not sold or shared. Personal identifiers held are only what the user typed into the journals (titles, notes, photos).
+
+To clear everything: delete the `data`, `config` and `media` folders next to `AkashicRecords.App.exe`.
