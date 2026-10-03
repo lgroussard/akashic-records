@@ -228,6 +228,13 @@ public sealed class SchemaInitializer
                     AddedAt TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS DownloadFolder (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Name TEXT NOT NULL,
+                    Subfolder TEXT,
+                    SortOrder INTEGER NOT NULL DEFAULT 0
+                );
+
                 CREATE TABLE IF NOT EXISTS WatchlistItem (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     Title TEXT NOT NULL,
@@ -235,6 +242,80 @@ public sealed class SchemaInitializer
                     Priority INTEGER NOT NULL,
                     CoverImagePath TEXT,
                     AddedAt TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS BudgetCategory (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Name TEXT NOT NULL,
+                    Color TEXT NOT NULL DEFAULT '#5B8CFF',
+                    MonthlyCap TEXT,
+                    SortOrder INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE IF NOT EXISTS BudgetTransaction (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Date TEXT NOT NULL,
+                    Label TEXT NOT NULL,
+                    Amount TEXT NOT NULL,
+                    CategoryId INTEGER,
+                    Source TEXT NOT NULL DEFAULT 'manuel',
+                    ExternalId TEXT,
+                    ImportedAt TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS BudgetRule (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Keyword TEXT NOT NULL,
+                    CategoryId INTEGER NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS BudgetPlan (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Name TEXT NOT NULL,
+                    Notes TEXT NOT NULL DEFAULT '',
+                    CreatedAt TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS BudgetPlanLine (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    PlanId INTEGER NOT NULL,
+                    CategoryId INTEGER NOT NULL,
+                    MonthlyAmount TEXT NOT NULL DEFAULT '0'
+                );
+
+                CREATE TABLE IF NOT EXISTS Birthday (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Name TEXT NOT NULL,
+                    Month INTEGER NOT NULL,
+                    Day INTEGER NOT NULL,
+                    BirthYear INTEGER,
+                    Notes TEXT NOT NULL DEFAULT ''
+                );
+
+                CREATE TABLE IF NOT EXISTS CalendarEvent (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Title TEXT NOT NULL,
+                    Kind INTEGER NOT NULL,
+                    Date TEXT NOT NULL,
+                    EndDate TEXT,
+                    StartHour INTEGER,
+                    StartMinute INTEGER,
+                    RecurringYearly INTEGER NOT NULL DEFAULT 0,
+                    Location TEXT NOT NULL DEFAULT '',
+                    Notes TEXT NOT NULL DEFAULT '',
+                    CreatedAt TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS CalendarEventLink (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    OwnerType TEXT NOT NULL DEFAULT 'Event',
+                    OwnerId INTEGER NOT NULL,
+                    Kind TEXT NOT NULL,
+                    Section TEXT NOT NULL,
+                    Title TEXT NOT NULL,
+                    PrimaryId INTEGER NOT NULL,
+                    SecondaryId INTEGER,
+                    Category INTEGER
                 );
                 """;
             command.ExecuteNonQuery();
@@ -255,6 +336,10 @@ public sealed class SchemaInitializer
         AddColumnIfMissing(connection, "Poem", "Italic", "INTEGER NOT NULL DEFAULT 1");
         AddColumnIfMissing(connection, "Poem", "RichContent", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing(connection, "Poem", "EditorWidth", "REAL NOT NULL DEFAULT 900");
+        // Download items now sit in a placement zone (DownloadFolder.Id); null = the "Unfiled" bucket.
+        AddColumnIfMissing(connection, "DownloadItem", "FolderId", "INTEGER");
+        AddColumnIfMissing(connection, "CalendarEvent", "EndDate", "TEXT");
+        MigrateCalendarEventLinkOwner(connection);
 
         // The typing-window width opened at a 300 base before settling at 900. Rows seeded under that first
         // default carry 300, and ALTER's column default never rewrites existing rows — so they are lifted
@@ -286,28 +371,51 @@ public sealed class SchemaInitializer
         }
     }
 
+    // Links used to hang off events only (EventId). Birthdays gained linkable entries, and the two
+    // id spaces overlap — so rows became OwnerType/OwnerId. Dbs built under the old shape get the
+    // columns added in place, existing rows backfilled as Event links, then the dead column dropped
+    // (SQLite >= 3.35). A db that never saw the old shape skips this entirely.
+    private static void MigrateCalendarEventLinkOwner(Microsoft.Data.Sqlite.SqliteConnection connection)
+    {
+        if (HasColumn(connection, "CalendarEventLink", "OwnerType")) return;
+
+        using var addType = connection.CreateCommand();
+        addType.CommandText = "ALTER TABLE CalendarEventLink ADD COLUMN OwnerType TEXT NOT NULL DEFAULT 'Event';";
+        addType.ExecuteNonQuery();
+
+        using var addId = connection.CreateCommand();
+        addId.CommandText = "ALTER TABLE CalendarEventLink ADD COLUMN OwnerId INTEGER;";
+        addId.ExecuteNonQuery();
+
+        using var backfill = connection.CreateCommand();
+        backfill.CommandText = "UPDATE CalendarEventLink SET OwnerId = EventId WHERE OwnerId IS NULL;";
+        backfill.ExecuteNonQuery();
+
+        using var drop = connection.CreateCommand();
+        drop.CommandText = "ALTER TABLE CalendarEventLink DROP COLUMN EventId;";
+        drop.ExecuteNonQuery();
+    }
+
     // No migration framework yet - for a db created before a column existed, add it in place.
     private static void AddColumnIfMissing(Microsoft.Data.Sqlite.SqliteConnection connection, string table, string column, string sqlType)
     {
-        var hasColumn = false;
-        using (var checkCommand = connection.CreateCommand())
-        {
-            checkCommand.CommandText = $"PRAGMA table_info({table});";
-            using var reader = checkCommand.ExecuteReader();
-            while (reader.Read())
-            {
-                if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
-                {
-                    hasColumn = true;
-                    break;
-                }
-            }
-        }
-
-        if (hasColumn) return;
+        if (HasColumn(connection, table, column)) return;
 
         using var alterCommand = connection.CreateCommand();
         alterCommand.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {sqlType};";
         alterCommand.ExecuteNonQuery();
+    }
+
+    private static bool HasColumn(Microsoft.Data.Sqlite.SqliteConnection connection, string table, string column)
+    {
+        using var checkCommand = connection.CreateCommand();
+        checkCommand.CommandText = $"PRAGMA table_info({table});";
+        using var reader = checkCommand.ExecuteReader();
+        while (reader.Read())
+        {
+            if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 }

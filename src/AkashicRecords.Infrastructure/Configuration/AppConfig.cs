@@ -30,14 +30,19 @@ public sealed class AppConfig
     public string? CollectionsActiveCategory { get; set; }
     public int? CollectionsActiveFilmId { get; set; }
 
-    // Optional TMDB API key (v3, free) for movie/anime poster lookup. TMDB has no regional
-    // restriction like the Custom Search JSON API, so it's the reliable source for film covers.
-    // Leave it null/empty to use the no-key Wikipedia fallback.
+    // Budget: last sub-tab (Overview/Transactions/Plans) and the month period last shown (yyyy-MM).
+    public string? BudgetActiveTab { get; set; }
+    public string? BudgetActivePeriod { get; set; }
+
+    // Optional TMDB API key (v3, free) for movie/anime/series poster lookup. TMDB has no
+    // regional restriction like the Custom Search JSON API, so it's the reliable source for
+    // film covers. Leave it null/empty to use the no-key Wikipedia fallback. Video games
+    // never needed a key: Steam's public store search replaced RAWG (poor coverage).
     public string? TmdbApiKey { get; set; }
 
-    // Optional RAWG API key (free, from rawg.io) for video game cover lookup. Without it,
-    // video games fall back to the no-key Wikipedia search like everything else.
-    public string? RawgApiKey { get; set; }
+    // Optional Pinterest developer token (v5, free "trial" tier = 1000 req/day) used as the
+    // artistic image bank: search results + the account's own boards. Null = Wikipedia fallback.
+    public string? PinterestToken { get; set; }
 
     // Ambient desktop widgets (§45): whether each is currently shown, plus the persisted
     // daily film pick and last-known widget positions.
@@ -57,5 +62,25 @@ public sealed class AppConfig
     public string? DownloaderToolPath { get; set; }
     public string DownloaderArguments { get; set; } = "-x --audio-format mp3 --embed-thumbnail --add-metadata";
     public bool DownloaderAutoMode { get; set; }
+
+    // Calendrier (§57): notifications paramétrables à la Samsung Calendar. Each kind carries its
+    // own lead time in minutes, measured back from a reference moment — 09:00 on the item's day
+    // for all-day rows (birthdays, deadlines, all-day events), the event's clock time for timed
+    // ones. 0 = notified at the reference moment itself; a negative-effect very large value =
+    // effectively "the day before/at N days". A kind the user sets to -1 is never notified.
+    public bool CalendarNotificationsEnabled { get; set; } = true;
+    public bool CalendarDailyToastEnabled { get; set; } = true;
+    // Date of the last shown startup toast, so it appears once per day and not on every relaunch.
+    public DateTime? CalendarDailyToastDate { get; set; }
+    public int CalendarBirthdayLeadMinutes { get; set; } = 0;
+    public int CalendarDeadlineLeadMinutes { get; set; } = 2880; // 2 jours avant une échéance
+    public int CalendarLeadMinutesSortie { get; set; } = 120;
+    public int CalendarLeadMinutesPlan { get; set; } = 1440;
+    public int CalendarLeadMinutesVoyage { get; set; } = 10080; // 1 semaine avant
+    public int CalendarLeadMinutesRendezvous { get; set; } = 60;
+    public int CalendarLeadMinutesAutre { get; set; } = 1440;
+    // Keys ("Source:RefId:date") already notified — kept so a lead-time reminder fires once.
+    // Pruned of stale keys on each notification pass.
+    public List<string> CalendarNotifiedKeys { get; set; } = new();
 }
 

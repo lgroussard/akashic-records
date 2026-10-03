@@ -39,6 +39,7 @@ public partial class CollectionsView : UserControl, ISearchNavigable
     {
         [ArtworkCategory.Film] = "FILMS",
         [ArtworkCategory.FilmAnimation] = "FILMS D'ANIMATION",
+        [ArtworkCategory.TvSeries] = "SÉRIES",
         [ArtworkCategory.Anime] = "ANIME/MANGA",
         [ArtworkCategory.Livre] = "LIVRES",
         [ArtworkCategory.VideoGame] = "JEUX VIDÉO"
@@ -49,6 +50,7 @@ public partial class CollectionsView : UserControl, ISearchNavigable
     {
         [ArtworkCategory.Film] = "Vos œuvres classées par tier — cliquez une œuvre pour sa fiche.",
         [ArtworkCategory.FilmAnimation] = "Vos œuvres classées par tier — cliquez une œuvre pour sa fiche.",
+        [ArtworkCategory.TvSeries] = "Vos séries classées par tier — cliquez une série pour sa fiche.",
         [ArtworkCategory.Anime] = "Vos œuvres classées par tier — cliquez une œuvre pour sa fiche.",
         [ArtworkCategory.Livre] = "Vos œuvres classées par tier — cliquez une œuvre pour sa fiche.",
         [ArtworkCategory.VideoGame] = "Vos jeux classées par tier — cliquez un jeu pour sa fiche."
@@ -98,7 +100,7 @@ public partial class CollectionsView : UserControl, ISearchNavigable
     {
         InitializeComponent();
         _config = config;
-        _imageSearchService = new ImageSearchService(config.TmdbApiKey);
+        _imageSearchService = new ImageSearchService(config.TmdbApiKey, config.PinterestToken);
         Loaded += (_, _) =>
         {
             RestoreActiveItem();
@@ -120,19 +122,21 @@ public partial class CollectionsView : UserControl, ISearchNavigable
     // Reopens the exact category + fiche the user last viewed.
     private void RestoreActiveItem()
     {
+        // Screenshot capture drives the view itself (ShowTabForScreenshot) — replaying the persisted
+        // category here would re-check the old tab pill over the captured one (e.g. "À voir" shots).
+        if (_screenshotMode) return;
+
         if (!string.IsNullOrEmpty(_config.CollectionsActiveCategory) &&
             Enum.TryParse<ArtworkCategory>(_config.CollectionsActiveCategory, out var category))
         {
             _selectedCategory = category;
             ApplyCategoryHeader();
-            foreach (var tab in new[] { FilmsTab, FilmAnimationTab, AnimesTab, LivresTab, VideoGameTab, WatchlistTab })
+            foreach (var tab in new[] { FilmsTab, FilmAnimationTab, SeriesTab, AnimesTab, LivresTab, VideoGameTab, WatchlistTab })
             {
                 // WatchlistTab's tag ("Watchlist") isn't an ArtworkCategory, so match via TryParse.
                 tab.IsChecked = Enum.TryParse<ArtworkCategory>((string)tab.Tag, out var tabCategory) && tabCategory == _selectedCategory;
             }
         }
-
-        if (_screenshotMode) return;
 
         if (_config.CollectionsActiveFilmId is { } filmId)
         {
@@ -163,7 +167,7 @@ public partial class CollectionsView : UserControl, ISearchNavigable
         if (result.Category is int categoryInt)
         {
             var category = (ArtworkCategory)categoryInt;
-            foreach (var tab in new[] { FilmsTab, FilmAnimationTab, AnimesTab, LivresTab, VideoGameTab })
+            foreach (var tab in new[] { FilmsTab, FilmAnimationTab, SeriesTab, AnimesTab, LivresTab, VideoGameTab })
             {
                 tab.IsChecked = Enum.Parse<ArtworkCategory>((string)tab.Tag) == category;
             }
@@ -212,7 +216,7 @@ public partial class CollectionsView : UserControl, ISearchNavigable
             return;
         }
 
-        foreach (var tab in new[] { FilmsTab, FilmAnimationTab, AnimesTab, LivresTab, VideoGameTab, WatchlistTab })
+        foreach (var tab in new[] { FilmsTab, FilmAnimationTab, SeriesTab, AnimesTab, LivresTab, VideoGameTab, WatchlistTab })
         {
             tab.IsChecked = tab.Tag is string t && t == category;
         }
@@ -234,7 +238,7 @@ public partial class CollectionsView : UserControl, ISearchNavigable
     {
         if (sender is not ToggleButton clicked || clicked.Tag is not string tag) return;
 
-        foreach (var tab in new[] { FilmsTab, FilmAnimationTab, AnimesTab, LivresTab, VideoGameTab, WatchlistTab })
+        foreach (var tab in new[] { FilmsTab, FilmAnimationTab, SeriesTab, AnimesTab, LivresTab, VideoGameTab, WatchlistTab })
         {
             tab.IsChecked = tab == clicked;
         }
@@ -247,7 +251,9 @@ public partial class CollectionsView : UserControl, ISearchNavigable
             ListRoot.Visibility = Visibility.Collapsed;
             WatchlistRoot.Visibility = Visibility.Visible;
             WatchlistHeader.Visibility = Visibility.Visible;
-            TabsRow.Visibility = Visibility.Collapsed;
+            // TabsRow STAYS visible: hiding it (the old behaviour) made the Films/Séries/Anime tray
+            // vanish the moment the user clicked "À voir", with no way back except guesswork.
+            AddWorkButton.Visibility = Visibility.Collapsed; // the watchlist has its own "Ajouter"
             CategoryHeaderText.Visibility = Visibility.Collapsed;
             CategorySubText.Visibility = Visibility.Collapsed;
             RefreshWatchlist();
@@ -258,6 +264,7 @@ public partial class CollectionsView : UserControl, ISearchNavigable
         WatchlistRoot.Visibility = Visibility.Collapsed;
         WatchlistHeader.Visibility = Visibility.Collapsed;
         TabsRow.Visibility = Visibility.Visible;
+        AddWorkButton.Visibility = Visibility.Visible;
         CategoryHeaderText.Visibility = Visibility.Visible;
         CategorySubText.Visibility = Visibility.Visible;
         CloseFiche();
@@ -590,6 +597,7 @@ public partial class CollectionsView : UserControl, ISearchNavigable
     {
         ArtworkCategory.Film => ImageSearchKind.Film,
         ArtworkCategory.FilmAnimation => ImageSearchKind.AnimatedFilm,
+        ArtworkCategory.TvSeries => ImageSearchKind.TvSeries,
         ArtworkCategory.Anime => ImageSearchKind.Anime,
         ArtworkCategory.Livre => ImageSearchKind.Book,
         ArtworkCategory.VideoGame => ImageSearchKind.VideoGame,
@@ -697,6 +705,44 @@ public partial class CollectionsView : UserControl, ISearchNavigable
 
         RefreshCoverImage();
         RefreshArtworks();
+    }
+
+    // Re-runs the automatic cover lookup on demand (Steam/TMDB/MangaDex/Wikipedia chain) for the
+    // open fiche, replacing the current cover — the escape hatch when the fetch at add-time found
+    // nothing or a poor image (a title typed differently than the store's, a first lookup made
+    // before the source knew the game, etc.).
+    private async void FetchCoverWebButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_selectedFilm is not { } film) return;
+
+        var button = (Button)sender;
+        button.IsEnabled = false;
+        button.Content = "Recherche…";
+        try
+        {
+            var result = await _imageSearchService.TryFindImageAsync(film.Title, SearchKindFor(film.Category));
+            if (result is null)
+            {
+                MessageBox.Show($"Aucune couverture trouv\u00E9e pour \u00AB {film.Title} \u00BB. V\u00E9rifiez l'orthographe du titre " +
+                                "ou choisissez une couverture manuellement.",
+                    "Recherche en ligne", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            if (_selectedFilm?.Id != film.Id) return; // the fiche changed while the fetch was in flight
+
+            if (film.CoverImagePath is { } old) MediaStorage.DeleteFile(old);
+            var relativePath = _mediaStorage.ImportCoverFromBytes(result.Value.Data, result.Value.Extension);
+            _artworkRepository.UpdateCoverImage(film.Id, relativePath);
+            film.CoverImagePath = relativePath;
+
+            RefreshCoverImage();
+            RefreshArtworks();
+        }
+        finally
+        {
+            button.Content = "Chercher en ligne";
+            button.IsEnabled = true;
+        }
     }
 
     private void RemoveCoverImageButton_OnClick(object sender, RoutedEventArgs e)

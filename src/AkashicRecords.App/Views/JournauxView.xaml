@@ -605,8 +605,9 @@
                                 <Image x:Name="PoemImage" Grid.Row="2" MaxHeight="180" Margin="0,4,0,12"
                                        Stretch="Uniform" HorizontalAlignment="Center" Visibility="Collapsed"/>
 
-                                <!-- Formatting toolbar. -->
-                                <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,8">
+                                <!-- Formatting toolbar. Named so the code-behind can tell "focus left the
+                                     verse for a formatting tool" (keep the selection) from any other move. -->
+                                <StackPanel Grid.Row="3" x:Name="PoemFormattingToolbar" Orientation="Horizontal" Margin="0,0,0,8">
                                     <ToggleButton x:Name="PoemAlignLeftButton" Content="⯇≡" Tag="Left" Click="PoemAlignButton_OnClick"
                                                   Style="{StaticResource NavButtonStyle}" Padding="6,2" Margin="0,0,2,0"/>
                                     <ToggleButton x:Name="PoemAlignCenterButton" Content="≡" Tag="Center" Click="PoemAlignButton_OnClick"
@@ -650,13 +651,18 @@
                                      sinks below. The "Marges" toolbar control drives the INTERNAL padding (see
                                      ApplyPoemFormatting): it breathes the verse away from the frame — its page
                                      margin — over a 14/12 base, rather than resizing the rectangle itself. -->
-                                <TextBox Grid.Row="4" x:Name="PoemTextInput" TextWrapping="Wrap" AcceptsReturn="True"
+                                <!-- A RichTextBox, not a TextBox: only a FlowDocument carries Run-level styles,
+                                     which is what lets B/I/A+/A-/police touch a few words instead of the whole
+                                     page. The poem's BASE typography (family, size, bold, italic, alignment)
+                                     lives on the document — see PoemRichFormatting — so partial overrides and
+                                     the whole-poem toggles never fight each other. -->
+                                <RichTextBox Grid.Row="4" x:Name="PoemTextInput"
                                          Background="{StaticResource Surface2Brush}" CaretBrush="#FFFFFFFF"
                                          BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1"
                                          Padding="14,12" MinHeight="300" Width="900"
                                          HorizontalAlignment="Center" VerticalAlignment="Stretch"
-                                         Foreground="{StaticResource TextBrush}" FontSize="15"
-                                         VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"
+                                         Foreground="{StaticResource TextBrush}"
+                                         VerticalScrollBarVisibility="Auto"
                                          PreviewKeyDown="PoemTextInput_OnPreviewKeyDown"
                                          LostFocus="PoemField_OnLostFocus"/>
 
@@ -752,45 +758,27 @@
                 </Border>
             </Grid>
 
-            <!-- Archive artistique: free-form canvas linking Observations into projects -->
+            <!-- Archive artistique: the board IS the section — arrive on the canvas, switch projects from the toolbar -->
             <Grid x:Name="ArtisticJournalRoot" Visibility="Collapsed">
-                <!-- Project list: the artistic projects that live on their own free-form canvas -->
-                <Border x:Name="ProjectListRoot" Style="{StaticResource CardBorderStyle}" Padding="16" MaxWidth="420" HorizontalAlignment="Left" VerticalAlignment="Top">
-                    <Grid>
-                        <Grid.Resources>
-                            <Style TargetType="ScrollBar" BasedOn="{StaticResource ThinVerticalScrollBarStyle}"/>
-                        </Grid.Resources>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
-                        </Grid.RowDefinitions>
-
-                        <TextBlock Grid.Row="0" Text="ARCHIVE ARTISTIQUE" FontSize="15" FontWeight="SemiBold"
-                                   Foreground="{StaticResource TextBrush}" Margin="0,0,0,14"/>
-
-                        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,12">
-                            <TextBox x:Name="NewProjectTitleInput" Style="{StaticResource DarkTextBoxStyle}" Width="220" Margin="0,0,8,0"/>
-                            <Button Content="Nouveau projet" Style="{StaticResource SecondaryButtonStyle}" Click="NewProjectButton_OnClick"/>
-                        </StackPanel>
-
-                        <ListBox Grid.Row="2" x:Name="ProjectsList" DisplayMemberPath="Title"
-                                 Background="Transparent" Foreground="{StaticResource TextBrush}" BorderThickness="0"
-                                 SelectionChanged="ProjectsList_OnSelectionChanged"/>
-                    </Grid>
-                </Border>
-
                 <!-- Canvas: free-form, pannable surface for one artistic project -->
-                <Grid x:Name="CanvasRoot" Visibility="Collapsed" Focusable="True" PreviewKeyDown="CanvasRoot_OnPreviewKeyDown">
+                <Grid x:Name="CanvasRoot" Focusable="True" PreviewKeyDown="CanvasRoot_OnPreviewKeyDown">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
                     <WrapPanel Grid.Row="0" Margin="0,0,0,12">
-                        <Button Content="← Retour" Style="{StaticResource SecondaryButtonStyle}" Click="BackToProjectsButton_OnClick" Margin="0,0,12,4"/>
-                        <TextBlock x:Name="CanvasProjectTitleText" Foreground="{StaticResource TextBrush}" FontWeight="Bold"
-                                   VerticalAlignment="Center" Margin="0,0,16,4"/>
+                        <ComboBox x:Name="ProjectPicker" Width="190" Style="{StaticResource DarkComboBoxStyle}"
+                                  SelectionChanged="ProjectPicker_OnSelectionChanged" VerticalAlignment="Center" Margin="0,0,8,4">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <!-- Explicit template: this ComboBox's custom style does not honour DisplayMemberPath on the closed box -->
+                                    <TextBlock Text="{Binding Title}"/>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                        <TextBox x:Name="NewProjectTitleInput" Style="{StaticResource DarkTextBoxStyle}" Width="160" Margin="0,0,8,4"/>
+                        <Button Content="Nouveau projet" Style="{StaticResource SecondaryButtonStyle}" Click="NewProjectButton_OnClick" Margin="0,0,16,4"/>
                         <Button Content="Ajouter texte" Style="{StaticResource SecondaryButtonStyle}" Click="AddTextNoteButton_OnClick" Margin="0,0,4,4"/>
                         <Button Content="Ajouter image" Style="{StaticResource SecondaryButtonStyle}" Click="AddImageButton_OnClick" Margin="0,0,4,4"/>
                         <Button Content="Ajouter référence" Style="{StaticResource SecondaryButtonStyle}" Click="AddReferenceButton_OnClick" Margin="0,0,4,4"/>

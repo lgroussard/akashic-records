@@ -14,6 +14,7 @@ public enum ImageSearchKind
     Film,
     AnimatedFilm,
     Anime,
+    TvSeries,
     Book,
     VideoGame
 }
@@ -69,17 +70,18 @@ public sealed class ImageSearchService
     // restriction like the Custom Search JSON API, so it's the reliable source for film covers.
     private readonly string? _tmdbApiKey;
 
-    // Optional RAWG API key (free, from rawg.io) for video game cover lookup. Without it,
-    // video games fall back to the no-key Wikipedia search like everything else.
-    private readonly string? _rawgApiKey;
+    // Optional Pinterest developer token (v5), used as the artistic image bank when the
+    // dedicated source for a kind finds nothing (before the Wikipedia fallback).
+    private readonly string? _pinterestToken;
 
-    // Pass a TMDB API key for movie/anime poster lookup and an optional RAWG key for video
-    // game covers. Either may be null/empty, in which case the no-key Wikipedia fallback is
-    // used for that media type.
-    public ImageSearchService(string? tmdbApiKey = null, string? rawgApiKey = null)
+    // Pass a TMDB API key for movie/anime poster lookup. Without it the no-key Wikipedia
+    // fallback is used for that media type. Video games need no key at all: Steam's public
+    // store search is the primary source (RAWG was dropped — poor coverage, no hits for
+    // titles like Celeste or GRIS).
+    public ImageSearchService(string? tmdbApiKey = null, string? pinterestToken = null)
     {
         _tmdbApiKey = tmdbApiKey;
-        _rawgApiKey = rawgApiKey;
+        _pinterestToken = pinterestToken;
     }
 
     private static HttpClient CreateClient()
@@ -190,22 +192,20 @@ public sealed class ImageSearchService
         if (!NetworkInterface.GetIsNetworkAvailable()) return "error: réseau indisponible";
 
         if (kind is ImageSearchKind.Film or ImageSearchKind.AnimatedFilm or ImageSearchKind.Anime
-            && string.IsNullOrWhiteSpace(_tmdbApiKey))
+            or ImageSearchKind.TvSeries && string.IsNullOrWhiteSpace(_tmdbApiKey))
             return "error: aucune clé TMDB configurée";
-
-        if (kind is ImageSearchKind.VideoGame && string.IsNullOrWhiteSpace(_rawgApiKey))
-            return "error: aucune clé RAWG configurée";
 
         try
         {
             var ct = default(CancellationToken);
-            // Call the exact per-API resolver the app uses, so a valid key that finds nothing cannot
-            // be masked by the generic no-key Wikipedia fallback.
+            // Call the exact per-API resolver the app uses, so a working source that finds nothing
+            // cannot be masked by the generic no-key Wikipedia fallback.
             var imageUrl = kind switch
             {
                 ImageSearchKind.Film or ImageSearchKind.AnimatedFilm or ImageSearchKind.Anime
+                    or ImageSearchKind.TvSeries
                     => await TryFindTmdbImageUrlAsync(title, kind, ct),
-                ImageSearchKind.VideoGame => await RawgImageUrlAsync(title, ct),
+                ImageSearchKind.VideoGame => await SteamImageUrlAsync(title, ct),
                 _ => await FindImageUrlAsync(title, kind, ct)
             };
             if (imageUrl is null) return "no-result";
@@ -239,12 +239,23 @@ public sealed class ImageSearchService
             if (viaMangaDex is not null) return viaMangaDex;
         }
 
-        // TMDB is the reliable source for film/anime posters and has no regional restriction
-        // (unlike the Custom Search JSON API). It needs a free API key.
-        if (kind is ImageSearchKind.Film or ImageSearchKind.AnimatedFilm or ImageSearchKind.Anime)
+        // TMDB is the reliable source for film/anime/series posters and has no regional
+        // restriction (unlike the Custom Search JSON API). It needs a free API key.
+        if (kind is ImageSearchKind.Film or ImageSearchKind.AnimatedFilm or ImageSearchKind.Anime
+            or ImageSearchKind.TvSeries)
         {
             var viaTmdb = await TryFindTmdbImageUrlAsync(title, kind, ct);
             if (viaTmdb is not null) return viaTmdb;
+        }
+
+        // Manga living in the Anime/Manga tier list rarely have a TMDB entry — TMDB only knows
+        // the anime adaptation. When the work wasn't found there, ask MangaDex (the manga
+        // database) too. Requiring an actual title match here (unlike the "manga"-hinted path)
+        // keeps a plain anime title from getting some unrelated manga's cover.
+        if (kind is ImageSearchKind.Anime)
+        {
+            var viaMangaDexMatched = await MangaDexImageUrlAsync(title, ct, requireTitleMatch: true);
+            if (viaMangaDexMatched is not null) return viaMangaDexMatched;
         }
 
         // Books: OpenLibrary is the reliable source of real covers (no key, no regional
@@ -256,14 +267,24 @@ public sealed class ImageSearchService
             if (viaOpenLibrary is not null) return viaOpenLibrary;
         }
 
-        // Video games: RAWG is the reliable source of real box art (free key, no regional
-        // restriction). We search by title, take the first result whose title matches, then
-        // download its background_image (the box/cover art). Without a key, this is skipped
-        // and the no-key Wikipedia fallback below is used instead.
+        // Video games: Steam's public store search (no key, no regional restriction) is the
+        // reliable source of real box art — it knows Celeste, GRIS and the rest of the indie
+        // catalogue RAWG simply didn't have. Games that aren't on Steam fall through to the
+        // no-key Wikipedia fallback below.
         if (kind is ImageSearchKind.VideoGame)
         {
-            var viaRawg = await RawgImageUrlAsync(title, ct);
-            if (viaRawg is not null) return viaRawg;
+            var viaSteam = await SteamImageUrlAsync(title, ct);
+            if (viaSteam is not null) return viaSteam;
+        }
+
+        // Pinterest (own token, artistic image bank) before the generic Wikipedia fallback:
+        // its search returns real artwork images for any kind the dedicated source missed.
+        if (!string.IsNullOrWhiteSpace(_pinterestToken))
+        {
+            var pins = await new PinterestSearchService(_pinterestToken)
+                .SearchAsync(title, 1, ct);
+            if (pins.Count > 0 && !string.IsNullOrWhiteSpace(pins[0].ImageUrl))
+                return pins[0].ImageUrl;
         }
 
         // Last resort: the no-key Wikipedia fallback.
@@ -276,9 +297,10 @@ public sealed class ImageSearchService
     {
         if (string.IsNullOrWhiteSpace(_tmdbApiKey)) return null;
 
-        // Anime are TV series, not films: the movie search returns the movie (or nothing),
-        // while the TV search returns the actual series. Films and animated films use movie.
-        var searchType = kind is ImageSearchKind.Anime ? "tv" : "movie";
+        // Anime and TV series are series, not films: the movie search returns the movie (or
+        // nothing), while the TV search returns the actual series. Films and animated films use
+        // the movie search.
+        var searchType = kind is ImageSearchKind.Anime or ImageSearchKind.TvSeries ? "tv" : "movie";
 
         // The search endpoint returns poster_path directly on each result, which is more
         // reliable than the details endpoint: some entries (notably anime films) have a
@@ -351,18 +373,14 @@ public sealed class ImageSearchService
         return bytes.Length > 1000;
     }
 
-    // RAWG video-game cover lookup. Free API key (from rawg.io), no regional restriction.
-    // We search by title, take the first result whose title matches the query, then download
-    // its background_image (the box/cover art). Without a configured key this is skipped so
-    // the caller falls back to the no-key Wikipedia search.
-    private async Task<string?> RawgImageUrlAsync(string title, CancellationToken ct)
+    // Steam video-game cover lookup. Public store search — no key, no regional restriction.
+    // We search by title, keep only an exact name match, then take the vertical library capsule
+    // (600x900) built from the app id. Games absent from Steam (or titled differently there)
+    // return null so the caller falls back to the no-key Wikipedia search.
+    private async Task<string?> SteamImageUrlAsync(string title, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(_rawgApiKey)) return null;
-
-        var url = "https://api.rawg.io/api/games" +
-                  "?key=" + Uri.EscapeDataString(_rawgApiKey) +
-                  "&search=" + Uri.EscapeDataString(title) +
-                  "&page_size=10&fields=name,background_image,slug";
+        var url = "https://store.steampowered.com/api/storesearch/?term=" +
+                  Uri.EscapeDataString(title) + "&l=english&cc=US";
         using var response = await Http.GetAsync(url, ct);
         if (!response.IsSuccessStatusCode) return null;
 
@@ -370,48 +388,42 @@ public sealed class ImageSearchService
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
 
         var root = doc.RootElement;
-        if (!root.TryGetProperty("results", out var results) || results.GetArrayLength() == 0)
+        if (!root.TryGetProperty("items", out var items) || items.GetArrayLength() == 0)
             return null;
 
-        foreach (var result in results.EnumerateArray())
+        var exactHit = 0;
+        foreach (var item in items.EnumerateArray())
         {
-            if (!result.TryGetProperty("slug", out var slug) || slug.ValueKind != JsonValueKind.String)
+            if (!item.TryGetProperty("name", out var name) || name.ValueKind != JsonValueKind.String)
+                continue;
+            if (!item.TryGetProperty("id", out var idEl) || idEl.ValueKind != JsonValueKind.Number)
                 continue;
 
-            var candidate = slug.GetString();
-            if (string.IsNullOrWhiteSpace(candidate)) continue;
-
-            // RAWG's "slug" is a lowercased, hyphenated form of the title ("final-fantasy-vii"),
-            // so match on that rather than the display name.
-            if (!RawgSlugMatches(title, candidate)) continue;
-
-            if (!result.TryGetProperty("background_image", out var bg) ||
-                bg.ValueKind != JsonValueKind.String)
-            {
-                // No box art on this hit: try the next result instead of giving up.
-                continue;
-            }
-
-            var bgUrl = bg.GetString();
-            if (!string.IsNullOrWhiteSpace(bgUrl) && await IsRealCoverAsync(bgUrl, ct))
-                return bgUrl;
+            // EXACT full-title match only. A subtitle-tolerant match looks convenient but steals
+            // the wrong art: "Raji" ranks "Raji: Kaliyuga" (a different game) above the user's
+            // "Raji: An Ancient Epic". Title unmatched on Steam -> null -> Wikipedia fallback.
+            if (!SteamNameExactMatches(title, name.GetString() ?? "")) continue;
+            if (exactHit == 0) exactHit = idEl.GetInt32();
         }
-        return null;
+
+        var appId = exactHit;
+        if (appId == 0) return null;
+
+        // The vertical box art lives at apps/{appid}/library_600x900.jpg and must be built
+        // from the app id, NOT derived from tiny_image: newer search hits carry a content-hash
+        // segment in that URL (…/2379780/554b5f6…/capsule_231x87.jpg), and swapping the file
+        // name inside the hash folder 404s — that's why Balatro silently got no cover and
+        // Hollow Knight/Raji fell back to Wikipedia's text-logo image. The id-based path
+        // resolves for every app that has library art.
+        var coverUrl = $"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{appId}/library_600x900.jpg";
+        return await IsRealCoverAsync(coverUrl, ct) ? coverUrl : null;
     }
 
-    // Matches a title against a RAWG slug: case-insensitive, ignoring accents, and treating
-    // hyphens/spaces as word boundaries so "final fantasy vii" matches "Final Fantasy VII".
-    private static bool RawgSlugMatches(string query, string slug)
-    {
-        var q = Normalize(query);
-        var s = Normalize(slug).Replace("-", " ").Replace("_", " ");
-        if (q.Length == 0 || s.Length == 0) return false;
-
-        // Whole-title match, or the slug's leading words cover the query (so "Portal" matches
-        // "Portal: Half-Life Zero Point" without a false positive on a longer title).
-        return s == q || s.StartsWith(q + " ", StringComparison.Ordinal) ||
-               q.StartsWith(s + " ", StringComparison.Ordinal);
-    }
+    // Matches a game name against the query: case/accents-insensitive, and exact — Steam's
+    // store search ranks "Celeste Soundtrack" right behind "Celeste", so anything looser than
+    // an exact match starts showing soundtrack/DLC art as the game's cover.
+    private static bool SteamNameExactMatches(string query, string candidate)
+        => Normalize(candidate) == Normalize(query) && query.Length > 0;
 
     // A single MangaDex entry: its id plus the best available title (preferring English,
     // then any other language) and the cover_art relationship id used to fetch the cover.
@@ -452,7 +464,10 @@ public sealed class ImageSearchService
 
     // MangaDex cover lookup. Free, no key. We search by title, pick the entry whose title
     // matches the query, then fetch its cover_art attachment and download the image.
-    private async Task<string?> MangaDexImageUrlAsync(string title, CancellationToken ct)
+    // requireTitleMatch: when called as the anime fallback, only an actual title match is
+    // accepted — taking the first arbitrary search hit would attach some unrelated manga's
+    // cover to the anime.
+    private async Task<string?> MangaDexImageUrlAsync(string title, CancellationToken ct, bool requireTitleMatch = false)
     {
         // Drop the manga-family hint word(s) from the query: "Rainbow manga" returns zero
         // results on MangaDex, while "Rainbow" returns the real entry.
@@ -480,7 +495,7 @@ public sealed class ImageSearchService
 
         var hit = entries.FirstOrDefault(e => !string.IsNullOrWhiteSpace(e.Title) &&
             MangaDexTitleMatches(title, e.Title));
-        if (hit is null) hit = entries.FirstOrDefault();
+        if (hit is null && !requireTitleMatch) hit = entries.FirstOrDefault();
         if (hit is null || hit.CoverId is null) return null;
 
         // The cover attachment id is not the image filename: we must ask the cover endpoint
@@ -496,6 +511,8 @@ public sealed class ImageSearchService
     }
 
     // Resolves the cover attachment id to the actual image filename MangaDex serves.
+        // The API spells the property "fileName" (camelCase) — reading "filename" returns
+        // nothing and every manga cover silently 404s.
     private async Task<string?> MangaDexCoverFilenameAsync(string coverId, CancellationToken ct)
     {
         var url = "https://api.mangadex.org/cover/" + coverId;
@@ -507,13 +524,15 @@ public sealed class ImageSearchService
 
         var root = doc.RootElement;
         if (!root.TryGetProperty("data", out var data) ||
-            !data.TryGetProperty("attributes", out var attrs) ||
-            !attrs.TryGetProperty("filename", out var filename) ||
-            filename.ValueKind != JsonValueKind.String)
+            !data.TryGetProperty("attributes", out var attrs))
             return null;
 
-        var name = filename.GetString();
-        return name ?? "";
+        foreach (var prop in new[] { "fileName", "filename" })
+        {
+            if (attrs.TryGetProperty(prop, out var filename) && filename.ValueKind == JsonValueKind.String)
+                return filename.GetString() ?? "";
+        }
+        return null;
     }
 
     // Extracts the id, best title, and cover_art id from a MangaDex search element.
@@ -686,8 +705,12 @@ public sealed class ImageSearchService
         (ImageSearchKind.AnimatedFilm, "fr") => "film d'animation",
         (ImageSearchKind.AnimatedFilm, _) => "animated film",
         (ImageSearchKind.Anime, _) => "anime",
+        (ImageSearchKind.TvSeries, "fr") => "série télévisée",
+        (ImageSearchKind.TvSeries, _) => "television series",
         (ImageSearchKind.Book, "fr") => "roman",
         (ImageSearchKind.Book, _) => "novel",
+        (ImageSearchKind.VideoGame, "fr") => "jeu vidéo",
+        (ImageSearchKind.VideoGame, _) => "video game",
         _ => null
     };
 

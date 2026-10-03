@@ -125,6 +125,19 @@ public sealed class PoemRepository
         command.ExecuteNonQuery();
     }
 
+    // Folds every still-orphaned poem (RecueilId NULL) into the catch-all. The always-present "Sans
+    // classement" recueil is the one home for an unfiled poem — nothing should float free of it — so a
+    // legacy NULL row is adopted into it rather than left to haunt the shelf as a standalone. Idempotent:
+    // once adopted, the WHERE clause matches nothing and the statement is a no-op.
+    public void AssignUnassignedToRecueil(int recueilId)
+    {
+        using var connection = _connectionFactory.CreateOpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE Poem SET RecueilId = $recueilId WHERE RecueilId IS NULL;";
+        command.Parameters.AddWithValue("$recueilId", recueilId);
+        command.ExecuteNonQuery();
+    }
+
     public void Delete(int id)
     {
         using var connection = _connectionFactory.CreateOpenConnection();

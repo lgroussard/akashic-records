@@ -11,7 +11,8 @@ public enum SearchResultKind
     Photo,
     PersonalProject,
     Transition,
-    MusicTrack
+    MusicTrack,
+    BudgetTransaction
 }
 
 /// <summary>

@@ -209,6 +209,11 @@
                                  TextChanged="LibrarySearchInput_OnTextChanged"/>
                         <StackPanel x:Name="LibraryPanel"/>
 
+                        <!-- Similar tracks (Spotify-style, filled on demand) -->
+                        <TextBlock x:Name="SimilarHeader" Text="SIMILAIRES" Foreground="#8888AA" FontSize="10"
+                                   FontWeight="Bold" Margin="0,10,0,4" Visibility="Collapsed"/>
+                        <StackPanel x:Name="SimilarPanel"/>
+
                         <!-- Queue -->
                         <TextBlock Text="FILE D'ATTENTE" Foreground="#8888AA" FontSize="10" FontWeight="Bold" Margin="0,10,0,4"/>
                         <StackPanel x:Name="QueuePanel"/>

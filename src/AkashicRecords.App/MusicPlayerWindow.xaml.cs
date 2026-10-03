@@ -9,7 +9,9 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using AkashicRecords.Domain;
+using AkashicRecords.Infrastructure.Configuration;
 using AkashicRecords.Infrastructure.Persistence;
+using AkashicRecords.Infrastructure.Web;
 using Microsoft.Win32;
 
 namespace AkashicRecords.App;
@@ -24,8 +26,34 @@ public partial class MusicPlayerWindow : Window
     private readonly TrackMoodRepository _trackMoodRepository = new(new SqliteConnectionFactory());
     private readonly PlaylistRepository _playlistRepository = new(new SqliteConnectionFactory());
     private readonly PlaylistTrackRepository _playlistTrackRepository = new(new SqliteConnectionFactory());
+    private readonly DownloadItemRepository _downloadRepository = new(new SqliteConnectionFactory());
     private readonly MediaStorage _mediaStorage = new();
     private readonly MusicLibraryScanner _scanner;
+
+    // Keyless similar-tracks lookup (iTunes + MusicBrainz), best-effort.
+    private readonly MusicRecommendationService _recommendations = new();
+
+    // Separate player for the 30 s iTunes preview clips, so they don't fight the main queue.
+    private readonly MediaPlayer _previewPlayer = new();
+    private string? _previewSource;
+
+    // Chain mode (Spotify-style): the suggestions of the current track feed the next song
+    // once the queue is exhausted. Refreshed with each new track.
+    private List<SimilarTrack> _similarList = new();
+    private int _chainIndex;
+
+    // Normalized titles already heard this session, so the chain never revisits one
+    // (MusicBrainz lists bounce A -> B -> A endlessly without this).
+    private readonly HashSet<string> _playedKeys = new();
+
+    // Title/artist of whatever last sounded (local file or 30 s clip), used to reseed the
+    // chain when a suggestion list runs dry.
+    private string _lastTitle = string.Empty;
+    private string _lastArtist = string.Empty;
+
+    // Bumped on every similar-list lookup so only the newest async result is rendered
+    // (previews change the seed without touching _currentIndex).
+    private long _similarGeneration;
 
     private readonly List<MusicTrack> _queue = new();
     private int _currentIndex = -1;
@@ -46,9 +74,11 @@ public partial class MusicPlayerWindow : Window
         Width = SystemParameters.PrimaryScreenWidth / 5.0;
 
         _scanner = new MusicLibraryScanner(_trackRepository);
+
         _mediaPlayer.Volume = VolumeSlider.Value;
         _mediaPlayer.MediaOpened += MediaPlayer_OnMediaOpened;
         _mediaPlayer.MediaEnded += MediaPlayer_OnMediaEnded;
+        _previewPlayer.MediaEnded += (_, _) => { _previewPlayer.Stop(); _previewSource = null; };
 
         // Runs only while something is playing; stopped on pause/stop/close to keep the app idle-quiet (§45).
         _positionTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
@@ -92,6 +122,10 @@ public partial class MusicPlayerWindow : Window
 
     private void PlayQueue(IReadOnlyList<MusicTrack> tracks, int startIndex)
     {
+        _playedKeys.Clear();
+        // New run: the accumulating suggestion pool restarts empty.
+        _similarList = new();
+        _chainIndex = 0;
         _queue.Clear();
         _queue.AddRange(tracks);
         RefreshQueue();
@@ -106,8 +140,14 @@ public partial class MusicPlayerWindow : Window
     private void PlayAt(int index)
     {
         if (index < 0 || index >= _queue.Count) return;
+        // One sound at a time: the main queue takes over, stop any 30 s clip.
+        _previewPlayer.Stop();
+        _previewSource = null;
         _currentIndex = index;
         var track = _queue[index];
+        _playedKeys.Add(Normalize(track.Title));
+        _lastTitle = track.Title ?? string.Empty;
+        _lastArtist = track.Artist ?? string.Empty;
 
         StatusText.Visibility = Visibility.Collapsed;
 
@@ -182,6 +222,8 @@ public partial class MusicPlayerWindow : Window
         }
         else
         {
+            _previewPlayer.Stop();
+            _previewSource = null;
             _mediaPlayer.Play();
             _isPlaying = true;
             _positionTimer.Start();
@@ -199,24 +241,29 @@ public partial class MusicPlayerWindow : Window
         if (_currentIndex >= 0 && _currentIndex < _queue.Count - 1) PlayAt(_currentIndex + 1);
     }
 
-    private void MediaPlayer_OnMediaEnded(object? sender, EventArgs e)
+    private async void MediaPlayer_OnMediaEnded(object? sender, EventArgs e)
     {
         if (_currentIndex < _queue.Count - 1)
         {
             PlayAt(_currentIndex + 1);
+            return;
         }
-        else
-        {
-            // End of queue: stop cleanly and kill the timer so nothing spins idle.
-            _mediaPlayer.Stop();
-            _isPlaying = false;
-            _positionTimer.Stop();
-            PlayPauseButton.Content = "▶";
-            _updatingPositionFromTimer = true;
-            PositionSlider.Value = 0;
-            _updatingPositionFromTimer = false;
-            ElapsedText.Text = "0:00";
-        }
+
+        // End of queue: the next suggestion of the last track becomes the next song.
+        if (TryAdvanceChain()) return;
+
+        // Suggestions exhausted: reseed from the track that just sounded, then try once more.
+        if (await ReseedAndAdvanceAsync()) return;
+
+        // Nothing left: stop cleanly and kill the timer so nothing spins idle.
+        _mediaPlayer.Stop();
+        _isPlaying = false;
+        _positionTimer.Stop();
+        PlayPauseButton.Content = "▶";
+        _updatingPositionFromTimer = true;
+        PositionSlider.Value = 0;
+        _updatingPositionFromTimer = false;
+        ElapsedText.Text = "0:00";
     }
 
     private void MediaPlayer_OnMediaOpened(object? sender, EventArgs e)
@@ -238,6 +285,300 @@ public partial class MusicPlayerWindow : Window
                 RefreshLibrary();
             }
         }
+
+        // Fire-and-forget similar-tracks lookup for the freshly opened track.
+        RefreshSimilarForCurrentTrack();
+    }
+
+    // Fills the "SIMILAIRES" section from the Spotify recommendation engine, matched against
+    // the local library so a click plays the local copy when present. Best-effort: leaves the
+    // section collapsed when no service/keys or no hits.
+    private async void RefreshSimilarForCurrentTrack()
+    {
+        // Seed from what actually sounded last: a local track OR a 30 s preview (the latter
+        // is not in _queue, so _currentIndex would carry a stale seed).
+        var seedTitle = _lastTitle;
+        var seedArtist = _lastArtist;
+        if (string.IsNullOrWhiteSpace(seedTitle)) return;
+        var gen = ++_similarGeneration;
+        var similar = await _recommendations.GetSimilarAsync(seedTitle, seedArtist);
+
+        // A newer lookup started while this one was in flight; that one renders.
+        if (gen != _similarGeneration) return;
+
+        // Already-owned titles (pocket + full library) are not proposed again.
+        var library = _trackRepository.GetAll();
+        bool SameAsSeed(SimilarTrack s)
+        {
+            var a = Normalize(seedTitle);
+            var b = Normalize(s.Title);
+            return a.Length > 0 && (a.Contains(b) || b.Contains(a));
+        }
+        bool Owned(SimilarTrack s) =>
+            SameAsSeed(s) ||
+            PlayedAlready(s.Title) ||
+            _queue.Any(t => MatchesSimilar(t, s)) ||
+            library.Any(t => MatchesSimilar(t, s));
+
+        // Accumulating pool: fresh hits are appended rather than replacing the list, so a
+        // thin answer (2 hits) never truncates a chain built on earlier, richer ones.
+        foreach (var s in similar)
+        {
+            if (Owned(s)) continue;
+            if (_similarList.Any(t => SameKey(t.Title, s.Title))) continue;
+            _similarList.Add(s);
+        }
+
+        RenderSimilar();
+    }
+
+    // Redraws every pooled suggestion. The pool only grows within a run, so a full redraw
+    // stays cheap and keeps _chainIndex aligned with the rendered rows.
+    private void RenderSimilar()
+    {
+        SimilarPanel.Children.Clear();
+        if (_similarList.Count == 0)
+        {
+            SimilarHeader.Visibility = Visibility.Collapsed;
+            return;
+        }
+        SimilarHeader.Visibility = Visibility.Visible;
+        foreach (var s in _similarList)
+            SimilarPanel.Children.Add(BuildSimilarRow(s));
+    }
+
+    // Containment match between two suggestion titles (punctuation/case folded).
+    private static bool SameKey(string a, string b)
+    {
+        var x = Normalize(a);
+        var y = Normalize(b);
+        return x.Length > 0 && (x.Contains(y) || y.Contains(x));
+    }
+
+    // Spotify-style chain: when the queue is exhausted, the next suggestion that exists
+    // locally becomes the next song. False when the chain is done.
+    private bool TryAdvanceChain()
+    {
+        while (_chainIndex < _similarList.Count)
+        {
+            var s = _similarList[_chainIndex++];
+            var key = Normalize(s.Title);
+            if (key.Length > 0 && PlayedAlready(s.Title)) continue;
+            var local = _trackRepository.GetAll().FirstOrDefault(t => MatchesSimilar(t, s));
+            if (local is not null)
+            {
+                _queue.Add(local);
+                PlayAt(_queue.Count - 1);
+                return true;
+            }
+            // No local copy: keep the chain alive with the 30 s preview on the main player.
+            if (!string.IsNullOrWhiteSpace(s.PreviewUrl))
+            {
+                try
+                {
+                    _updatingPositionFromTimer = true;
+                    PositionSlider.Maximum = 1;
+                    PositionSlider.Value = 0;
+                    _updatingPositionFromTimer = false;
+                    ElapsedText.Text = "0:00";
+                    TotalText.Text = "0:00";
+                    TitleText.Text = string.IsNullOrWhiteSpace(s.Title) ? "(sans titre)" : s.Title;
+                    ArtistText.Text = s.Artist;
+                    _playedKeys.Add(key);
+                    _lastTitle = s.Title;
+                    _lastArtist = s.Artist;
+                    RefreshSimilarForCurrentTrack();
+                    _mediaPlayer.Open(new Uri(s.PreviewUrl!));
+                    _mediaPlayer.Play();
+                    _isPlaying = true;
+                    PlayPauseButton.Content = "⏸";
+                    _positionTimer.Start();
+                    return true;
+                }
+                catch { /* dead clip: fall through to the next suggestion */ }
+            }
+        }
+        return false;
+    }
+
+    // One more breath for the chain: ask the recommendation engine again from the track that
+    // last sounded, and take the first suggestion not heard yet. False when exhausted.
+    private async Task<bool> ReseedAndAdvanceAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_lastTitle)) return false;
+        var fresh = await _recommendations.GetSimilarAsync(_lastTitle, _lastArtist, 10);
+        foreach (var s in fresh)
+        {
+            if (PlayedAlready(s.Title)) continue;
+            if (_similarList.Any(t => SameKey(t.Title, s.Title))) continue;
+            _similarList.Add(s);
+        }
+        RenderSimilar();
+        return TryAdvanceChain();
+    }
+
+    // True when a suggestion title matches an already-heard one. Containment-based because the
+    // local scanner prefixes the folder name to titles ("AURORA - Black Water Lilies") while the
+    // API returns the bare title ("Black Water Lilies") - exact key equality would miss it.
+    private bool PlayedAlready(string title)
+    {
+        var key = Normalize(title);
+        return key.Length > 0 && _playedKeys.Any(k => k.Contains(key) || key.Contains(k));
+    }
+
+    // One similar-tracks line:
+    //   * present in the local library  -> a ▶ chip that plays the full local .mp3.
+    //   * otherwise                     -> "· Titre — Artiste" plus a ⤓ that queues the
+    //     Apple Music page in the existing downloader board (yt-dlp writes the full file).
+    private FrameworkElement BuildSimilarRow(SimilarTrack similar)
+    {
+        var container = new StackPanel { Margin = new Thickness(0, 0, 0, 3) };
+
+        var local = _queue.FirstOrDefault(t => MatchesSimilar(t, similar))
+                    ?? _trackRepository.GetAll().FirstOrDefault(t => MatchesSimilar(t, similar));
+
+        var label = string.IsNullOrWhiteSpace(similar.Artist)
+            ? similar.Title
+            : $"{similar.Title} — {similar.Artist}";
+
+        if (local is not null)
+        {
+            var button = new Button
+            {
+                Content = label,
+                Style = ChipButton(),
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+                Foreground = Brushes.White,
+                Background = InputBg(),
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+            button.Click += (_, _) => PlayLibraryTrack(local);
+            container.Children.Add(button);
+            return container;
+        }
+
+        var row = new Grid();
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        row.Children.Add(new TextBlock
+        {
+            Text = "· " + label,
+            Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
+            FontSize = 11,
+            TextWrapping = TextWrapping.Wrap,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
+        if (!string.IsNullOrWhiteSpace(similar.PreviewUrl))
+        {
+            var pv = new Button
+            {
+                Content = "▶",
+                Style = SmallButton(),
+                VerticalAlignment = VerticalAlignment.Center,
+                ToolTip = "Écouter l'extrait 30 s"
+            };
+            var previewUrl = similar.PreviewUrl!;
+            pv.Click += (_, _) => PlayPreview(previewUrl);
+            Grid.SetColumn(pv, 1);
+            row.Children.Add(pv);
+        }
+
+        // Full-length file first: yt-dlp's "ytsearch1:" resolves the complete track on
+        // YouTube (the iTunes m4a clip is only 30 s). Fallbacks: the iTunes clip, then the page.
+        var searchQuery = $"ytsearch1:{similar.Title} {similar.Artist}".Trim();
+        var downloadUrl = !string.IsNullOrWhiteSpace(similar.Title)
+            ? searchQuery
+            : !string.IsNullOrWhiteSpace(similar.PreviewUrl) ? similar.PreviewUrl : similar.PageUrl;
+        if (!string.IsNullOrWhiteSpace(downloadUrl))
+        {
+            var dl = new Button
+            {
+                Content = "⤓",
+                Style = SmallButton(),
+                VerticalAlignment = VerticalAlignment.Center,
+                ToolTip = "Télécharger dans la file du downloader"
+            };
+            var url = downloadUrl!;
+            var title = similar.Title;
+            dl.Click += (_, _) =>
+            {
+                if (!_downloadRepository.ExistsByUrl(url))
+                    _downloadRepository.Add(new DownloadItem
+                    {
+                        Url = url,
+                        Title = title,
+                        Status = DownloadStatus.Queued,
+                        AddedAt = DateTime.Now
+                    });
+            };
+            Grid.SetColumn(dl, 2);
+            row.Children.Add(dl);
+        }
+
+        container.Children.Add(row);
+        return container;
+    }
+
+    // Plays a track found via the similar list, using the full (filtered) library as the queue.
+    private void PlayLibraryTrack(MusicTrack track)
+    {
+        var tracks = CurrentLibraryTracks();
+        var index = tracks.ToList().FindIndex(t => t.Id == track.Id);
+        PlayQueue(tracks, index < 0 ? 0 : index);
+    }
+
+    // 30 s iTunes preview clip, on its own MediaPlayer so the main queue keeps its position.
+    // Second click on the same clip stops it.
+    private void PlayPreview(string url)
+    {
+        try
+        {
+            if (_previewSource is not null &&
+                string.Equals(_previewSource, url, StringComparison.OrdinalIgnoreCase))
+            {
+                _previewPlayer.Stop();
+                _previewSource = null;
+                return;
+            }
+            // One sound at a time: pause the main player while the 30 s clip runs.
+            if (_isPlaying)
+            {
+                _mediaPlayer.Pause();
+                _isPlaying = false;
+                _positionTimer.Stop();
+                PlayPauseButton.Content = "▶";
+            }
+            _previewPlayer.Open(new Uri(url));
+            _previewPlayer.Play();
+            _previewSource = url;
+        }
+        catch
+        {
+            // Best-effort: a dead preview URL leaves the main player untouched.
+        }
+    }
+
+    private static bool MatchesSimilar(MusicTrack track, SimilarTrack similar)
+    {
+        if (string.IsNullOrWhiteSpace(track.Title)) return false;
+        var t = Normalize(track.Title);
+        var s = Normalize(similar.Title);
+        // Containment covers the scanner's "album-title" compound titles ("adelle-rolling-in-the-deep")
+        // against API titles ("Rolling in the Deep") once punctuation is folded away.
+        return t == s || t.Contains(s) || s.Contains(t);
+    }
+
+    // Strips the yt-dlp " [youtubeId]" suffix and folds punctuation so filename-titles match API
+    // titles: "adelle-rolling-in-the-deep" and "Rolling in the Deep" both reduce to one key.
+    private static string Normalize(string s)
+    {
+        var t = s.Trim();
+        var bracket = t.IndexOf('[');
+        if (bracket > 0) t = t[..bracket].Trim();
+        return new string(t.ToLowerInvariant().Where(c => char.IsLetterOrDigit(c)).ToArray());
     }
 
     private void PositionTimer_OnTick(object? sender, EventArgs e)
@@ -388,8 +729,11 @@ public partial class MusicPlayerWindow : Window
         row.Children.Add(info);
 
         var actions = new StackPanel { Orientation = Orientation.Horizontal };
+        var chainButton = new Button { Content = "∞", Style = SmallButton(), ToolTip = "Mode libre : la piste joue, puis les pistes similaires enchaînées" };
         var editButton = new Button { Content = "✎", Style = SmallButton() };
         var moodButton = new Button { Content = "☾", Style = SmallButton() };
+        chainButton.Click += (_, _) => PlayQueue(new[] { track }, 0);
+        actions.Children.Add(chainButton);
         actions.Children.Add(editButton);
         actions.Children.Add(moodButton);
         Grid.SetColumn(actions, 2);
@@ -635,6 +979,8 @@ public partial class MusicPlayerWindow : Window
         _mediaPlayer.MediaEnded -= MediaPlayer_OnMediaEnded;
         _mediaPlayer.Stop();
         _mediaPlayer.Close();
+        _previewPlayer.Stop();
+        _previewPlayer.Close();
     }
 
     // Lets MainWindow truly close (and dispose) the player on real app exit.

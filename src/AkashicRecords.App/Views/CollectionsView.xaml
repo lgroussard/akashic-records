@@ -40,6 +40,8 @@
                                   Style="{StaticResource NavButtonStyle}" Click="CategoryTab_OnClick"/>
                     <ToggleButton x:Name="FilmAnimationTab" Content="Films d'animation" Tag="FilmAnimation"
                                   Style="{StaticResource NavButtonStyle}" Click="CategoryTab_OnClick"/>
+                    <ToggleButton x:Name="SeriesTab" Content="Séries" Tag="TvSeries"
+                                  Style="{StaticResource NavButtonStyle}" Click="CategoryTab_OnClick"/>
                     <ToggleButton x:Name="AnimesTab" Content="Anime/manga" Tag="Anime"
                                   Style="{StaticResource NavButtonStyle}" Click="CategoryTab_OnClick"/>
                     <ToggleButton x:Name="LivresTab" Content="Livres" Tag="Livre"
@@ -184,6 +186,9 @@
                                             <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                                                 <Button Content="Choisir une couverture…" Click="SetCoverImageButton_OnClick"
                                                         Style="{StaticResource SecondaryButtonStyle}"/>
+                                                <Button x:Name="FetchCoverWebButton" Content="Chercher en ligne"
+                                                        Click="FetchCoverWebButton_OnClick"
+                                                        Margin="8,0,0,0" Style="{StaticResource SecondaryButtonStyle}"/>
                                                 <Button x:Name="RemoveCoverButton" Content="Retirer" Click="RemoveCoverImageButton_OnClick"
                                                         Margin="8,0,0,0" Visibility="Collapsed" Style="{StaticResource SecondaryButtonStyle}"/>
                                             </StackPanel>

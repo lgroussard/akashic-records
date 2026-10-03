@@ -16,6 +16,11 @@ public partial class App : Application
 {
     public App()
     {
+        // The WPF MediaPlayer gates https media behind a zone check (default off): internet
+        // URLs fail with "Only site-of-origin pack URIs are supported". iTunes preview clips
+        // are https, so restore the legacy allow-all behavior for this app.
+        AppContext.SetSwitch("Switch.System.Windows.Net.DoNotApplyZoneCheckForDefaultCredentials", true);
+
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
     }
@@ -63,6 +68,62 @@ public partial class App : Application
             return;
         }
 
+        // The music player is also a standalone top-level window (not hosted in MainWindow).
+        if (section.Equals("Music", StringComparison.OrdinalIgnoreCase) ||
+            section.Equals("Musique", StringComparison.OrdinalIgnoreCase))
+        {
+            var player = new MusicPlayerWindow
+            {
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Left = 0,
+                Top = 0
+            };
+            player.Show();
+            // Open the expand panel so the library rows (and the ∞ chain buttons) are visible.
+            player.ExpandedPanel.Visibility = Visibility.Visible;
+            player.ExpandButton.Content = "▴";
+            player.SizeToContent = SizeToContent.Manual;
+            player.Height = 560;
+            var playerSettle = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1200) };
+            playerSettle.Tick += (_, _) =>
+            {
+                playerSettle.Stop();
+                try { CaptureElement((FrameworkElement)player.Content, outputPath); }
+                catch (Exception ex) { LogCrash(ex); }
+                finally { player.Close(); Shutdown(); }
+            };
+            playerSettle.Start();
+            return;
+        }
+
+        // Same reasoning for the calendar toast: standalone window, fed with the real agenda so the
+        // capture shows what the user would actually see today.
+        if (section.Equals("CalendarToast", StringComparison.OrdinalIgnoreCase))
+        {
+            var service = new AkashicRecords.Infrastructure.Persistence.CalendarService(
+                new AkashicRecords.Infrastructure.Persistence.SqliteConnectionFactory());
+            var todays = service.GetRange(DateTime.Today, DateTime.Today);
+            var toast = new CalendarToast
+            {
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Left = 0,
+                Top = 0,
+            };
+            toast.SetItems("Aujourd'hui", todays.Select(i => new CalendarToast.ToastLine(
+                Views.CalendarView.ColorFor(i), i.TimeText, i.Title, i.Subtitle, i.NotificationKey)).ToList());
+            toast.Show();
+            var toastSettle = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
+            toastSettle.Tick += (_, _) =>
+            {
+                toastSettle.Stop();
+                try { CaptureElement((FrameworkElement)toast.Content, outputPath); }
+                catch (Exception ex) { LogCrash(ex); }
+                finally { toast.ForceClose(); Shutdown(); }
+            };
+            toastSettle.Start();
+            return;
+        }
+
         var window = new MainWindow(screenshotMode: true)
         {
             WindowStartupLocation = WindowStartupLocation.Manual,
@@ -79,12 +140,16 @@ public partial class App : Application
             settle.Stop();
             try
             {
-                var dbg = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                    "AkashicRecords", "screenshot-debug.log");
-                System.IO.File.AppendAllText(dbg, $"{DateTime.Now:O} settle tick. Content={window.Content?.GetType().Name ?? "null"}, W={window.ActualWidth}, H={window.ActualHeight}\n");
-                CaptureElement((FrameworkElement)window.Content, outputPath);
-                System.IO.File.AppendAllText(dbg, $"{DateTime.Now:O} CaptureElement done\n");
+                // The calendar link picker renders in a detached popup visual (its own PopupRoot),
+                // not inside the window's content tree — RenderTargetBitmap on the window would miss
+                // it. The popup only opens once the view's Loaded has run, so resolve it here, after
+                // the settle delay, not synchronously after OpenSectionForScreenshot.
+                var target = section == "Calendrier" && subTab == "Picker"
+                    ? window.CalendarPickerElementForScreenshot() ?? (FrameworkElement)window.Content
+                    : section == "Calendrier" && subTab == "Hover"
+                        ? window.CalendarPreviewCardForScreenshot() ?? (FrameworkElement)window.Content
+                        : (FrameworkElement)window.Content;
+                CaptureElement(target, outputPath);
             }
             catch (Exception ex)
             {

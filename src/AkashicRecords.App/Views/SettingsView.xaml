@@ -23,8 +23,9 @@
 
                 <TextBlock TextWrapping="Wrap" Foreground="#CCCCCC" LineHeight="18" Margin="0,0,0,4">
                     <Run FontSize="13">Par défaut, l'ajout d'un élément tente de trouver sa couverture sur</Run>
-                    <Run FontSize="13">Wikipédia (aucune clé requise). Pour les affiches de films, animation et</Run>
-                    <Run FontSize="13">anime, entrez une clé TMDB gratuite. L'application reste entièrement</Run>
+                    <Run FontSize="13">Wikipédia (aucune clé requise). Jeux vidéo : Steam (aucune clé).</Run>
+                    <Run FontSize="13">Pour les affiches de films, animation, séries et anime, entrez une</Run>
+                    <Run FontSize="13">clé TMDB gratuite. L'application reste entièrement</Run>
                     <Run FontSize="13">fonctionnelle sans clé — c'est une option.</Run>
                 </TextBlock>
 
@@ -37,20 +38,21 @@
                     <LineBreak/>
                     <Run FontSize="12">Gratuit, sans restriction régionale. Créez une clé sur</Run>
                     <Run FontSize="12">www.themoviedb.org (Compte → Paramètres → Clés API → v3). Indispensable</Run>
-                    <Run FontSize="12">pour les affiches de films, animations et anime. Les livres</Run>
-                    <Run FontSize="12">utilisent Wikipédia (aucune clé).</Run>
+                    <Run FontSize="12">pour les affiches de films, animations, séries et anime. Les livres</Run>
+                    <Run FontSize="12">utilisent OpenLibrary/Wikipédia, les jeux vidéo Steam et Wikipédia (aucune clé).</Run>
                 </TextBlock>
 
-                <TextBlock Text="Clé RAWG (affiches de jeux vidéo)" Foreground="White" Margin="0,10,0,4"/>
-                <TextBox x:Name="RawgKeyInput" Background="#2A2A45" Foreground="White"
+                <TextBlock Text="Clé Pinterest (banque d'images artistiques)" Foreground="White" Margin="0,10,0,4"/>
+                <TextBox x:Name="PinterestKeyInput" Background="#2A2A45" Foreground="White"
                          BorderThickness="1" BorderBrush="#553B82F6" Padding="8,6" Margin="0,0,0,4"/>
 
                 <TextBlock TextWrapping="Wrap" Foreground="#AAAAAA" LineHeight="16" Margin="0,0,0,4">
-                    <Run FontSize="12" FontWeight="SemiBold">RAWG :</Run>
+                    <Run FontSize="12" FontWeight="SemiBold">Pinterest :</Run>
                     <LineBreak/>
-                    <Run FontSize="12">Gratuit, sans restriction régionale. Créez une clé sur</Run>
-                    <Run FontSize="12">rawg.io (compte → API). Indispensable pour les affiches de jeux</Run>
-                    <Run FontSize="12">vidéo. Sans clé, Wikipédia est utilisée en secours.</Run>
+                    <Run FontSize="12">Jeton développeur (developers.pinterest.com, gratuit, niveau</Run>
+                    <Run FontSize="12">d'essai = 1000 requêtes/jour). Alimente la banque d'images :</Run>
+                    <Run FontSize="12">recherche par titre + les tableaux du compte. Sans jeton,</Run>
+                    <Run FontSize="12">Wikipédia sert de repli.</Run>
                 </TextBlock>
 
                 <StackPanel Orientation="Horizontal" Margin="0,12,0,4">
@@ -58,16 +60,20 @@
                             Style="{StaticResource ChipButtonStyle}" Padding="16,6" Click="SaveButton_OnClick"/>
                     <Button x:Name="TestTmdbButton" Content="Tester TMDB" Margin="8,0,0,0"
                             Style="{StaticResource MiniButtonStyle}" Click="TestTmdbButton_OnClick"/>
-                    <Button x:Name="TestRawgButton" Content="Tester RAWG" Margin="8,0,0,0"
-                            Style="{StaticResource MiniButtonStyle}" Click="TestRawgButton_OnClick"/>
+                    <Button x:Name="TestSpotifyButton" Content="Tester les pistes similaires" Margin="8,0,0,0"
+                            Style="{StaticResource MiniButtonStyle}" Click="TestSpotifyButton_OnClick"/>
+                    <Button x:Name="TestPinterestButton" Content="Tester Pinterest" Margin="8,0,0,0"
+                            Style="{StaticResource MiniButtonStyle}" Click="TestPinterestButton_OnClick"/>
                 </StackPanel>
 
                 <TextBlock x:Name="StatusText" TextWrapping="Wrap" Foreground="#7FB0FF"
                            LineHeight="16" Margin="0,10,0,0" FontSize="12"/>
                 <TextBlock x:Name="TmdbStatusText" TextWrapping="Wrap" Foreground="#7FB0FF"
                            LineHeight="16" Margin="0,6,0,0" FontSize="12"/>
-                <TextBlock x:Name="RawgStatusText" TextWrapping="Wrap" Foreground="#7FB0FF"
-                           LineHeight="16" Margin="0,4,0,0" FontSize="12"/>
+                <TextBlock x:Name="SpotifyStatusText" TextWrapping="Wrap" Foreground="#7FB0FF"
+                           LineHeight="16" Margin="0,6,0,0" FontSize="12"/>
+                <TextBlock x:Name="PinterestStatusText" TextWrapping="Wrap" Foreground="#7FB0FF"
+                           LineHeight="16" Margin="0,6,0,0" FontSize="12"/>
             </StackPanel>
         </ScrollViewer>
         <!-- WindowStyle="None" means there is no OS title-bar close box; pin one top-right over the

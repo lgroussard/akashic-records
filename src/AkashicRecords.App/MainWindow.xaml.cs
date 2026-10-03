@@ -43,6 +43,12 @@ public partial class MainWindow : Window
     private AkashicRecords.Domain.WatchlistItem? _todaysFilmPick;
     private AkashicRecords.Domain.WatchlistItem? _todaysAnimPick;
     private DispatcherTimer? _midnightTimer;
+    private CalendarToast? _calendarToast;
+    private readonly CalendarService _calendarService = new(new SqliteConnectionFactory());
+    // Lead-time reminder check. Only started when a future timed reminder actually exists
+    // (§45: no idle timers); stopped when none remain until the next reschedule.
+    private DispatcherTimer? _calendarTimer;
+    private DateTime _lastCalendarCheck = DateTime.MinValue;
 
     private readonly GlobalSearchService _searchService = new(new SqliteConnectionFactory());
     private readonly DispatcherTimer _searchDebounce;
@@ -132,7 +138,7 @@ public partial class MainWindow : Window
         _hotkey = new GlobalHotkey(HotkeyId, GlobalHotkey.ModControl | GlobalHotkey.ModAlt, GlobalHotkey.VkSpace);
         _hotkey.Pressed += ToggleVisibility;
 
-        _trayIcon = new TrayIcon("Akashic Records", StartupManager.IsEnabled());
+        _trayIcon = new TrayIcon("Archives Akashiques", StartupManager.IsEnabled());
         _trayIcon.ToggleRequested += ToggleVisibility;
         _trayIcon.ExitRequested += ExitApplication;
         _trayIcon.StartWithWindowsChanged += StartupManager.SetEnabled;
@@ -141,6 +147,7 @@ public partial class MainWindow : Window
         _trayIcon.DownloaderRequested += ToggleDownloader;
 
         InitializeAmbientWidgets();
+        BootstrapCalendarNotifications();
 
         DockHeaderToScreenEdge();
     }
@@ -324,6 +331,190 @@ public partial class MainWindow : Window
         else _reminderWidget?.Hide();
     }
 
+    // --- Calendrier notifications (§57) ---------------------------------------
+    // Startup + midnight "toast du matin" (today's agenda) plus per-kind lead-time reminders,
+    // all configurable from CalendarView's ⚙ panel. The 60s check timer only runs while a
+    // future reminder actually exists (§45: no idle timers when nothing can fire).
+
+    private void BootstrapCalendarNotifications()
+    {
+        if (_screenshotMode) return;
+        CheckCalendarReminders();
+        RescheduleCalendarTimer();
+    }
+
+    // Called by CalendarView whenever an item or a lead time changes: re-check immediately
+    // (a brand-new event may already be due) and re-arm the timer for the new schedule.
+    public void RescheduleCalendarNotifications()
+    {
+        if (_screenshotMode) return;
+        CheckCalendarReminders();
+        RescheduleCalendarTimer();
+    }
+
+    private void CalendarTimer_OnTick(object? sender, EventArgs e) => CheckCalendarReminders();
+
+    private void CheckCalendarReminders()
+    {
+        if (!_config.CalendarNotificationsEnabled)
+        {
+            _calendarTimer?.Stop();
+            return;
+        }
+
+        var now = DateTime.Now;
+        var changed = false;
+
+        // Morning toast: on first check of a new day (covers both startup and a midnight
+        // rollover while the app keeps running), at most once per calendar day.
+        if (now.Date != _lastCalendarCheck.Date)
+        {
+            _lastCalendarCheck = now;
+            if (_config.CalendarDailyToastEnabled && _config.CalendarDailyToastDate?.Date != now.Date)
+            {
+                _config.CalendarDailyToastDate = now;
+                changed = true;
+                var todays = _calendarService.GetRange(now.Date, now.Date);
+                if (todays.Count > 0) ShowCalendarToast("Aujourd'hui", todays, 0);
+            }
+        }
+
+        var due = new List<AkashicRecords.Domain.AgendaItem>();
+        foreach (var item in _calendarService.GetRange(now.Date, now.Date.AddDays(35)))
+        {
+            if (item.IsSpanContinuation) continue; // a multi-day event pings once, on its first day
+            if (ReminderFireTime(item) is not { } when) continue;
+            var key = item.NotificationKey;
+            if (_config.CalendarNotifiedKeys.Contains(key)) continue;
+            if (when > now) continue;
+
+            // Already surfaced by today's morning toast AND due before that toast showed: the
+            // morning card covered it. A reminder whose lead moment is later in the day (e.g. the
+            // 18h ping for a 20h sortie, after an 8h morning toast) still fires at its own time.
+            if (_config.CalendarDailyToastEnabled && item.Date.Date == now.Date
+                && _config.CalendarDailyToastDate is { } toastAt && toastAt.Date == now.Date
+                && when <= toastAt) continue;
+
+            // Long-past (app launched hours late): mark notified quietly — not a "reminder" anymore.
+            if (when < now.AddHours(-3))
+            {
+                _config.CalendarNotifiedKeys.Add(key);
+                changed = true;
+                continue;
+            }
+
+            due.Add(item);
+            _config.CalendarNotifiedKeys.Add(key);
+            changed = true;
+        }
+
+        if (PruneNotifiedKeys()) changed = true;
+        if (changed) _configService.Save(_config);
+
+        if (due.Count > 0)
+            ShowCalendarToast("Rappel", due.OrderBy(i => i.Date).ThenBy(i => i.Hour ?? -1).ToList(), 60);
+    }
+
+    // When a reminder should pop: lead minutes back from the item's reference moment — its clock
+    // time when timed, 09:00 on the day otherwise. -1 lead (per kind) disables that kind.
+    private DateTime? ReminderFireTime(AkashicRecords.Domain.AgendaItem item)
+    {
+        var lead = item.Source switch
+        {
+            AkashicRecords.Domain.AgendaSource.Birthday => _config.CalendarBirthdayLeadMinutes,
+            AkashicRecords.Domain.AgendaSource.Deadline => _config.CalendarDeadlineLeadMinutes,
+            AkashicRecords.Domain.AgendaSource.Event => item.EventKind switch
+            {
+                AkashicRecords.Domain.CalendarEventKind.Sortie => _config.CalendarLeadMinutesSortie,
+                AkashicRecords.Domain.CalendarEventKind.Plan => _config.CalendarLeadMinutesPlan,
+                AkashicRecords.Domain.CalendarEventKind.Voyage => _config.CalendarLeadMinutesVoyage,
+                AkashicRecords.Domain.CalendarEventKind.Rendezvous => _config.CalendarLeadMinutesRendezvous,
+                _ => _config.CalendarLeadMinutesAutre,
+            },
+            _ => -1,
+        };
+        if (lead < 0) return null;
+
+        var reference = item.Hour is int h
+            ? item.Date.Date.AddHours(h).AddMinutes(item.Minute ?? 0)
+            : item.Date.Date.AddHours(9);
+        return reference.AddMinutes(-lead);
+    }
+
+    // Drop keys older than two days so the persisted list can't grow forever.
+    private bool PruneNotifiedKeys()
+    {
+        var cutoff = DateTime.Today.AddDays(-2);
+        return _config.CalendarNotifiedKeys.RemoveAll(key =>
+        {
+            var idx = key.LastIndexOf(':');
+            return idx < 0
+                   || !DateTime.TryParseExact(key[(idx + 1)..], "yyyy-MM-dd",
+                       System.Globalization.CultureInfo.InvariantCulture,
+                       System.Globalization.DateTimeStyles.None, out var date)
+                   || date < cutoff;
+        }) > 0;
+    }
+
+    private void RescheduleCalendarTimer()
+    {
+        if (!_config.CalendarNotificationsEnabled)
+        {
+            _calendarTimer?.Stop();
+            return;
+        }
+
+        var now = DateTime.Now;
+        var anyFuture = _calendarService.GetRange(now.Date, now.Date.AddDays(35))
+            .Any(item => !item.IsSpanContinuation
+                         && !_config.CalendarNotifiedKeys.Contains(item.NotificationKey)
+                         && ReminderFireTime(item) is { } when && when > now);
+
+        if (!anyFuture)
+        {
+            _calendarTimer?.Stop();
+            return;
+        }
+
+        _calendarTimer ??= new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
+        _calendarTimer.Tick -= CalendarTimer_OnTick;
+        _calendarTimer.Tick += CalendarTimer_OnTick;
+        _calendarTimer.Start();
+    }
+
+    private void ShowCalendarToast(string header, IReadOnlyList<AkashicRecords.Domain.AgendaItem> items, int autoCloseSeconds)
+    {
+        _calendarToast ??= new CalendarToast();
+        _calendarToast.ItemClicked -= OnCalendarToastItemClicked;
+        _calendarToast.ItemClicked += OnCalendarToastItemClicked;
+
+        var lines = items.Select(i => new CalendarToast.ToastLine(
+            CalendarView.ColorFor(i),
+            i.TimeText,
+            i.Title,
+            i.Subtitle,
+            i.NotificationKey)).ToList();
+
+        _calendarToast.SetItems(header, lines, autoCloseSeconds);
+        if (!_calendarToast.IsVisible) _calendarToast.Show();
+        _calendarToast.UpdateLayout();
+        // Bottom-right, raised above where the film widget docks so the two never overlap.
+        _calendarToast.Left = SystemParameters.PrimaryScreenWidth - _calendarToast.ActualWidth - 24;
+        _calendarToast.Top = SystemParameters.PrimaryScreenHeight - _calendarToast.ActualHeight - 360;
+        _calendarToast.Activate();
+    }
+
+    // Clicking a toast row deep-links into the calendar section.
+    private void OnCalendarToastItemClicked(string key)
+    {
+        foreach (var button in new[] { OrganisationNav, JournauxNav, CollectionsNav, ArchivesNav, BudgetNav, CalendarNav })
+        {
+            button.IsChecked = button == CalendarNav;
+        }
+        _activeSection = "Calendrier";
+        UpdateSectionContent();
+    }
+
     // Reserves the header's strip of screen space so maximized/snapped windows leave it free.
     private void DockHeaderToScreenEdge()
     {
@@ -438,7 +629,7 @@ public partial class MainWindow : Window
     private void NavButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (sender is not ToggleButton clicked || clicked.Tag is not string sectionName) return;
-        foreach (var button in new[] { OrganisationNav, JournauxNav, CollectionsNav, ArchivesNav })
+        foreach (var button in new[] { OrganisationNav, JournauxNav, CollectionsNav, ArchivesNav, BudgetNav, CalendarNav })
         {
             if (button != clicked) button.IsChecked = false;
         }
@@ -555,6 +746,7 @@ public partial class MainWindow : Window
             "Journaux" => JournauxNav,
             "Collections" => CollectionsNav,
             "Archives" => ArchivesNav,
+            "Budget" => BudgetNav,
             _ => null
         };
         if (nav is null) return;
@@ -602,7 +794,7 @@ public partial class MainWindow : Window
     {
         if (e.Key != Key.Escape || _activeSection is null) return;
 
-        foreach (var button in new[] { OrganisationNav, JournauxNav, CollectionsNav, ArchivesNav })
+        foreach (var button in new[] { OrganisationNav, JournauxNav, CollectionsNav, ArchivesNav, BudgetNav, CalendarNav })
         {
             button.IsChecked = false;
         }
@@ -620,6 +812,8 @@ public partial class MainWindow : Window
             "Journaux" => new JournauxView(_config),
             "Collections" => new CollectionsView(_config),
             "Archives" => new ArchivesView(_config),
+            "Budget" => new BudgetView(_config),
+            "Calendrier" => new CalendarView(_config, RescheduleCalendarNotifications),
             _ => null
         };
 
@@ -644,6 +838,8 @@ public partial class MainWindow : Window
             "Journaux" => JournauxNav,
             "Collections" => CollectionsNav,
             "Archives" => ArchivesNav,
+            "Budget" => BudgetNav,
+            "Calendrier" => CalendarNav,
             _ => null
         };
         if (nav is null) return;
@@ -673,8 +869,14 @@ public partial class MainWindow : Window
                 case JournauxView jour when tab is "Personal" or "Recipes" or "Poetry" or "Artistic":
                     jour.ShowTabForScreenshot(tab);
                     break;
-                case CollectionsView coll when tab is "Film" or "FilmAnimation" or "Anime" or "Livre" or "VideoGame" or "Watchlist":
+                case CollectionsView coll when tab is "Film" or "FilmAnimation" or "TvSeries" or "Anime" or "Livre" or "VideoGame" or "Watchlist":
                     coll.ShowTabForScreenshot(tab);
+                    break;
+                case BudgetView bud when tab is "Overview" or "Transactions" or "Plans":
+                    bud.ShowTabForScreenshot(tab);
+                    break;
+                case CalendarView cal when tab is "Event" or "Settings" or "Edit" or "Picker" or "Hover":
+                    cal.ShowPaneForScreenshot(tab);
                     break;
                 case JournauxView jour when tab.StartsWith("Poetry:"):
                     // Reaches the two poetry sub-panes the plain "Poetry" capture cannot: the opened
@@ -685,6 +887,15 @@ public partial class MainWindow : Window
             }
         }
     }
+
+    // Headless capture of the calendar link picker: the popup renders in a detached visual tree,
+    // so App.RunScreenshot grabs this element instead of the window content (see App.xaml.cs).
+    public FrameworkElement? CalendarPickerElementForScreenshot() =>
+        SectionContent.Content is CalendarView cal ? cal.PickerElementForScreenshot() : null;
+
+    // Same trick for the link hover-preview card (see CalendarView.PreviewCardForScreenshot).
+    public FrameworkElement? CalendarPreviewCardForScreenshot() =>
+        SectionContent.Content is CalendarView cal ? cal.PreviewCardForScreenshot() : null;
 
     private void ExitApplication()
     {
@@ -702,7 +913,9 @@ public partial class MainWindow : Window
         _reminderWidget?.ForceClose();
         _downloaderWindow?.ForceClose();
         _settingsView?.ForceClose();
+        _calendarToast?.ForceClose();
         _midnightTimer?.Stop();
+        _calendarTimer?.Stop();
         Application.Current.Shutdown();
     }
 

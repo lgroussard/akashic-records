@@ -23,15 +23,15 @@ public partial class SettingsView : Window
 
         // Pre-fill with whatever is already saved, so reopening settings doesn't wipe the fields.
         TmdbKeyInput.Text = _config.TmdbApiKey ?? string.Empty;
-        RawgKeyInput.Text = _config.RawgApiKey ?? string.Empty;
+        PinterestKeyInput.Text = _config.PinterestToken ?? string.Empty;
     }
 
     private void SaveButton_OnClick(object sender, RoutedEventArgs e)
     {
         _config.TmdbApiKey = TmdbKeyInput.Text.Trim();
-        _config.RawgApiKey = RawgKeyInput.Text.Trim();
+        _config.PinterestToken = PinterestKeyInput.Text.Trim();
         _configService.Save(_config);
-        StatusText.Text = "Enregistré. Films/animation/anime : TMDB (si une clé est mise). Jeux vidéo : RAWG (si une clé est mise). Livres : Wikipédia.";
+        StatusText.Text = "Enregistré. Films/animation/séries/anime : TMDB (si une clé est mise). Jeux vidéo : Steam (aucune clé). Livres : OpenLibrary/Wikipédia. Images artistiques : Pinterest (si jeton), sinon Wikipédia.";
         StatusText.Foreground = System.Windows.Media.Brushes.ForestGreen;
     }
 
@@ -61,31 +61,64 @@ public partial class SettingsView : Window
         }
     }
 
-    private async void TestRawgButton_OnClick(object sender, RoutedEventArgs e)
+    private async void TestSpotifyButton_OnClick(object sender, RoutedEventArgs e)
     {
-        var key = RawgKeyInput.Text.Trim();
-        if (key.Length == 0)
-        {
-            RawgStatusText.Text = "RAWG : entrez d'abord une clé.";
-            RawgStatusText.Foreground = System.Windows.Media.Brushes.OrangeRed;
-            return;
-        }
-
-        TestRawgButton.IsEnabled = false;
-        RawgStatusText.Text = "RAWG : test en cours…";
-        RawgStatusText.Foreground = System.Windows.Media.Brushes.LightGoldenrodYellow;
+        TestSpotifyButton.IsEnabled = false;
+        SpotifyStatusText.Text = "Spotify : test en cours…";
+        SpotifyStatusText.Foreground = System.Windows.Media.Brushes.LightGoldenrodYellow;
         try
         {
-            var status = await new ImageSearchService(null, key).TestImageLookupAsync("Celeste", ImageSearchKind.VideoGame);
-            ApplyTestStatus(RawgStatusText, status, "RAWG");
+            // Tests the keyless recommendation chain (iTunes + MusicBrainz), so a green state
+            // proves the sources are reachable and return tracks. No API key needed.
+            var status = await new MusicRecommendationService().TestAsync();
+            switch (status)
+            {
+                case "ok":
+                    SpotifyStatusText.Text = "Pistes similaires : OK — pistes reçues, les sources répondent.";
+                    SpotifyStatusText.Foreground = System.Windows.Media.Brushes.ForestGreen;
+                    break;
+                case "no-result":
+                    SpotifyStatusText.Text = "Pistes similaires : AUCUNE piste trouvée pour le titre d'essai.";
+                    SpotifyStatusText.Foreground = System.Windows.Media.Brushes.OrangeRed;
+                    break;
+                default:
+                    SpotifyStatusText.Text = $"Pistes similaires : {status}";
+                    SpotifyStatusText.Foreground = System.Windows.Media.Brushes.OrangeRed;
+                    break;
+            }
         }
         finally
         {
-            TestRawgButton.IsEnabled = true;
+            TestSpotifyButton.IsEnabled = true;
         }
     }
 
-    // Shared rendering for the two API tests. The service returns "ok" | "no-result" | "error: ...";
+    private async void TestPinterestButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var key = PinterestKeyInput.Text.Trim();
+        if (key.Length == 0)
+        {
+            PinterestStatusText.Text = "Pinterest : entrez d'abord un jeton.";
+            PinterestStatusText.Foreground = System.Windows.Media.Brushes.OrangeRed;
+            return;
+        }
+
+        TestPinterestButton.IsEnabled = false;
+        PinterestStatusText.Text = "Pinterest : test en cours…";
+        PinterestStatusText.Foreground = System.Windows.Media.Brushes.LightGoldenrodYellow;
+        try
+        {
+            // Tests the v5 search chain with the typed token (not only the saved one).
+            var status = await new PinterestSearchService(key).TestAsync();
+            ApplyTestStatus(PinterestStatusText, status, "Pinterest");
+        }
+        finally
+        {
+            TestPinterestButton.IsEnabled = true;
+        }
+    }
+
+    // Shared rendering for the API test. The service returns "ok" | "no-result" | "error: ...";
     // "ok" already proves a real image was downloaded, so it is the only green state.
     private static void ApplyTestStatus(TextBlock target, string status, string api)
     {

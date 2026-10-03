@@ -19,6 +19,7 @@ public sealed class GlobalSearchService
     private readonly PersonalProjectRepository _personalProjectRepository;
     private readonly TransitionRepository _transitionRepository;
     private readonly MusicTrackRepository _musicTrackRepository;
+    private readonly BudgetTransactionRepository _budgetTxRepository;
 
     public GlobalSearchService(SqliteConnectionFactory connectionFactory)
     {
@@ -32,6 +33,7 @@ public sealed class GlobalSearchService
         _personalProjectRepository = new PersonalProjectRepository(connectionFactory);
         _transitionRepository = new TransitionRepository(connectionFactory);
         _musicTrackRepository = new MusicTrackRepository(connectionFactory);
+        _budgetTxRepository = new BudgetTransactionRepository(connectionFactory);
     }
 
     public IReadOnlyList<SearchResult> Search(string query, int maxResults = 60)
@@ -46,8 +48,8 @@ public sealed class GlobalSearchService
             if (rank is int r) scored.Add((r, factory()));
         }
 
-        // --- Collections: artworks (all 4 categories) + observations ---
-        foreach (var category in new[] { ArtworkCategory.Film, ArtworkCategory.FilmAnimation, ArtworkCategory.Anime, ArtworkCategory.Livre })
+        // --- Collections: artworks (all categories) + observations ---
+        foreach (var category in Enum.GetValues<ArtworkCategory>())
         {
             foreach (var art in _artworkRepository.GetByCategory(category))
             {
@@ -129,6 +131,14 @@ public sealed class GlobalSearchService
                 track.Id, null, null));
         }
 
+        // --- Budget: imported transactions ---
+        foreach (var tx in _budgetTxRepository.GetAll())
+        {
+            Add(Rank(q, tx.Label), () => new SearchResult(
+                SearchResultKind.BudgetTransaction, "Budget", tx.Label, Snippet(q, tx.Label),
+                tx.Id, null, null));
+        }
+
         return scored
             .OrderBy(s => s.Rank)
             .ThenBy(s => s.Result.Title, StringComparer.CurrentCultureIgnoreCase)
@@ -180,4 +190,54 @@ public sealed class GlobalSearchService
         var normalized = text.Replace('\r', ' ').Replace('\n', ' ').Trim();
         return normalized.Length <= 80 ? normalized : normalized[..80] + "…";
     }
+
+    /// <summary>
+    /// What a hit actually looks like: the item's own image (cover, photo, artwork image…) when it
+    /// has one, and a body excerpt for text items. Feeds the link picker's thumbnails and the link
+    /// chips' preview popups. Null when the target no longer exists — the caller greys the preview
+    /// out. Poems carry their reader style so the popup can render verses the way they are read.
+    /// </summary>
+    public sealed record SearchPreview(string? ImagePath, string? Body, PoemView? Poem = null);
+
+    public sealed record PoemView(string FontFamily, double FontSize, bool Italic, bool Bold, string Alignment);
+
+    public SearchPreview? GetPreview(SearchResultKind kind, int primaryId, int? secondaryId)
+    {
+        return kind switch
+        {
+            SearchResultKind.Artwork => Pick(_artworkRepository.GetById(primaryId), a => (a.CoverImagePath, null)),
+            SearchResultKind.Observation => _observationRepository.GetById(secondaryId ?? -1) is { } obs
+                ? new SearchPreview(Existing(_artworkRepository.GetById(obs.ArtworkId)?.CoverImagePath), obs.Content)
+                : null,
+            SearchResultKind.JournalEntry => Pick(_journalEntryRepository.GetById(primaryId), e => (null, e.Text)),
+            SearchResultKind.Recipe => Pick(_recipeRepository.GetById(primaryId), r => (r.CoverImagePath, FirstText(r.Ingredients, r.Instructions, r.Notes))),
+            SearchResultKind.Poem => _poemRepository.GetById(primaryId) is { } poemView
+                ? new SearchPreview(Existing(poemView.ImagePath), poemView.Text,
+                    new PoemView(poemView.FontFamily, poemView.FontSize, poemView.Italic, poemView.Bold, poemView.TextAlignment))
+                : null,
+            SearchResultKind.Photo => Pick(_photoRepository.GetById(primaryId), p => (p.ImagePath, p.Description)),
+            SearchResultKind.PersonalProject => Pick(_personalProjectRepository.GetById(primaryId), p => (null, p.Description)),
+            SearchResultKind.Transition => Pick(_transitionRepository.GetById(primaryId), t => (null, FirstText(t.Description, t.Notes))),
+            SearchResultKind.MusicTrack => Pick(_musicTrackRepository.GetById(primaryId), t => (t.CoverImagePath, FirstText(t.Artist, t.Album))),
+            SearchResultKind.BudgetTransaction => Pick(_budgetTxRepository.GetAll().FirstOrDefault(t => t.Id == primaryId),
+                t => (null, $"{t.Label} · {t.Date:dd/MM/yyyy} · {t.Amount:0.00}")),
+            _ => null, // ArtisticProject carries nothing but a title — the chip shows the title alone.
+        };
+    }
+
+    private static SearchPreview? Pick<T>(T? item, Func<T, (string? Image, string? Body)> project) where T : class
+    {
+        if (item is null) return null;
+        var (image, body) = project(item);
+        return new SearchPreview(Existing(image), body);
+    }
+
+    // A relative media path pointing at a missing file becomes null, so the UI skips the thumbnail
+    // instead of showing a broken image.
+    private static string? Existing(string? relativePath)
+        => relativePath is { Length: > 0 } && File.Exists(MediaStorage.ResolveFullPath(relativePath))
+            ? relativePath : null;
+
+    private static string? FirstText(params string?[] fields)
+        => fields.FirstOrDefault(f => !string.IsNullOrWhiteSpace(f));
 }

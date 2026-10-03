@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:AkashicRecords.App"
         mc:Ignorable="d"
-        Title="Akashic Records"
+        Title="Archives Akashiques"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
@@ -15,6 +15,37 @@
         WindowStartupLocation="Manual"
         Closing="MainWindow_OnClosing"
         KeyDown="MainWindow_OnPreviewKeyDown">
+    <Window.Resources>
+        <!-- Calendar entry: an icon, deliberately outside the module row (the calendar is a
+             cross-section utility, not a content module). Checked state lights the accent. -->
+        <Style x:Key="IconNavButtonStyle" TargetType="ToggleButton">
+            <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Width" Value="38"/>
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="FontSize" Value="15"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bg" Background="{TemplateBinding Background}" CornerRadius="8">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="{StaticResource AccentSoftBrush}"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="{StaticResource Surface3Brush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -25,14 +56,11 @@
         <Border x:Name="HeaderBar" Grid.Row="0" Background="#EE1A1A2E" BorderBrush="#553B82F6" BorderThickness="0,0,0,1">
             <Grid Margin="16,10">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <TextBlock Grid.Column="0" Text="AKASHIC RECORDS" FontWeight="Bold"
-                           Foreground="White" VerticalAlignment="Center" Margin="0,0,24,0"/>
-
-                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                     <ToggleButton x:Name="OrganisationNav" Content="Organisation"
                                   Style="{StaticResource NavButtonStyle}"
                                   Click="NavButton_OnClick" Tag="Organisation"/>
@@ -45,10 +73,16 @@
                     <ToggleButton x:Name="ArchivesNav" Content="Archives"
                                   Style="{StaticResource NavButtonStyle}"
                                   Click="NavButton_OnClick" Tag="Archives"/>
+                    <ToggleButton x:Name="BudgetNav" Content="Budget"
+                                  Style="{StaticResource NavButtonStyle}"
+                                  Click="NavButton_OnClick" Tag="Budget"/>
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal"
                             HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <ToggleButton x:Name="CalendarNav" Content="&#xE787;" FontFamily="Segoe MDL2 Assets" ToolTip="Calendrier"
+                                  Style="{StaticResource IconNavButtonStyle}"
+                                  Click="NavButton_OnClick" Tag="Calendrier" Margin="0,0,10,0" VerticalAlignment="Center"/>
                     <Border x:Name="SearchBoxContainer" Width="240" Height="30" Margin="0,0,8,0"
                             Background="#2A2A45" CornerRadius="6" VerticalAlignment="Center">
                         <Grid>

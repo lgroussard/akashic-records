@@ -18,14 +18,15 @@ public sealed class DownloadItemRepository
         using var command = connection.CreateCommand();
         command.CommandText =
             """
-            INSERT INTO DownloadItem (Url, Title, Status, AddedAt)
-            VALUES ($url, $title, $status, $addedAt);
+            INSERT INTO DownloadItem (Url, Title, Status, AddedAt, FolderId)
+            VALUES ($url, $title, $status, $addedAt, $folderId);
             SELECT last_insert_rowid();
             """;
         command.Parameters.AddWithValue("$url", item.Url);
         command.Parameters.AddWithValue("$title", item.Title);
         command.Parameters.AddWithValue("$status", (int)item.Status);
         command.Parameters.AddWithValue("$addedAt", item.AddedAt.ToString("O"));
+        command.Parameters.AddWithValue("$folderId", (object?)item.FolderId ?? DBNull.Value);
         return Convert.ToInt32((long)command.ExecuteScalar()!);
     }
 
@@ -33,7 +34,7 @@ public sealed class DownloadItemRepository
     {
         using var connection = _connectionFactory.CreateOpenConnection();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, Url, Title, Status, AddedAt FROM DownloadItem ORDER BY AddedAt;";
+        command.CommandText = "SELECT Id, Url, Title, Status, AddedAt, FolderId FROM DownloadItem ORDER BY AddedAt;";
 
         var results = new List<DownloadItem>();
         using var reader = command.ExecuteReader();
@@ -63,6 +64,27 @@ public sealed class DownloadItemRepository
         command.ExecuteNonQuery();
     }
 
+    // Moves a card into a placement zone; null un-files it back to the implicit bucket.
+    public void UpdateFolder(int id, int? folderId)
+    {
+        using var connection = _connectionFactory.CreateOpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE DownloadItem SET FolderId = $folderId WHERE Id = $id;";
+        command.Parameters.AddWithValue("$folderId", (object?)folderId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$id", id);
+        command.ExecuteNonQuery();
+    }
+
+    public void UpdateTitle(int id, string title)
+    {
+        using var connection = _connectionFactory.CreateOpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE DownloadItem SET Title = $title WHERE Id = $id;";
+        command.Parameters.AddWithValue("$title", title);
+        command.Parameters.AddWithValue("$id", id);
+        command.ExecuteNonQuery();
+    }
+
     public void Delete(int id)
     {
         using var connection = _connectionFactory.CreateOpenConnection();
@@ -87,6 +109,7 @@ public sealed class DownloadItemRepository
         Url = reader.GetString(1),
         Title = reader.GetString(2),
         Status = (DownloadStatus)reader.GetInt32(3),
-        AddedAt = DateTime.Parse(reader.GetString(4))
+        AddedAt = DateTime.Parse(reader.GetString(4)),
+        FolderId = reader.IsDBNull(5) ? null : reader.GetInt32(5)
     };
 }

@@ -75,7 +75,7 @@
             </Grid>
 
             <TextBlock TextWrapping="Wrap" Foreground="#AAAAAA" FontSize="11" Margin="0,0,0,8">
-                File de liens. Akashic ne télécharge rien lui-même : il pilote votre propre outil (yt-dlp),
+                File de liens. L'application ne télécharge rien lui-même : il pilote votre propre outil (yt-dlp),
                 que vous installez et configurez, sous votre responsabilité et dans le respect des
                 conditions d'utilisation de chaque source.
             </TextBlock>
@@ -122,14 +122,14 @@
                 <TextBlock x:Name="StatusText" Foreground="#AAAAAA" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0"/>
             </StackPanel>
 
-            <ScrollViewer MaxHeight="260" VerticalScrollBarVisibility="Auto">
-                <StackPanel x:Name="QueuePanel"/>
+            <TextBlock Text="Glissez une fiche dans une zone pour l'y ranguer." Foreground="#888888" FontSize="10" Margin="0,0,0,6"/>
+            <ScrollViewer MaxHeight="360" VerticalScrollBarVisibility="Auto">
+                <StackPanel x:Name="BoardPanel"/>
             </ScrollViewer>
 
-            <TextBlock x:Name="EmptyText" Text="La file est vide." Foreground="#888888" FontSize="11"
-                       Margin="0,4,0,0" Visibility="Collapsed"/>
-
             <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                <Button Content="＋ Zone" Style="{StaticResource DlSmallButton}" Click="NewZoneButton_OnClick"
+                        ToolTip="Créer une zone de placement"/>
                 <Button Content="Télécharger maintenant" Style="{StaticResource DlSmallButton}" Click="DownloadNowButton_OnClick"/>
                 <Button Content="Copier les liens en file" Style="{StaticResource DlSmallButton}" Click="CopyQueuedButton_OnClick"/>
                 <Button Content="Vider terminés" Style="{StaticResource DlSmallButton}" Click="ClearDoneButton_OnClick"/>

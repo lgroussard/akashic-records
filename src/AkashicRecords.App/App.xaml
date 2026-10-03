@@ -588,7 +588,11 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="DatePicker">
-                        <Grid>
+                        <!-- DatePicker resolves its parts by name: PART_Root (Grid) and PART_TextBox.
+                             The old PART_DatePickerTextBox name was never found, so the control never
+                             wrote the formatted date into the box (it stayed blank behind the
+                             watermark). Keep those names exactly. -->
+                        <Grid x:Name="PART_Root">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
@@ -598,29 +602,25 @@
                                     BorderThickness="{TemplateBinding BorderThickness}"
                                     CornerRadius="8">
                                 <Grid>
-                                    <DatePickerTextBox x:Name="PART_DatePickerTextBox"
+                                    <DatePickerTextBox x:Name="PART_TextBox"
                                                        Foreground="{TemplateBinding Foreground}"
                                                        Background="Transparent"
                                                        BorderThickness="0"
                                                        Padding="9,6"
-                                                       VerticalAlignment="Center">
-                                        <DatePickerTextBox.Style>
-                                            <Style TargetType="DatePickerTextBox">
-                                                <Setter Property="Text" Value=" "/>
-                                            </Style>
-                                        </DatePickerTextBox.Style>
-                                    </DatePickerTextBox>
+                                                       VerticalAlignment="Center"/>
                                     <TextBlock Text="Sélectionner une date" Foreground="#888888" IsHitTestVisible="False"
                                                Padding="9,6" VerticalAlignment="Center">
                                         <TextBlock.Style>
                                             <Style TargetType="TextBlock">
-                                                <Setter Property="Visibility" Value="Visible"/>
+                                                <!-- DatePicker has no HasDate property (the old trigger was
+                                                     dead code, so the watermark never hid and the picked
+                                                     date stayed invisible behind it). Show it only while no
+                                                     date is selected; the DatePicker paints the formatted
+                                                     date into PART_DatePickerTextBox when one is. -->
+                                                <Setter Property="Visibility" Value="Collapsed"/>
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding SelectedDate, RelativeSource={RelativeSource TemplatedParent}}" Value="{x:Null}">
                                                         <Setter Property="Visibility" Value="Visible"/>
-                                                    </DataTrigger>
-                                                    <DataTrigger Binding="{Binding HasDate, RelativeSource={RelativeSource TemplatedParent}}" Value="True">
-                                                        <Setter Property="Visibility" Value="Collapsed"/>
                                                     </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>

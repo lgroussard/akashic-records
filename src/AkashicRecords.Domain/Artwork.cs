@@ -6,7 +6,9 @@ public enum ArtworkCategory
     FilmAnimation,
     Anime,
     Livre,
-    VideoGame
+    VideoGame,
+    // Appended last on purpose: Category persists as its int, so existing rows keep their meaning.
+    TvSeries
 }
 
 // Personal "how much do I want to keep this in mind" ranking - not an objective quality score.

@@ -1,9 +1,11 @@
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -68,6 +70,9 @@ public partial class JournauxView : UserControl, ISearchNavigable
     private readonly Dictionary<int, ConnectorVisual> _connectorVisuals = new();
 
     private ArtisticProject? _currentProject;
+    // Guards the picker while code (not the user) moves its selection, so OpenProject and the
+    // SelectionChanged handler can't ping-pong.
+    private bool _suppressProjectEvent;
     private JournalEntry? _selectedEntry;
     private Recipe? _selectedRecipe;
     private string? _selectedRecipeCategoryFilter;
@@ -506,9 +511,25 @@ public partial class JournauxView : UserControl, ISearchNavigable
         return false;
     }
 
+    // Re-syncs the toolbar picker with the repository. The board itself never hides: arriving on the
+    // artistic tab lands straight on the canvas, with the newest project open when none is current.
     private void RefreshProjectsList()
     {
-        ProjectsList.ItemsSource = _projectRepository.GetAll();
+        var projects = _projectRepository.GetAll();
+        ArtisticProject? toSelect = null;
+        if (_currentProject is not null)
+        {
+            foreach (var p in projects) if (p.Id == _currentProject.Id) toSelect = p;
+        }
+        else if (projects.Count > 0)
+        {
+            toSelect = projects[projects.Count - 1]; // newest: GetAll orders CreatedAt-ascending
+        }
+        _suppressProjectEvent = true;
+        ProjectPicker.ItemsSource = projects;
+        ProjectPicker.SelectedItem = toSelect;
+        _suppressProjectEvent = false;
+        if (toSelect is not null && _currentProject?.Id != toSelect.Id) OpenProject(toSelect);
     }
 
     private void NewProjectButton_OnClick(object sender, RoutedEventArgs e)
@@ -518,17 +539,23 @@ public partial class JournauxView : UserControl, ISearchNavigable
 
         _projectRepository.Add(new ArtisticProject { Title = title, CreatedAt = DateTime.Now });
         NewProjectTitleInput.Clear();
+        _currentProject = null; // make RefreshProjectsList land on the newest — the one just created
         RefreshProjectsList();
     }
 
-    private void ProjectsList_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void ProjectPicker_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (ProjectsList.SelectedItem is ArtisticProject project) OpenProject(project);
+        if (_suppressProjectEvent) return;
+        if (ProjectPicker.SelectedItem is ArtisticProject project && _currentProject?.Id != project.Id)
+            OpenProject(project);
     }
 
     private void OpenProject(ArtisticProject project)
     {
         _currentProject = project;
+        _suppressProjectEvent = true;
+        ProjectPicker.SelectedItem = project;
+        _suppressProjectEvent = false;
         SaveActiveItem();
         _undoStack.Clear();
         _redoStack.Clear();
@@ -538,7 +565,6 @@ public partial class JournauxView : UserControl, ISearchNavigable
         _pendingConnectFromId = null;
         DrawArrowButton.Content = "Tracer une flèche";
 
-        CanvasProjectTitleText.Text = project.Title;
         ElementCanvas.Children.Clear();
 
         foreach (var element in _canvasRepository.GetByProject(project.Id))
@@ -553,27 +579,20 @@ public partial class JournauxView : UserControl, ISearchNavigable
             AddConnectorVisual(connector);
         }
 
-        ProjectListRoot.Visibility = Visibility.Collapsed;
-        CanvasRoot.Visibility = Visibility.Visible;
         CanvasRoot.Focus();
     }
 
-    private void BackToProjectsButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        _currentProject = null;
-        CanvasRoot.Visibility = Visibility.Collapsed;
-        ProjectListRoot.Visibility = Visibility.Visible;
-        RefreshProjectsList();
-    }
-
-    // Escape closes the canvas (back to project list) first; Ctrl+Z/Ctrl+Y drive undo/redo
-    // unless focus is in a text note, where the native textbox undo should apply instead.
+    // Escape cancels an in-flight arrow (the board has no "back to list" anymore); Ctrl+Z/Ctrl+Y drive
+    // undo/redo unless focus is in a text note, where the native textbox undo should apply instead.
     private void CanvasRoot_OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Escape)
         {
-            BackToProjectsButton_OnClick(sender, e);
-            e.Handled = true;
+            if (_isConnectMode)
+            {
+                DrawArrowButton_OnClick(sender, e);
+                e.Handled = true;
+            }
             return;
         }
 
@@ -1943,6 +1962,10 @@ public partial class JournauxView : UserControl, ISearchNavigable
         // bound to nothing, so a reopened session showed an empty book beside the poem.
         if (_selectedPoem is not null)
         {
+            // Re-read after EnsureUnclassifiedRecueil may have just adopted this poem out of NULL, so the
+            // fresh RecueilId — not the stale NULL the deep-link arrived with — decides which book opens.
+            if (_poemRepository.GetById(_selectedPoem.Id) is { } fresh) _selectedPoem = fresh;
+
             _openRecueil = _selectedPoem.RecueilId is { } rid
                 ? _recueilRepository.GetAll().FirstOrDefault(r => r.Id == rid)
                 : null;
@@ -1968,17 +1991,26 @@ public partial class JournauxView : UserControl, ISearchNavigable
     {
         var all = _recueilRepository.GetAll();
         var existing = all.FirstOrDefault(r => r.Title == UnclassifiedTitle);
-        if (existing is not null) return existing;
-
-        var legacy = all.FirstOrDefault(r => r.Title == LegacyUnclassifiedTitle);
-        if (legacy is not null)
+        if (existing is null)
         {
-            _recueilRepository.Update(legacy.Id, UnclassifiedTitle);
-            return _recueilRepository.GetAll().First(r => r.Id == legacy.Id);
+            var legacy = all.FirstOrDefault(r => r.Title == LegacyUnclassifiedTitle);
+            if (legacy is not null)
+            {
+                _recueilRepository.Update(legacy.Id, UnclassifiedTitle);
+                existing = _recueilRepository.GetAll().First(r => r.Id == legacy.Id);
+            }
+            else
+            {
+                var id = _recueilRepository.Add(new Recueil { Title = UnclassifiedTitle, CreatedAt = DateTime.Now });
+                existing = _recueilRepository.GetAll().First(r => r.Id == id);
+            }
         }
 
-        var id = _recueilRepository.Add(new Recueil { Title = UnclassifiedTitle, CreatedAt = DateTime.Now });
-        return _recueilRepository.GetAll().First(r => r.Id == id);
+        // An unfiled poem is meant to live in this catch-all, not float free of every book. Adopting any
+        // legacy NULL row here is what sends a deep-linked orphan to "Sans classement" rather than a stray
+        // standalone page. Idempotent — once adopted, no row still carries NULL and this is a no-op.
+        _poemRepository.AssignUnassignedToRecueil(existing.Id);
+        return existing;
     }
 
     private Recueil GetUnclassifiedRecueil() =>
@@ -2062,11 +2094,10 @@ public partial class JournauxView : UserControl, ISearchNavigable
         if (e.Key != Key.Tab) return;
 
         e.Handled = true;
-        var box = PoemTextInput;
-        var start = box.SelectionStart;
-        var taken = box.SelectionLength;
-        box.Text = box.Text.Remove(start, taken).Insert(start, "\t");
-        box.Select(start + 1, 0);
+        var insertAt = PoemTextInput.CaretPosition?.GetInsertionPosition(LogicalDirection.Forward);
+        if (insertAt is null) return;
+        var inserted = new TextRange(insertAt, insertAt) { Text = "\t" };
+        PoemTextInput.CaretPosition = inserted.End;
     }
 
     // The verse TextBox only hit-tests over the text it already holds — its height follows the glyphs, so
@@ -2087,7 +2118,7 @@ public partial class JournauxView : UserControl, ISearchNavigable
         }
 
         PoemTextInput.Focus();
-        PoemTextInput.Select(PoemTextInput.Text.Length, 0);
+        PoemTextInput.CaretPosition = PoemTextInput.Document.ContentEnd;
     }
 
     // Builds the horizontal shelf of recueil covers.
@@ -2538,8 +2569,9 @@ public partial class JournauxView : UserControl, ISearchNavigable
         SaveActiveItem();
         var recueils = (List<Recueil?>)PoemRecueilPicker.ItemsSource;
 
+        _poemSelectionToFormat = null;
         PoemTitleInput.Text = poem?.Title ?? string.Empty;
-        PoemTextInput.Text = poem?.Text ?? string.Empty;
+        LoadPoemContent(poem);
         PoemTagsInput.Text = poem?.Tags ?? string.Empty;
         PoemRecueilPicker.SelectedItem = recueils.FirstOrDefault(r => r?.Id == poem?.RecueilId);
         ApplyPoemFormatting(poem);
@@ -2564,7 +2596,8 @@ public partial class JournauxView : UserControl, ISearchNavigable
     {
         if (poem is null) return;
 
-        PoemTextInput.TextAlignment = Enum.Parse<TextAlignment>(poem.TextAlignment);
+        var doc = PoemTextInput.Document;
+        doc.TextAlignment = Enum.Parse<TextAlignment>(poem.TextAlignment);
         // "Marges" is a page/reading margin: it must breathe the verse away from the frame from the INSIDE, over a
         // 14/12 base padding, so it can never shrink the box itself. Driving the OUTER Margin instead scaled the
         // whole painted rectangle (and, the box now being full-bleed, looked like it did nothing to the text) —
@@ -2574,10 +2607,10 @@ public partial class JournauxView : UserControl, ISearchNavigable
         // stretches to fill the card's height so no vertical band is ever wasted.
         PoemTextInput.Width = Math.Clamp(poem.EditorWidth, 220, 1400);
         PoemWidthText.Text = $"{poem.EditorWidth:F0}";
-        PoemTextInput.FontSize = poem.FontSize;
-        PoemTextInput.FontFamily = new FontFamily(poem.FontFamily);
-        PoemTextInput.FontStyle = poem.Italic ? FontStyles.Italic : FontStyles.Normal;
-        PoemTextInput.FontWeight = poem.Bold ? FontWeights.Bold : FontWeights.Normal;
+        doc.FontSize = poem.FontSize;
+        doc.FontFamily = new FontFamily(poem.FontFamily);
+        doc.FontStyle = poem.Italic ? FontStyles.Italic : FontStyles.Normal;
+        doc.FontWeight = poem.Bold ? FontWeights.Bold : FontWeights.Normal;
 
         foreach (var button in new[] { PoemAlignLeftButton, PoemAlignCenterButton, PoemAlignRightButton, PoemAlignJustifyButton })
         {
@@ -2589,6 +2622,124 @@ public partial class JournauxView : UserControl, ISearchNavigable
         PoemItalicButton.IsChecked = poem.Italic;
         PoemFontSizeText.Text = $"{poem.FontSize:F0}";
         PoemMarginText.Text = $"{poem.Margin:F0}";
+    }
+
+    // ── Rich poem content ─────────────────────────────────────────────────────────
+    // The database always carried both columns — RichContent (the XAML-serialized FlowDocument) and
+    // Text (plain, what search and previews read). This editor is what finally feeds and consumes
+    // them, which is what makes per-word styling possible at all: a plain TextBox can only ever style
+    // the whole control, which is why B/I used to repaint the entire poem.
+
+    // The span the reader had selected when focus left the editor — a toolbar click takes focus first
+    // (LostFocus fires before Click), so the button handlers can still reach the intended words.
+    private TextRange? _poemSelectionToFormat;
+
+    private void LoadPoemContent(Poem? poem)
+    {
+        var doc = (poem?.RichContent is { Length: > 0 } xaml ? TryParsePoemDocument(xaml) : null)
+                  ?? BuildPlainPoemDocument(poem?.Text ?? string.Empty);
+        // The stored XAML froze the baselines it was saved with; dropping those local values lets
+        // ApplyPoemFormatting re-apply them from the poem, while genuine partial overrides — the
+        // explicit values sitting on the Runs — survive the round-trip untouched.
+        doc.ClearValue(FlowDocument.FontFamilyProperty);
+        doc.ClearValue(FlowDocument.FontSizeProperty);
+        doc.ClearValue(FlowDocument.FontStyleProperty);
+        doc.ClearValue(FlowDocument.FontWeightProperty);
+        doc.ClearValue(FlowDocument.TextAlignmentProperty);
+        PoemTextInput.Document = doc;
+    }
+
+    private static FlowDocument? TryParsePoemDocument(string xaml)
+    {
+        try
+        {
+            return System.Windows.Markup.XamlReader.Parse(xaml) as FlowDocument;
+        }
+        catch (Exception)
+        {
+            return null; // a corrupt blob is never worth losing the readable plain Text over
+        }
+    }
+
+    // Plain text in, one paragraph per verse-line out — the line breaks the reader typed stay exactly
+    // where they left them.
+    private static FlowDocument BuildPlainPoemDocument(string text)
+    {
+        var doc = new FlowDocument();
+        foreach (var line in text.Replace("\r\n", "\n").Split('\n'))
+            doc.Blocks.Add(new Paragraph(new Run(line)) { Margin = new Thickness(0) });
+        if (doc.Blocks.Count == 0) doc.Blocks.Add(new Paragraph(new Run()) { Margin = new Thickness(0) });
+        return doc;
+    }
+
+    // Pushes the on-screen document back into Text (plain, for search) and RichContent (XAML), persisting both.
+    private void SyncPoemTextFromEditor()
+    {
+        if (_selectedPoem is null) return;
+
+        var doc = PoemTextInput.Document;
+        var plain = new TextRange(doc.ContentStart, doc.ContentEnd).Text
+            .Replace("\r\n", "\n").TrimEnd('\n');
+
+        string xaml;
+        try
+        {
+            xaml = System.Windows.Markup.XamlWriter.Save(doc);
+        }
+        catch (Exception)
+        {
+            return; // a transient serialization failure keeps the last good RichContent rather than wiping it
+        }
+
+        _selectedPoem.Text = plain;
+        _selectedPoem.RichContent = xaml;
+        _poemRepository.UpdateRichContent(_selectedPoem.Id, plain, xaml);
+    }
+
+    // Consumes the span captured at the editor's LostFocus: valid for exactly one use, so a later click
+    // with no selection falls back to the whole-poem baseline instead of restyling stale words.
+    private bool TryConsumePoemSelection([NotNullWhen(true)] out TextRange? selection)
+    {
+        selection = _poemSelectionToFormat is { } pending
+                    && ReferenceEquals(DocumentOf(pending), PoemTextInput.Document)
+                    && !pending.IsEmpty
+            ? pending
+            : null;
+        _poemSelectionToFormat = null;
+        return selection is not null;
+    }
+
+    // The FlowDocument a span belongs to, walked up the logical tree — a stale span must never be
+    // applied to a document that has since been swapped under it.
+    private static FlowDocument? DocumentOf(TextRange range)
+    {
+        var node = range.Start.Parent as FrameworkContentElement;
+        while (node is not null and not FlowDocument) node = node.Parent as FrameworkContentElement;
+        return node as FlowDocument;
+    }
+
+    // Is the style already in effect (uniformly) across the selection — the toggle's basis. A mixed
+    // selection reads as inactive, so the next click applies it.
+    private static bool StyleActiveIn(TextRange selection, DependencyProperty property, object expected) =>
+        Equals(selection.GetPropertyValue(property), expected);
+
+    private void ApplyToPoemSelection(TextRange selection, DependencyProperty property, object value)
+    {
+        selection.ApplyPropertyValue(property, value);
+        SyncPoemTextFromEditor();
+        PoemTextInput.Focus();
+    }
+
+    // Drops a local value the runs no longer need — see the bold/italic toggle-off contract above.
+    // ReadLocalValue, not GetValue: an inherited Normal (a run that never had the style) must be left
+    // alone — only an EXPLICIT off-value, the one the toggle just stamped, is worth removing.
+    private void StripRunValues(DependencyProperty property, object offValue)
+    {
+        foreach (var block in PoemTextInput.Document.Blocks)
+            if (block is Paragraph paragraph)
+                foreach (Inline inline in paragraph.Inlines)
+                    if (inline is Run run && Equals(run.ReadLocalValue(property), offValue))
+                        run.ClearValue(property);
     }
 
     private void PopulateFontFamilies()
@@ -2604,6 +2755,9 @@ public partial class JournauxView : UserControl, ISearchNavigable
     {
         if (_selectedPoem is null || sender is not ToggleButton { Tag: string alignment }) return;
 
+        // Alignment is a whole-document baseline; a pending word-selection would otherwise survive the
+        // click (focus stayed inside the toolbar) and get applied by a later B/I press.
+        _poemSelectionToFormat = null;
         _selectedPoem.TextAlignment = alignment;
         ApplyPoemFormatting(_selectedPoem);
         _poemRepository.UpdateFormatting(_selectedPoem.Id, _selectedPoem.TextAlignment, _selectedPoem.Margin, _selectedPoem.FontSize, _selectedPoem.FontFamily, _selectedPoem.Bold, _selectedPoem.Italic);
@@ -2667,6 +2821,14 @@ public partial class JournauxView : UserControl, ISearchNavigable
     {
         if (_selectedPoem is null) return;
 
+        // With a selection, A± nudges those words from their own effective size; without, the whole-poem baseline.
+        if (TryConsumePoemSelection(out var selection))
+        {
+            var from = selection.GetPropertyValue(TextElement.FontSizeProperty) is double size ? size : _selectedPoem.FontSize;
+            ApplyToPoemSelection(selection, TextElement.FontSizeProperty, Math.Clamp(from + delta, 9, 72));
+            return;
+        }
+
         _selectedPoem.FontSize = Math.Clamp(_selectedPoem.FontSize + delta, 9, 72);
         ApplyPoemFormatting(_selectedPoem);
         _poemRepository.UpdateFormatting(_selectedPoem.Id, _selectedPoem.TextAlignment, _selectedPoem.Margin, _selectedPoem.FontSize, _selectedPoem.FontFamily, _selectedPoem.Bold, _selectedPoem.Italic);
@@ -2675,6 +2837,13 @@ public partial class JournauxView : UserControl, ISearchNavigable
     private void PoemFontFamilyCombo_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_selectedPoem is null || PoemFontFamilyCombo.SelectedItem is not string family) return;
+
+        // A live selection takes the family on those words only; the baseline is untouched.
+        if (TryConsumePoemSelection(out var selection))
+        {
+            ApplyToPoemSelection(selection, TextElement.FontFamilyProperty, new FontFamily(family));
+            return;
+        }
 
         _selectedPoem.FontFamily = family;
         ApplyPoemFormatting(_selectedPoem);
@@ -2685,6 +2854,24 @@ public partial class JournauxView : UserControl, ISearchNavigable
     {
         if (_selectedPoem is null || sender is not ToggleButton button) return;
 
+        // Words selected → B toggles those words (Run-level override) and leaves the whole-poem
+        // baseline alone; nothing selected → B stays the whole-poem toggle it always was.
+        if (TryConsumePoemSelection(out var selection))
+        {
+            var wasBold = StyleActiveIn(selection, TextElement.FontWeightProperty, FontWeights.Bold);
+            selection.ApplyPropertyValue(TextElement.FontWeightProperty,
+                wasBold ? FontWeights.Normal : FontWeights.Bold);
+            // Un-bolding while the baseline is plain: the explicit Normal the toggle just stamped is pure
+            // shadowing — it would freeze those words against a later whole-poem B. Drop it, so they
+            // inherit again. While the baseline IS bold, the explicit Normal must stay: it is the only
+            // thing keeping those words light amid the bold.
+            if (wasBold && !_selectedPoem.Bold) StripRunValues(TextElement.FontWeightProperty, FontWeights.Normal);
+            SyncPoemTextFromEditor();
+            PoemTextInput.Focus();
+            button.IsChecked = !wasBold;
+            return;
+        }
+
         _selectedPoem.Bold = button.IsChecked ?? false;
         ApplyPoemFormatting(_selectedPoem);
         _poemRepository.UpdateFormatting(_selectedPoem.Id, _selectedPoem.TextAlignment, _selectedPoem.Margin, _selectedPoem.FontSize, _selectedPoem.FontFamily, _selectedPoem.Bold, _selectedPoem.Italic);
@@ -2693,6 +2880,19 @@ public partial class JournauxView : UserControl, ISearchNavigable
     private void PoemItalicButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (_selectedPoem is null || sender is not ToggleButton button) return;
+
+        if (TryConsumePoemSelection(out var selection))
+        {
+            var wasItalic = StyleActiveIn(selection, TextElement.FontStyleProperty, FontStyles.Italic);
+            selection.ApplyPropertyValue(TextElement.FontStyleProperty,
+                wasItalic ? FontStyles.Normal : FontStyles.Italic);
+            // Same contract as the bold toggle: an explicit off-value only survives while the baseline is on.
+            if (wasItalic && !_selectedPoem.Italic) StripRunValues(TextElement.FontStyleProperty, FontStyles.Normal);
+            SyncPoemTextFromEditor();
+            PoemTextInput.Focus();
+            button.IsChecked = !wasItalic;
+            return;
+        }
 
         _selectedPoem.Italic = button.IsChecked ?? false;
         ApplyPoemFormatting(_selectedPoem);
@@ -2726,12 +2926,51 @@ public partial class JournauxView : UserControl, ISearchNavigable
     {
         if (_selectedPoem is null) return;
 
+        // Capture the live selection before anything can move it: a toolbar click lands its LostFocus
+        // here first, and the B/I/A±/police handlers consume exactly this span. The span survives only
+        // while focus goes straight to one of those toolbar controls — leaving for any other control is
+        // an abandoned selection, and a later toolbar click must then restyle the baseline, not stale words.
+        if (ReferenceEquals(sender, PoemTextInput))
+        {
+            if (PoemTextInput.Selection is { IsEmpty: false } selection && FocusLeftEditorForFormattingTools())
+                _poemSelectionToFormat = selection;
+            else _poemSelectionToFormat = null;
+        }
+
         _selectedPoem.Title = PoemTitleInput.Text.Trim();
-        _selectedPoem.Text = PoemTextInput.Text;
         _selectedPoem.Tags = PoemTagsInput.Text.Trim();
+        if (ReferenceEquals(sender, PoemTextInput)) SyncPoemTextFromEditor();
 
         _poemRepository.Update(_selectedPoem.Id, _selectedPoem.RecueilId, _selectedPoem.Title, _selectedPoem.Text, _selectedPoem.Tags);
     }
+
+    // True when focus moved somewhere the reader would consider "still working on these words": the
+    // editor itself (a button that never took focus leaves it there) or any control inside the formatting
+    // toolbar. Focus leaving for a title/tags/recueil field, a search box or an alignment button is an
+    // abandoned selection, and the next toolbar click must then restyle the baseline, not stale words.
+    // The focus can land on a template part, so the walk climbs to the toolbar rather than comparing directly.
+    private bool FocusLeftEditorForFormattingTools()
+    {
+        var window = Window.GetWindow(this);
+        if (window is null) return true;
+        return FocusManager.GetFocusedElement(window) is not DependencyObject focused
+               || focused == PoemTextInput
+               || IsWithinFormattingToolbar(focused);
+    }
+
+    private bool IsWithinFormattingToolbar(DependencyObject element)
+    {
+        for (var el = element; el is not null; el = ParentOf(el))
+        {
+            if (el is FrameworkElement { Name: "PoemFormattingToolbar" }) return true;
+        }
+        return false;
+    }
+
+    private static DependencyObject? ParentOf(DependencyObject element) =>
+        element is Visual or System.Windows.Media.Media3D.Visual3D
+            ? VisualTreeHelper.GetParent(element)
+            : LogicalTreeHelper.GetParent(element);
 
     private void PoemRecueilPicker_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
