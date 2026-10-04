@@ -73,6 +73,10 @@ public partial class JournauxView : UserControl, ISearchNavigable
     // Guards the picker while code (not the user) moves its selection, so OpenProject and the
     // SelectionChanged handler can't ping-pong.
     private bool _suppressProjectEvent;
+    // Same guard for the poem page's recueil picker: reassigning ItemsSource clears the selection
+    // and fires SelectionChanged while the old _selectedPoem is still in place, so the handler's
+    // null-read must not be mistaken for a user edit and stamp RecueilId = null over the real one.
+    private bool _suppressRecueilPickerEvent;
     private JournalEntry? _selectedEntry;
     private Recipe? _selectedRecipe;
     private string? _selectedRecipeCategoryFilter;
@@ -2051,9 +2055,12 @@ public partial class JournauxView : UserControl, ISearchNavigable
     private void PoetryMenuButton_OnToggle(object sender, RoutedEventArgs e)
         => SetPoetryMenuOpen(PoetryMenuButton.IsChecked == true);
 
-    // Escape inside the notebook steps back through what is open — the fly-out, then the rename bar, then
-    // the page to the book, then the book to the shelf — and stops there. Without this the key reaches the
-    // window's own handler and the whole section closes, which is what made the ⋯ menu feel inescapable.
+    // Escape inside the notebook steps back through what is open — the fly-out, then the rename bar,
+    // then the pane layer. For the pane steps the key is deliberately NOT marked handled, so the same
+    // press keeps bubbling to the window's own handler, which collapses the whole section: one Escape
+    // from a poem page closes the window at once, with the "last viewed item" pointer left on the pane
+    // below. The ⋯ fly-out and the rename bar stay one-step-only (handled), since they sit on top of a
+    // pane that is itself still one press away.
     private void PoetryRoot_OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key != Key.Escape) return;
@@ -2074,15 +2081,27 @@ public partial class JournauxView : UserControl, ISearchNavigable
 
         if (PoemEditor.Visibility == Visibility.Visible)
         {
-            ShowPoetryPane(_openRecueil is not null ? PoetryPane.Book : PoetryPane.Bookshelf);
-            e.Handled = true;
+            var toBook = _openRecueil is not null;
+            ShowPoetryPane(toBook ? PoetryPane.Book : PoetryPane.Bookshelf);
+            // The pointer follows the pane now on screen: page is nulled so the payload records the
+            // book (or the shelf, for the standalone list, whose flag goes with the hidden pane).
+            _selectedPoem = null;
+            if (!toBook) _poetryStandaloneActive = false;
+            SaveActiveItem();
+            _configService.Save(_config);
+            // e.Handled left false on purpose: the window's Escape handler runs on this same press
+            // and closes the section (one press = page → book/shelf → window shut).
             return;
         }
 
         if (_openRecueil is not null)
         {
             ShowPoetryPane(PoetryPane.Bookshelf);
-            e.Handled = true;
+            _openRecueil = null;
+            _selectedPoem = null;
+            _poetryStandaloneActive = false;
+            SaveActiveItem();
+            _configService.Save(_config);
         }
     }
 
@@ -2351,9 +2370,13 @@ public partial class JournauxView : UserControl, ISearchNavigable
         }
 
         // The recueil picker on the page needs a "none" option in addition to the actual recueils.
+        // Reassigning the list drops the current selection and raises SelectionChanged — suppressed
+        // so the programmatic clear is not read as a user edit (see _suppressRecueilPickerEvent).
         var withNone = new List<Recueil?> { null };
         withNone.AddRange(recueils);
+        _suppressRecueilPickerEvent = true;
         PoemRecueilPicker.ItemsSource = withNone;
+        _suppressRecueilPickerEvent = false;
     }
 
     private void RecueilFilterList_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -2573,7 +2596,9 @@ public partial class JournauxView : UserControl, ISearchNavigable
         PoemTitleInput.Text = poem?.Title ?? string.Empty;
         LoadPoemContent(poem);
         PoemTagsInput.Text = poem?.Tags ?? string.Empty;
+        _suppressRecueilPickerEvent = true;
         PoemRecueilPicker.SelectedItem = recueils.FirstOrDefault(r => r?.Id == poem?.RecueilId);
+        _suppressRecueilPickerEvent = false;
         ApplyPoemFormatting(poem);
         RefreshPoemImage();
 
@@ -2974,6 +2999,7 @@ public partial class JournauxView : UserControl, ISearchNavigable
 
     private void PoemRecueilPicker_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_suppressRecueilPickerEvent) return;
         if (_selectedPoem is null || !PoemRecueilPicker.IsEnabled) return;
 
         var recueilId = (PoemRecueilPicker.SelectedItem as Recueil)?.Id;
