@@ -629,7 +629,7 @@ public partial class MainWindow : Window
     private void NavButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (sender is not ToggleButton clicked || clicked.Tag is not string sectionName) return;
-        foreach (var button in new[] { OrganisationNav, JournauxNav, CollectionsNav, ArchivesNav, BudgetNav, CalendarNav })
+        foreach (var button in new[] { OrganisationNav, JournauxNav, CollectionsNav, ArchivesNav, BudgetNav, CalendarNav, AtelierNav })
         {
             if (button != clicked) button.IsChecked = false;
         }
@@ -794,7 +794,7 @@ public partial class MainWindow : Window
     {
         if (e.Key != Key.Escape || _activeSection is null) return;
 
-        foreach (var button in new[] { OrganisationNav, JournauxNav, CollectionsNav, ArchivesNav, BudgetNav, CalendarNav })
+        foreach (var button in new[] { OrganisationNav, JournauxNav, CollectionsNav, ArchivesNav, BudgetNav, CalendarNav, AtelierNav })
         {
             button.IsChecked = false;
         }
@@ -814,6 +814,7 @@ public partial class MainWindow : Window
             "Archives" => new ArchivesView(_config),
             "Budget" => new BudgetView(_config),
             "Calendrier" => new CalendarView(_config, RescheduleCalendarNotifications),
+            "Atelier" => new AtelierView(_config),
             _ => null
         };
 
@@ -840,6 +841,7 @@ public partial class MainWindow : Window
             "Archives" => ArchivesNav,
             "Budget" => BudgetNav,
             "Calendrier" => CalendarNav,
+            "Atelier" => AtelierNav,
             _ => null
         };
         if (nav is null) return;
@@ -883,6 +885,9 @@ public partial class MainWindow : Window
                     // book and the poem page (see JournauxView.ShowPoetryPaneForScreenshot).
                     jour.ShowTabForScreenshot("Poetry");
                     jour.ShowPoetryPaneForScreenshot(tab["Poetry:".Length..]);
+                    break;
+                case AtelierView atel when tab is "Cartes" or "Chrono":
+                    atel.ShowTabForScreenshot(tab);
                     break;
             }
         }

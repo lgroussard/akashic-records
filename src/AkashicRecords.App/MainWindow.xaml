@@ -76,6 +76,9 @@
                     <ToggleButton x:Name="BudgetNav" Content="Budget"
                                   Style="{StaticResource NavButtonStyle}"
                                   Click="NavButton_OnClick" Tag="Budget"/>
+                    <ToggleButton x:Name="AtelierNav" Content="Atelier"
+                                  Style="{StaticResource NavButtonStyle}"
+                                  Click="NavButton_OnClick" Tag="Atelier"/>
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal"

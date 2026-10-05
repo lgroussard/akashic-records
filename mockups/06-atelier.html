@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<title>06 — Atelier dessin</title>
+<style>
+:root{--bg:#0E0E1A;--s1:#16162A;--s2:#1C1C34;--s3:#232342;--bd:#24FFFFFF;
+--tx:#ECECF4;--mu:#A0A0BD;--fa:#6F6F8C;--ac:#5B8CFF;--ac2:#9B7BFF;}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);
+font:14px/1.45 "Segoe UI",sans-serif;padding:24px}
+.row{display:flex;gap:16px;align-items:center}
+.seg{display:inline-flex;background:var(--s1);border:1px solid var(--bd);border-radius:8px;padding:3px}
+.seg b{padding:6px 14px;border-radius:6px;color:var(--mu);font-weight:600}
+.seg b.on{background:var(--ac);color:#fff}
+.card{background:var(--s1);border:1px solid var(--bd);border-radius:12px;padding:20px}
+.k{color:var(--fa);font-size:11px;letter-spacing:.08em;text-transform:uppercase}
+.pill{display:inline-block;background:var(--s3);border-radius:999px;padding:4px 12px;font-size:12px;color:var(--mu)}
+.pill.ok{background:#295B8CFF;color:var(--tx)}
+.big{font:600 22px Georgia,serif}
+.num{display:inline-flex;width:20px;height:20px;border-radius:50%;background:var(--ac);
+color:#fff;align-items:center;justify-content:center;font-size:11px;margin-right:6px}
+ol{padding-left:0;list-style:none}
+li{margin:6px 0}
+.ref{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.r{background:var(--s2);border:1px solid var(--bd);border-radius:10px;padding:10px;font-size:12px}
+.bar{height:6px;background:var(--s3);border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,#5B8CFF,#9B7BFF)}
+</style></head><body>
+
+<div class="row" style="margin-bottom:14px">
+  <span class="big">Atelier</span>
+  <span class="seg"><b class="on">Cartes</b><b>Chrono</b></span>
+  <span class="pill">Exercice 7 / 32 · Structure</span>
+</div>
+
+<div class="card" style="margin-bottom:14px">
+  <div class="k">Exercice 7 · Structure · 5 min</div>
+  <div class="big" style="margin:8px 0">Volumes dans 3 plans</div>
+  <ol>
+    <li><span class="num">1</span>Cube en perspective 1 point, arêtes visibles</li>
+    <li><span class="num">2</span>Sphère : un cercle + 3 valeurs (clair / moyen / ombre)</li>
+    <li><span class="num">3</span>Cylindre : ellipses haut/bas, dégradé sur le fût</li>
+  </ol>
+  <div class="row" style="margin-top:10px">
+    <span class="pill ok">Auto-contrôle : 3 plans lisibles ?</span>
+    <span class="pill">Valeur 3 = ombre portée nette ?</span>
+  </div>
+</div>
+
+<div class="ref">
+  <div class="r"><span class="k">Réf 1</span><br><b>Paul Cézanne</b>, <i>Bouteille, verre et pot</i> — décomposition en cylindres/cônes. Wikimedia Commons.</div>
+  <div class="r"><span class="k">Réf 2</span><br><b>Nicolas Poussin</b>, <i>Et in Arcadia ego</i> — cube = plan 1, sphère = plan 2.</div>
+  <div class="r"><span class="k">Réf 3</span><br><b>Giorgio Morandi</b>, natures mortes — 3 valeurs, rien de plus.</div>
+</div>
+
+<div class="card" style="margin-top:14px">
+  <div class="k">Avancement de la session</div>
+  <div class="bar"><i style="width:22%"></i></div>
+  <div class="row" style="margin-top:8px">
+    <span class="pill">Structure → Valeur → Gesture → Couleur → Composition</span>
+    <span class="pill">7 / 32</span>
+  </div>
+</div>
+
+<div class="card" style="margin-top:14px">
+  <div class="k">Mode chrono — même vue, minuteur actif</div>
+  <div class="row" style="margin-top:8px">
+    <span class="big">30 s</span>
+    <span class="pill ok">Croquis 1 ✓</span><span class="pill ok">Croquis 2 ✓</span>
+    <span class="pill">Croquis 3 …</span><span class="pill">4</span><span class="pill">5</span><span class="pill">6</span>
+  </div>
+  <div class="r" style="margin-top:10px">Sujet : <b>pichet + 2 fruits</b> — le suivant s'enchaîne automatiquement à la sonnerie, les 6 croquis tiennent sur la même feuille.</div>
+</div>
+
+</body></html>
