@@ -432,6 +432,11 @@ public partial class JournauxView : UserControl, ISearchNavigable
 
     private void JournauxView_OnUnloaded(object sender, RoutedEventArgs e)
     {
+        // The section is being replaced (Escape, nav switch, deep-link) — this is the last moment the
+        // old visual tree still holds the typed values, and no LostFocus is guaranteed to have fired
+        // on the focused field. Flush before the tree goes away, or the edits die with this instance.
+        FlushPoemEdits();
+
         if (PresentationSource.FromVisual(this) is HwndSource hwndSource)
         {
             hwndSource.RemoveHook(HorizontalWheelHook);
@@ -2082,13 +2087,16 @@ public partial class JournauxView : UserControl, ISearchNavigable
         if (PoemEditor.Visibility == Visibility.Visible)
         {
             var toBook = _openRecueil is not null;
-            ShowPoetryPane(toBook ? PoetryPane.Book : PoetryPane.Bookshelf);
-            // The pointer follows the pane now on screen: page is nulled so the payload records the
-            // book (or the shelf, for the standalone list, whose flag goes with the hidden pane).
-            _selectedPoem = null;
-            if (!toBook) _poetryStandaloneActive = false;
+            // Leave no draft behind: the page's fields are read while the tree is still intact.
+            FlushPoemEdits();
+            // Pointer first, while the page is still the live one: the payload then carries
+            // "Poetry:Poem:<id>", so reopening Journaux lands straight back on this poem's page
+            // (RestoreActiveItem's Poem case reopens the book AND the page), not on the bare book.
             SaveActiveItem();
             _configService.Save(_config);
+            ShowPoetryPane(toBook ? PoetryPane.Book : PoetryPane.Bookshelf);
+            _selectedPoem = null;
+            if (!toBook) _poetryStandaloneActive = false;
             // e.Handled left false on purpose: the window's Escape handler runs on this same press
             // and closes the section (one press = page → book/shelf → window shut).
             return;
@@ -2962,9 +2970,18 @@ public partial class JournauxView : UserControl, ISearchNavigable
             else _poemSelectionToFormat = null;
         }
 
+        FlushPoemEdits();
+    }
+
+    // The single write path for the page's three fields, shared by LostFocus, the Escape step-back and
+    // the view's Unloaded. Called whenever the editor is still live; idempotent, so double calls are cheap.
+    private void FlushPoemEdits()
+    {
+        if (_selectedPoem is null) return;
+
         _selectedPoem.Title = PoemTitleInput.Text.Trim();
         _selectedPoem.Tags = PoemTagsInput.Text.Trim();
-        if (ReferenceEquals(sender, PoemTextInput)) SyncPoemTextFromEditor();
+        SyncPoemTextFromEditor();
 
         _poemRepository.Update(_selectedPoem.Id, _selectedPoem.RecueilId, _selectedPoem.Title, _selectedPoem.Text, _selectedPoem.Tags);
     }
