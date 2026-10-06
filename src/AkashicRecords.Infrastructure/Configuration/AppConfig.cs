@@ -57,6 +57,11 @@ public sealed class AppConfig
     public double? RemindersWidgetLeft { get; set; }
     public double? RemindersWidgetTop { get; set; }
 
+    // Floating "add to library" button, shown while a suggestion not in the library plays.
+    public bool ShowMusicSaveWidget { get; set; } = true;
+    public double? MusicSaveWidgetLeft { get; set; }
+    public double? MusicSaveWidgetTop { get; set; }
+
     // Downloader: path to a user-installed command-line tool (yt-dlp) + its arguments.
     // Empty path means "auto-detect" (tools/ folder next to the exe, then PATH).
     public string? DownloaderToolPath { get; set; }

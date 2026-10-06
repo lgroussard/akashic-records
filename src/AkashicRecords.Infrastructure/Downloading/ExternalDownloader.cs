@@ -7,7 +7,8 @@ namespace AkashicRecords.Infrastructure.Downloading;
 // for what they download and for respecting each source's terms of use.
 public sealed class ExternalDownloader
 {
-    public sealed record Result(bool Success, string? Error);
+    // Output carries the trimmed stdout (e.g. the direct stream URL in yt-dlp "print" mode).
+    public sealed record Result(bool Success, string? Error, string? Output = null);
 
     public async Task<Result> DownloadAsync(
         string toolPath,
@@ -45,15 +46,17 @@ public sealed class ExternalDownloader
             }
 
             // Read both streams concurrently to avoid a full-buffer deadlock, then wait.
+            // ConfigureAwait(false) everywhere: the caller may block on GetResult() from the WPF
+            // UI thread, and continuations must not need that captured context.
             var stdOutTask = process.StandardOutput.ReadToEndAsync();
             var stdErrTask = process.StandardError.ReadToEndAsync();
-            await process.WaitForExitAsync();
-            var stdErr = await stdErrTask;
-            await stdOutTask;
+            await process.WaitForExitAsync().ConfigureAwait(false);
+            var stdErr = await stdErrTask.ConfigureAwait(false);
+            var stdOut = await stdOutTask.ConfigureAwait(false);
 
             return process.ExitCode == 0
-                ? new Result(true, null)
-                : new Result(false, string.IsNullOrWhiteSpace(stdErr) ? $"Code de sortie {process.ExitCode}." : stdErr.Trim());
+                ? new Result(true, null, stdOut?.Trim())
+                : new Result(false, string.IsNullOrWhiteSpace(stdErr) ? $"Code de sortie {process.ExitCode}." : stdErr.Trim(), stdOut?.Trim());
         }
         catch (Exception ex)
         {

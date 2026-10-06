@@ -21,6 +21,9 @@ public sealed record SimilarTrack(
 public sealed class MusicRecommendationService
 {
     private const int MaxResults = 10;
+    // Full-length cap for the list: beyond this the "song" is a compilation/set,
+    // not the single the feature is meant to propose.
+    private const int MaxDurationMillis = 15 * 60 * 1000;
 
     private static readonly HttpClient Http = CreateClient();
     private static readonly object LogLock = new();
@@ -79,13 +82,13 @@ public sealed class MusicRecommendationService
             {
                 var seed = hits[0];
                 itunesGenre = seed.Genre;
-                Add(result, seen, seed.Title, seed.Artist, seed.Page, seed.Preview);
+                Add(result, seen, seed.Title, seed.Artist, seed.Page, seed.Preview, seed.DurationMillis);
                 if (seed.CollectionId is { } cid)
                 {
                     // Leave room for the category blocks below.
                     var albumCap = Math.Max(1, limit - 3);
                     foreach (var t in await ItunesLookupAlbumAsync(cid, albumCap, ct))
-                        Add(result, seen, t.Item1, t.Item2, t.Item3, t.Item4);
+                        Add(result, seen, t.Item1, t.Item2, t.Item3, t.Item4, t.Item5);
                 }
             }
 
@@ -118,7 +121,7 @@ public sealed class MusicRecommendationService
             if (!string.IsNullOrWhiteSpace(genre) && result.Count < limit)
             {
                 foreach (var t in await ItunesSearchAsync(genre!.Trim(), limit - result.Count, ct))
-                    Add(result, seen, t.Title, t.Artist, t.Page, t.Preview);
+                    Add(result, seen, t.Title, t.Artist, t.Page, t.Preview, t.DurationMillis);
             }
 
             return result;
@@ -139,23 +142,27 @@ public sealed class MusicRecommendationService
         }
     }
 
-    // Adds a title once (dedup by normalized title), up to the limit.
+    // Adds a title once (dedup by normalized title), up to the limit. Rows without a 30 s
+    // clip are dropped (nothing to hear on ▶), as are entries longer than 15 minutes
+    // (compilation sets, not single tracks).
     private static void Add(
         List<SimilarTrack> list, HashSet<string> seen,
-        string title, string artist, string? page, string? preview)
+        string title, string artist, string? page, string? preview, int? durationMillis = null)
     {
         if (list.Count >= MaxResults) return;
         if (string.IsNullOrWhiteSpace(title)) return;
+        if (string.IsNullOrWhiteSpace(preview)) return;
+        if (durationMillis is > MaxDurationMillis) return;
         if (!seen.Add(Normalized(title))) return;
         list.Add(new SimilarTrack(title, artist ?? string.Empty, page, preview));
     }
 
     // Up to `cap` iTunes search hits (title/artist/page/preview + album id). Several hits with
     // the same title but different artists give the cross-artist diversity of the real algo.
-    private static async Task<List<(string Title, string Artist, string? Page, string? Preview, int? CollectionId, string? Genre)>>
+    private static async Task<List<(string Title, string Artist, string? Page, string? Preview, int? CollectionId, string? Genre, int? DurationMillis)>>
         ItunesSearchAsync(string query, int cap, CancellationToken ct)
     {
-        var list = new List<(string Title, string Artist, string? Page, string? Preview, int? CollectionId, string? Genre)>();
+        var list = new List<(string Title, string Artist, string? Page, string? Preview, int? CollectionId, string? Genre, int? DurationMillis)>();
         var url = "https://itunes.apple.com/search?term=" + Uri.EscapeDataString(query) +
                   "&entity=song&limit=" + cap;
         var json = await GetStringAsync(url, ct);
@@ -171,17 +178,18 @@ public sealed class MusicRecommendationService
             var name = Str(r, "trackName");
             if (string.IsNullOrWhiteSpace(name)) continue;
             list.Add((name!, Str(r, "artistName") ?? string.Empty, Str(r, "trackViewUrl"),
-                      Str(r, "previewUrl"), Int(r, "collectionId"), Str(r, "primaryGenreName")));
+                      Str(r, "previewUrl"), Int(r, "collectionId"), Str(r, "primaryGenreName"),
+                      Int(r, "trackTimeMillis")));
             if (list.Count >= cap) break;
         }
         return list;
     }
 
     // All songs of one album (collection), for the album-neighbour block.
-    private static async Task<List<(string, string, string?, string?)>> ItunesLookupAlbumAsync(
+    private static async Task<List<(string, string, string?, string?, int?)>> ItunesLookupAlbumAsync(
         int collectionId, int limit, CancellationToken ct)
     {
-        var list = new List<(string, string, string?, string?)>();
+        var list = new List<(string, string, string?, string?, int?)>();
         var url = "https://itunes.apple.com/lookup?id=" + collectionId + "&entity=song&limit=" + limit;
         var json = await GetStringAsync(url, ct);
         if (json is null) return list;
@@ -195,7 +203,8 @@ public sealed class MusicRecommendationService
         {
             var name = Str(r, "trackName");
             if (string.IsNullOrWhiteSpace(name)) continue;
-            list.Add((name!, Str(r, "artistName") ?? string.Empty, Str(r, "trackViewUrl"), Str(r, "previewUrl")));
+            list.Add((name!, Str(r, "artistName") ?? string.Empty, Str(r, "trackViewUrl"), Str(r, "previewUrl"),
+                      Int(r, "trackTimeMillis")));
             if (list.Count >= limit) break;
         }
         return list;
@@ -287,10 +296,16 @@ public sealed class MusicRecommendationService
         List<SimilarTrack> list, HashSet<string> seen, string title, string? artist, CancellationToken ct)
     {
         string? page = null, preview = null;
+        int? durationMillis = null;
         var hit = await ItunesSearchAsync(
             string.IsNullOrWhiteSpace(artist) ? title : $"{title} {artist}", 1, ct);
-        if (hit.Count > 0) { page = hit[0].Page; preview = hit[0].Preview; }
-        Add(list, seen, title, artist ?? string.Empty, page, preview);
+        if (hit.Count > 0)
+        {
+            page = hit[0].Page;
+            preview = hit[0].Preview;
+            durationMillis = hit[0].DurationMillis;
+        }
+        Add(list, seen, title, artist ?? string.Empty, page, preview, durationMillis);
     }
 
     private static bool TryFirstGenre(JsonElement element, out string name)

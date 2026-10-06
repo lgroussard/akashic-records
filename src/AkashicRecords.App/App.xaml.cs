@@ -23,6 +23,7 @@ public partial class App : Application
 
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
+        AltTabHider.RegisterForAllWindows();
     }
 
     // Headless capture: `--screenshot <Section>[:<SubTab>] <outputPath>` opens the given view,
@@ -93,6 +94,25 @@ public partial class App : Application
                 finally { player.Close(); Shutdown(); }
             };
             playerSettle.Start();
+            return;
+        }
+
+        // Floating save pill, standalone window; sub-tab picks the state (None/Saving/Saved).
+        if (section.Equals("SaveWidget", StringComparison.OrdinalIgnoreCase))
+        {
+            var widget = new MusicSaveWidget { Left = 0, Top = 0 };
+            var state = Enum.TryParse<TrackSaveState>(subTab, true, out var s) ? s : TrackSaveState.None;
+            widget.Render(state);
+            widget.Show();
+            var widgetSettle = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
+            widgetSettle.Tick += (_, _) =>
+            {
+                widgetSettle.Stop();
+                try { CaptureElement((FrameworkElement)widget.Content, outputPath); }
+                catch (Exception ex) { LogCrash(ex); }
+                finally { widget.ForceClose(); Shutdown(); }
+            };
+            widgetSettle.Start();
             return;
         }
 

@@ -15,6 +15,8 @@ public partial class SettingsView : Window
     // Set only via ForceClose() when the app is genuinely exiting; otherwise closing hides the window.
     private bool _isExiting;
 
+    public event Action<bool>? MusicSaveWidgetToggled;
+
     public SettingsView(AppConfig config, ConfigService configService)
     {
         InitializeComponent();
@@ -24,6 +26,16 @@ public partial class SettingsView : Window
         // Pre-fill with whatever is already saved, so reopening settings doesn't wipe the fields.
         TmdbKeyInput.Text = _config.TmdbApiKey ?? string.Empty;
         PinterestKeyInput.Text = _config.PinterestToken ?? string.Empty;
+        MusicSaveWidgetInput.IsChecked = _config.ShowMusicSaveWidget;
+    }
+
+    private void MusicSaveWidgetInput_OnChanged(object sender, RoutedEventArgs e)
+    {
+        var on = MusicSaveWidgetInput.IsChecked == true;
+        if (_config.ShowMusicSaveWidget == on) return;
+        _config.ShowMusicSaveWidget = on;
+        _configService.Save(_config);
+        MusicSaveWidgetToggled?.Invoke(on);
     }
 
     private void SaveButton_OnClick(object sender, RoutedEventArgs e)

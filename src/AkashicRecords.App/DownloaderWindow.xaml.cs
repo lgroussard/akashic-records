@@ -54,6 +54,9 @@ public partial class DownloaderWindow : Window
         };
     }
 
+    // Items queued from elsewhere (music player) while the board is open.
+    public void Reload() => RefreshQueue();
+
     // Only DragMove when the click didn't originate on an interactive control.
     private void Root_OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {

@@ -28,6 +28,7 @@ public partial class MainWindow : Window
     private TrayIcon? _trayIcon;
     private ScreenEdgeDock? _screenEdgeDock;
     private MusicPlayerWindow? _musicPlayer;
+    private MusicSaveWidget? _saveWidget;
     private FilmOfTheDayWidget? _filmWidget;
     private DesktopReminderWidget? _reminderWidget;
     private DownloaderWindow? _downloaderWindow;
@@ -554,13 +555,7 @@ public partial class MainWindow : Window
     {
         if (_musicPlayer is null)
         {
-            _musicPlayer = new MusicPlayerWindow();
-            // Position it bottom-right of the primary screen once it has measured itself.
-            _musicPlayer.Loaded += (_, _) =>
-            {
-                _musicPlayer.Left = SystemParameters.PrimaryScreenWidth - _musicPlayer.ActualWidth - 24;
-                _musicPlayer.Top = SystemParameters.PrimaryScreenHeight - _musicPlayer.ActualHeight - 24;
-            };
+            _musicPlayer = CreateMusicPlayer();
             _musicPlayer.Show();
             return;
         }
@@ -576,6 +571,60 @@ public partial class MainWindow : Window
         }
     }
 
+    // Positioned bottom-right of the primary screen once it has measured itself.
+    private MusicPlayerWindow CreateMusicPlayer()
+    {
+        var player = new MusicPlayerWindow();
+        player.Loaded += (_, _) =>
+        {
+            player.Left = SystemParameters.PrimaryScreenWidth - player.ActualWidth - 24;
+            player.Top = SystemParameters.PrimaryScreenHeight - player.ActualHeight - 24;
+        };
+        player.NowPlayingChanged += UpdateSaveWidget;
+        player.DownloadQueued += () => _downloaderWindow?.Reload();
+        return player;
+    }
+
+    // The floating save pill follows the player's current entry, whether the player is shown or not.
+    private void UpdateSaveWidget()
+    {
+        var state = _musicPlayer?.SaveableState;
+        if (!_config.ShowMusicSaveWidget || state is null)
+        {
+            _saveWidget?.Hide();
+            return;
+        }
+
+        if (_saveWidget is null)
+        {
+            _saveWidget = new MusicSaveWidget();
+            _saveWidget.SaveRequested += () => _musicPlayer?.SaveCurrent();
+            _saveWidget.PositionCommitted += (l, t) =>
+            {
+                _config.MusicSaveWidgetLeft = l;
+                _config.MusicSaveWidgetTop = t;
+                _configService.Save(_config);
+            };
+            _saveWidget.Loaded += (_, _) => PositionSaveWidget();
+        }
+        _saveWidget.Render(state.Value);
+        if (!_saveWidget.IsVisible) _saveWidget.Show();
+    }
+
+    private void PositionSaveWidget()
+    {
+        if (_saveWidget is null) return;
+        if (_config.MusicSaveWidgetLeft is { } left && _config.MusicSaveWidgetTop is { } top)
+        {
+            _saveWidget.Left = left;
+            _saveWidget.Top = top;
+            return;
+        }
+        // Default: bottom-left corner of the primary screen.
+        _saveWidget.Left = 24;
+        _saveWidget.Top = SystemParameters.PrimaryScreenHeight - _saveWidget.ActualHeight - 24;
+    }
+
     // Toggles the settings window (created lazily). Separate top-level window so it survives
     // the main window hiding; closed only on real app exit.
     private void SettingsButton_OnClick(object sender, RoutedEventArgs e)
@@ -583,6 +632,7 @@ public partial class MainWindow : Window
         if (_settingsView is null)
         {
             _settingsView = new Views.SettingsView(_config, _configService);
+            _settingsView.MusicSaveWidgetToggled += _ => UpdateSaveWidget();
             _settingsView.Show();
             return;
         }
@@ -772,13 +822,8 @@ public partial class MainWindow : Window
     {
         if (_musicPlayer is null)
         {
-            _musicPlayer = new MusicPlayerWindow();
-            _musicPlayer.Loaded += (_, _) =>
-            {
-                _musicPlayer.Left = SystemParameters.PrimaryScreenWidth - _musicPlayer.ActualWidth - 24;
-                _musicPlayer.Top = SystemParameters.PrimaryScreenHeight - _musicPlayer.ActualHeight - 24;
-                _musicPlayer.PlayTrackById(trackId);
-            };
+            _musicPlayer = CreateMusicPlayer();
+            _musicPlayer.Loaded += (_, _) => _musicPlayer.PlayTrackById(trackId);
             _musicPlayer.Show();
             return;
         }
@@ -909,6 +954,7 @@ public partial class MainWindow : Window
             _musicPlayer.ShutdownPlayer();
             _musicPlayer.ForceClose();
         }
+        _saveWidget?.ForceClose();
         _filmWidget?.ForceClose();
         _reminderWidget?.ForceClose();
         _downloaderWindow?.ForceClose();

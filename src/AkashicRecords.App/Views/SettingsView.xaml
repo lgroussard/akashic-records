@@ -74,6 +74,14 @@
                            LineHeight="16" Margin="0,6,0,0" FontSize="12"/>
                 <TextBlock x:Name="PinterestStatusText" TextWrapping="Wrap" Foreground="#7FB0FF"
                            LineHeight="16" Margin="0,6,0,0" FontSize="12"/>
+
+                <TextBlock Text="Musique" FontSize="14" FontWeight="SemiBold"
+                           Foreground="#7FB0FF" Margin="0,20,0,8"/>
+                <CheckBox x:Name="MusicSaveWidgetInput" Foreground="White" FontSize="13"
+                          Content="Bouton flottant « Ajouter aux téléchargements »"
+                          Checked="MusicSaveWidgetInput_OnChanged" Unchecked="MusicSaveWidgetInput_OnChanged"/>
+                <TextBlock TextWrapping="Wrap" Foreground="#AAAAAA" FontSize="12" Margin="20,4,0,0"
+                           Text="Apparaît tout seul quand un titre similaire hors bibliothèque joue, même lecteur masqué. Un clic l'ajoute à la file du téléchargeur."/>
             </StackPanel>
         </ScrollViewer>
         <!-- WindowStyle="None" means there is no OS title-bar close box; pin one top-right over the
