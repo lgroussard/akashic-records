@@ -1,0 +1,1692 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "5683261aadb858f19005a61310eb1b6f",
+    "entities": [
+      {
+        "tableName": "Artwork",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `Title` TEXT NOT NULL, `Category` INTEGER NOT NULL, `Tier` INTEGER NOT NULL, `CreatedAt` TEXT NOT NULL, `CoverImagePath` TEXT, `WatchPriority` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Title",
+            "columnName": "Title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Category",
+            "columnName": "Category",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Tier",
+            "columnName": "Tier",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "CreatedAt",
+            "columnName": "CreatedAt",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "CoverImagePath",
+            "columnName": "CoverImagePath",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "WatchPriority",
+            "columnName": "WatchPriority",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "EvaluationAxis",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `Name` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Name",
+            "columnName": "Name",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "ArtworkEvaluation",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `ArtworkId` INTEGER NOT NULL, `AxisId` INTEGER NOT NULL, `Score` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ArtworkId",
+            "columnName": "ArtworkId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "AxisId",
+            "columnName": "AxisId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Score",
+            "columnName": "Score",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "Observation",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `ArtworkId` INTEGER NOT NULL, `Subject` TEXT NOT NULL, `Content` TEXT NOT NULL, `CreatedAt` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ArtworkId",
+            "columnName": "ArtworkId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Subject",
+            "columnName": "Subject",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Content",
+            "columnName": "Content",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "CreatedAt",
+            "columnName": "CreatedAt",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "JournalEntry",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `Title` TEXT NOT NULL, `Text` TEXT NOT NULL, `EntryDate` TEXT NOT NULL, `Tags` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Title",
+            "columnName": "Title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Text",
+            "columnName": "Text",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "EntryDate",
+            "columnName": "EntryDate",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Tags",
+            "columnName": "Tags",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "JournalPhoto",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `EntryId` INTEGER NOT NULL, `ImagePath` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "EntryId",
+            "columnName": "EntryId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ImagePath",
+            "columnName": "ImagePath",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "Recipe",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `Title` TEXT NOT NULL, `Category` TEXT NOT NULL, `Ingredients` TEXT NOT NULL, `Instructions` TEXT NOT NULL, `Notes` TEXT NOT NULL, `Tags` TEXT NOT NULL, `CoverImagePath` TEXT, `CreatedAt` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Title",
+            "columnName": "Title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Category",
+            "columnName": "Category",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Ingredients",
+            "columnName": "Ingredients",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Instructions",
+            "columnName": "Instructions",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Notes",
+            "columnName": "Notes",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Tags",
+            "columnName": "Tags",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "CoverImagePath",
+            "columnName": "CoverImagePath",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "CreatedAt",
+            "columnName": "CreatedAt",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "Recueil",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `Title` TEXT NOT NULL, `CreatedAt` TEXT NOT NULL, `Summary` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Title",
+            "columnName": "Title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "CreatedAt",
+            "columnName": "CreatedAt",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Summary",
+            "columnName": "Summary",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "Poem",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `RecueilId` INTEGER, `Title` TEXT NOT NULL, `Text` TEXT NOT NULL, `Tags` TEXT NOT NULL, `ImagePath` TEXT, `CreatedAt` TEXT NOT NULL, `TextAlignment` TEXT NOT NULL, `Margin` REAL NOT NULL, `FontSize` REAL NOT NULL, `FontFamily` TEXT NOT NULL, `Bold` INTEGER NOT NULL, `Italic` INTEGER NOT NULL, `RichContent` TEXT NOT NULL, `EditorWidth` REAL NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "RecueilId",
+            "columnName": "RecueilId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "Title",
+            "columnName": "Title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Text",
+            "columnName": "Text",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Tags",
+            "columnName": "Tags",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ImagePath",
+            "columnName": "ImagePath",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "CreatedAt",
+            "columnName": "CreatedAt",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "TextAlignment",
+            "columnName": "TextAlignment",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Margin",
+            "columnName": "Margin",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "FontSize",
+            "columnName": "FontSize",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "FontFamily",
+            "columnName": "FontFamily",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Bold",
+            "columnName": "Bold",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Italic",
+            "columnName": "Italic",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "RichContent",
+            "columnName": "RichContent",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "EditorWidth",
+            "columnName": "EditorWidth",
+            "affinity": "REAL",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "ArtisticProject",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `Title` TEXT NOT NULL, `CreatedAt` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Title",
+            "columnName": "Title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "CreatedAt",
+            "columnName": "CreatedAt",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "Reference",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `ObservationId` INTEGER NOT NULL, `ProjectId` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ObservationId",
+            "columnName": "ObservationId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ProjectId",
+            "columnName": "ProjectId",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "CanvasElement",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `ProjectId` INTEGER NOT NULL, `Type` INTEGER NOT NULL, `X` REAL NOT NULL, `Y` REAL NOT NULL, `TextContent` TEXT, `ImagePath` TEXT, `ObservationId` INTEGER, `Width` REAL, `Height` REAL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ProjectId",
+            "columnName": "ProjectId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Type",
+            "columnName": "Type",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "X",
+            "columnName": "X",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Y",
+            "columnName": "Y",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "TextContent",
+            "columnName": "TextContent",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "ImagePath",
+            "columnName": "ImagePath",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "ObservationId",
+            "columnName": "ObservationId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "Width",
+            "columnName": "Width",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "Height",
+            "columnName": "Height",
+            "affinity": "REAL",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "CanvasConnector",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `ProjectId` INTEGER NOT NULL, `FromElementId` INTEGER NOT NULL, `ToElementId` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ProjectId",
+            "columnName": "ProjectId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "FromElementId",
+            "columnName": "FromElementId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ToElementId",
+            "columnName": "ToElementId",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "PersonalProject",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `Title` TEXT NOT NULL, `Description` TEXT NOT NULL, `Status` INTEGER NOT NULL, `Deadline` TEXT, `CreatedAt` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Title",
+            "columnName": "Title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Description",
+            "columnName": "Description",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Status",
+            "columnName": "Status",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Deadline",
+            "columnName": "Deadline",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "CreatedAt",
+            "columnName": "CreatedAt",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "ProjectTask",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `ProjectId` INTEGER NOT NULL, `Text` TEXT NOT NULL, `IsDone` INTEGER NOT NULL, `SortOrder` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ProjectId",
+            "columnName": "ProjectId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Text",
+            "columnName": "Text",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "IsDone",
+            "columnName": "IsDone",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "SortOrder",
+            "columnName": "SortOrder",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "Transition",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `Title` TEXT NOT NULL, `Description` TEXT NOT NULL, `CurrentState` TEXT NOT NULL, `DesiredState` TEXT NOT NULL, `Notes` TEXT NOT NULL, `Resources` TEXT NOT NULL, `ReminderText` TEXT NOT NULL, `ShowOnDesktop` INTEGER NOT NULL, `CreatedAt` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Title",
+            "columnName": "Title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Description",
+            "columnName": "Description",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "CurrentState",
+            "columnName": "CurrentState",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "DesiredState",
+            "columnName": "DesiredState",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Notes",
+            "columnName": "Notes",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Resources",
+            "columnName": "Resources",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ReminderText",
+            "columnName": "ReminderText",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ShowOnDesktop",
+            "columnName": "ShowOnDesktop",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "CreatedAt",
+            "columnName": "CreatedAt",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "TransitionStep",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `TransitionId` INTEGER NOT NULL, `Text` TEXT NOT NULL, `IsDone` INTEGER NOT NULL, `SortOrder` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "TransitionId",
+            "columnName": "TransitionId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Text",
+            "columnName": "Text",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "IsDone",
+            "columnName": "IsDone",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "SortOrder",
+            "columnName": "SortOrder",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "PhotoAlbum",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `Name` TEXT NOT NULL, `CreatedAt` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Name",
+            "columnName": "Name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "CreatedAt",
+            "columnName": "CreatedAt",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "Photo",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `ImagePath` TEXT NOT NULL, `Title` TEXT NOT NULL, `Description` TEXT NOT NULL, `TakenDate` TEXT, `Tags` TEXT NOT NULL, `IsFavorite` INTEGER NOT NULL, `AlbumId` INTEGER, `ImportedAt` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ImagePath",
+            "columnName": "ImagePath",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Title",
+            "columnName": "Title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Description",
+            "columnName": "Description",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "TakenDate",
+            "columnName": "TakenDate",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "Tags",
+            "columnName": "Tags",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "IsFavorite",
+            "columnName": "IsFavorite",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "AlbumId",
+            "columnName": "AlbumId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "ImportedAt",
+            "columnName": "ImportedAt",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "MusicTrack",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `FilePath` TEXT NOT NULL, `Title` TEXT NOT NULL, `Artist` TEXT NOT NULL, `DurationSeconds` REAL, `CoverImagePath` TEXT, `Album` TEXT NOT NULL, `AddedAt` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "FilePath",
+            "columnName": "FilePath",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Title",
+            "columnName": "Title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Artist",
+            "columnName": "Artist",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "DurationSeconds",
+            "columnName": "DurationSeconds",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "CoverImagePath",
+            "columnName": "CoverImagePath",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "Album",
+            "columnName": "Album",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "AddedAt",
+            "columnName": "AddedAt",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "Mood",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `Name` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Name",
+            "columnName": "Name",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "TrackMood",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `TrackId` INTEGER NOT NULL, `MoodId` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "TrackId",
+            "columnName": "TrackId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "MoodId",
+            "columnName": "MoodId",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "Playlist",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `Name` TEXT NOT NULL, `CreatedAt` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Name",
+            "columnName": "Name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "CreatedAt",
+            "columnName": "CreatedAt",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "PlaylistTrack",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `PlaylistId` INTEGER NOT NULL, `TrackId` INTEGER NOT NULL, `SortOrder` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "PlaylistId",
+            "columnName": "PlaylistId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "TrackId",
+            "columnName": "TrackId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "SortOrder",
+            "columnName": "SortOrder",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "DownloadItem",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `Url` TEXT NOT NULL, `Title` TEXT NOT NULL, `Status` INTEGER NOT NULL, `AddedAt` TEXT NOT NULL, `FolderId` INTEGER)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Url",
+            "columnName": "Url",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Title",
+            "columnName": "Title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Status",
+            "columnName": "Status",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "AddedAt",
+            "columnName": "AddedAt",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "FolderId",
+            "columnName": "FolderId",
+            "affinity": "INTEGER",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "DownloadFolder",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `Name` TEXT NOT NULL, `Subfolder` TEXT, `SortOrder` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Name",
+            "columnName": "Name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Subfolder",
+            "columnName": "Subfolder",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "SortOrder",
+            "columnName": "SortOrder",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "WatchlistItem",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `Title` TEXT NOT NULL, `Category` INTEGER NOT NULL, `Priority` INTEGER NOT NULL, `CoverImagePath` TEXT, `AddedAt` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Title",
+            "columnName": "Title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Category",
+            "columnName": "Category",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Priority",
+            "columnName": "Priority",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "CoverImagePath",
+            "columnName": "CoverImagePath",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "AddedAt",
+            "columnName": "AddedAt",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "BudgetCategory",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `Name` TEXT NOT NULL, `Color` TEXT NOT NULL, `MonthlyCap` TEXT, `SortOrder` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Name",
+            "columnName": "Name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Color",
+            "columnName": "Color",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "MonthlyCap",
+            "columnName": "MonthlyCap",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "SortOrder",
+            "columnName": "SortOrder",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "BudgetTransaction",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `Date` TEXT NOT NULL, `Label` TEXT NOT NULL, `Amount` TEXT NOT NULL, `CategoryId` INTEGER, `Source` TEXT NOT NULL, `ExternalId` TEXT, `ImportedAt` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Date",
+            "columnName": "Date",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Label",
+            "columnName": "Label",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Amount",
+            "columnName": "Amount",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "CategoryId",
+            "columnName": "CategoryId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "Source",
+            "columnName": "Source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ExternalId",
+            "columnName": "ExternalId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "ImportedAt",
+            "columnName": "ImportedAt",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "BudgetRule",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `Keyword` TEXT NOT NULL, `CategoryId` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Keyword",
+            "columnName": "Keyword",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "CategoryId",
+            "columnName": "CategoryId",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "BudgetPlan",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `Name` TEXT NOT NULL, `Notes` TEXT NOT NULL, `CreatedAt` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Name",
+            "columnName": "Name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Notes",
+            "columnName": "Notes",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "CreatedAt",
+            "columnName": "CreatedAt",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "BudgetPlanLine",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `PlanId` INTEGER NOT NULL, `CategoryId` INTEGER NOT NULL, `MonthlyAmount` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "PlanId",
+            "columnName": "PlanId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "CategoryId",
+            "columnName": "CategoryId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "MonthlyAmount",
+            "columnName": "MonthlyAmount",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "Birthday",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `Name` TEXT NOT NULL, `Month` INTEGER NOT NULL, `Day` INTEGER NOT NULL, `BirthYear` INTEGER, `Notes` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Name",
+            "columnName": "Name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Month",
+            "columnName": "Month",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Day",
+            "columnName": "Day",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "BirthYear",
+            "columnName": "BirthYear",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "Notes",
+            "columnName": "Notes",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "CalendarEvent",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `Title` TEXT NOT NULL, `Kind` INTEGER NOT NULL, `Date` TEXT NOT NULL, `EndDate` TEXT, `StartHour` INTEGER, `StartMinute` INTEGER, `RecurringYearly` INTEGER NOT NULL, `Location` TEXT NOT NULL, `Notes` TEXT NOT NULL, `CreatedAt` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Title",
+            "columnName": "Title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Kind",
+            "columnName": "Kind",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Date",
+            "columnName": "Date",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "EndDate",
+            "columnName": "EndDate",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "StartHour",
+            "columnName": "StartHour",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "StartMinute",
+            "columnName": "StartMinute",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "RecurringYearly",
+            "columnName": "RecurringYearly",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Location",
+            "columnName": "Location",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Notes",
+            "columnName": "Notes",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "CreatedAt",
+            "columnName": "CreatedAt",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "CalendarEventLink",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `OwnerType` TEXT NOT NULL, `OwnerId` INTEGER NOT NULL, `Kind` TEXT NOT NULL, `Section` TEXT NOT NULL, `Title` TEXT NOT NULL, `PrimaryId` INTEGER NOT NULL, `SecondaryId` INTEGER, `Category` INTEGER)",
+        "fields": [
+          {
+            "fieldPath": "Id",
+            "columnName": "Id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "OwnerType",
+            "columnName": "OwnerType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "OwnerId",
+            "columnName": "OwnerId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Kind",
+            "columnName": "Kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Section",
+            "columnName": "Section",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "Title",
+            "columnName": "Title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "PrimaryId",
+            "columnName": "PrimaryId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "SecondaryId",
+            "columnName": "SecondaryId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "Category",
+            "columnName": "Category",
+            "affinity": "INTEGER",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "Id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '5683261aadb858f19005a61310eb1b6f')"
+    ]
+  }
+}
