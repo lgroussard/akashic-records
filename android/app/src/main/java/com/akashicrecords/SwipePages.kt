@@ -32,6 +32,8 @@ fun SwipePages(
     modifier: Modifier = Modifier,
     key: ((Int) -> Any)? = null,
     verticalAlignment: Alignment.Vertical = Alignment.Top,
+    // False while something else uses horizontal drags (a zoomed page being panned).
+    userScrollEnabled: Boolean = true,
     content: @Composable (Int) -> Unit,
 ) {
     if (count <= 0) return
@@ -63,6 +65,7 @@ fun SwipePages(
         beyondViewportPageCount = 1,
         key = key,
         verticalAlignment = verticalAlignment,
+        userScrollEnabled = userScrollEnabled,
         // A third of the width (or a quick flick) is enough to turn the page.
         flingBehavior = PagerDefaults.flingBehavior(state, snapPositionalThreshold = 0.3f),
     ) { p -> content(p) }

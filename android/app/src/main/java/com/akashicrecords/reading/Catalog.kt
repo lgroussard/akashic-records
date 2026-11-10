@@ -174,16 +174,24 @@ object Catalog {
 
     private fun words(s: String) = norm(s).split(' ').filter { it.length > 1 }.toSet()
 
-    // The item's public EPUB file, if it has one.
+    // The item's best public file. An EPUB that was uploaded ("original") is a real ebook, with its images. An EPUB
+    // Internet Archive generated ("derivative") from a scan holds only the recognised text — a comic becomes loose
+    // speech-bubble text — so the PDF is taken instead (it has the page images; the lightest when there are several).
+    // The derived EPUB is the last resort. CBZ comics are taken like an original EPUB.
     private fun archiveEpub(id: String): String? {
         val json = get("https://archive.org/metadata/$id") ?: return null
         val files = runCatching { JSONObject(json).getJSONArray("files") }.getOrNull() ?: return null
-        for (i in 0 until files.length()) {
-            val f = files.getJSONObject(i)
-            val name = f.optString("name")
-            if (name.endsWith(".epub", true) && f.optString("private") != "true") return "https://archive.org/download/$id/${enc(name).replace("+", "%20")}"
-        }
-        return null
+        data class F(val name: String, val original: Boolean, val size: Long)
+        val public = (0 until files.length()).map { files.getJSONObject(it) }
+            .filter { it.optString("private") != "true" }
+            .map { F(it.optString("name"), it.optString("source") == "original", it.optString("size").toLongOrNull() ?: Long.MAX_VALUE) }
+        fun ext(f: F) = f.name.substringAfterLast('.').lowercase()
+        val pick = public.firstOrNull { (ext(it) == "epub" || ext(it) == "cbz") && it.original }
+            ?: public.filter { ext(it) == "pdf" }.minByOrNull { it.size }
+            ?: public.firstOrNull { ext(it) == "epub" }
+            ?: return null
+        android.util.Log.d(LOG, "archive $id: ${pick.name} (${if (pick.original) "original" else "derivative"}, ${pick.size} o)")
+        return "https://archive.org/download/$id/${enc(pick.name).replace("+", "%20")}"
     }
 
     // ---------------------------------------------------------------- user OPDS catalogues
@@ -312,9 +320,10 @@ object Catalog {
                 c.disconnect()
             }
             val head = into.inputStream().use { s -> ByteArray(2).also { s.read(it) } }
-            if (head[0] != 'P'.code.toByte() || head[1] != 'K'.code.toByte()) {
+            val isPdf = head[0] == '%'.code.toByte() && head[1] == 'P'.code.toByte()
+            if (!isPdf && (head[0] != 'P'.code.toByte() || head[1] != 'K'.code.toByte())) {
                 into.delete()
-                error("Ce lien ne donne pas un fichier epub (page web, connexion requise…).")
+                error("Ce lien ne donne pas un livre (epub, PDF ou BD) : page web, connexion requise…")
             }
             return
         }

@@ -56,7 +56,7 @@ fun LectureSection(db: AkashicDatabase, config: ConfigStore) {
     var openId by remember { mutableStateOf(config.lectureOpenBook()) }
     val open = openId
     if (open != null) {
-        ReaderScreen(db, config, open) {
+        BookReader(db, config, open) {
             openId = null
             config.saveLectureOpenBook(null)
         }
@@ -114,7 +114,7 @@ private fun Shelf(db: AkashicDatabase, onOpen: (Int) -> Unit) {
             when {
                 list == null -> {}
                 list.isEmpty() -> Text(
-                    "Aucun livre. « + » pour importer un epub depuis le téléphone (Téléchargements, Drive…).",
+                    "Aucun livre. « + » pour importer un epub, un PDF ou une BD (CBZ) depuis le téléphone (Téléchargements, Drive…).",
                     color = Palette.TextMuted, modifier = Modifier.padding(16.dp),
                 )
                 else -> LazyVerticalGrid(
@@ -139,7 +139,7 @@ private fun Shelf(db: AkashicDatabase, onOpen: (Int) -> Unit) {
             }
         }
         FloatingActionButton(
-            onClick = { pick.launch(arrayOf("application/epub+zip", "application/octet-stream")) },
+            onClick = { pick.launch(arrayOf("application/epub+zip", "application/pdf", "application/vnd.comicbook+zip", "application/x-cbz", "application/zip", "application/octet-stream")) },
             containerColor = Palette.Accent,
             modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
         ) { Icon(Icons.Filled.Add, contentDescription = "Importer un epub") }
@@ -256,7 +256,7 @@ private sealed interface HighlightEdit {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ReaderScreen(db: AkashicDatabase, config: ConfigStore, bookId: Int, onClose: () -> Unit) {
+internal fun ReaderScreen(db: AkashicDatabase, config: ConfigStore, bookId: Int, onClose: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var book by remember { mutableStateOf<Book?>(null) }

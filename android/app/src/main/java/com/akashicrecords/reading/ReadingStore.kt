@@ -21,50 +21,122 @@ object ReadingStore {
 
     fun fileOf(context: Context, book: Book) = File(context.filesDir, book.FilePath.replace('\\', '/'))
 
-    // Copies the picked file in, then as importFile.
+    // What the place a book came from knows about it, used when the file itself says nothing useful (no title, an
+    // identifier as title, no cover — typical of Internet Archive conversions and of PDFs/CBZs).
+    data class Hints(val title: String? = null, val author: String? = null, val coverUrl: String? = null)
+
+    // Copies the picked file in (epub, PDF or CBZ), then as importFile. Its display name is the fallback title.
     suspend fun import(context: Context, db: AkashicDatabase, source: Uri): Book = withContext(Dispatchers.IO) {
-        val name = UUID.randomUUID().toString().replace("-", "")
-        val file = File(booksDir(context), "$name.epub")
+        val file = File(booksDir(context), UUID.randomUUID().toString().replace("-", "") + ".tmp")
         context.contentResolver.openInputStream(source)!!.use { input -> file.outputStream().use { input.copyTo(it) } }
-        importFile(context, db, file)
+        val shown = context.contentResolver.query(source, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        importFile(context, db, file, Hints(title = shown?.substringBeforeLast('.')))
     }
 
     // Downloads a book from the catalogue (or a direct link) straight into the shelf.
-    suspend fun download(context: Context, db: AkashicDatabase, fetch: (File) -> Unit): Book = withContext(Dispatchers.IO) {
-        val name = UUID.randomUUID().toString().replace("-", "")
-        val file = File(booksDir(context), "$name.epub")
+    suspend fun download(context: Context, db: AkashicDatabase, hints: Hints, fetch: (File) -> Unit): Book = withContext(Dispatchers.IO) {
+        val file = File(booksDir(context), UUID.randomUUID().toString().replace("-", "") + ".tmp")
         try {
             fetch(file)
         } catch (e: Exception) {
             file.delete()
             throw e
         }
-        importFile(context, db, file)
+        importFile(context, db, file, hints)
     }
 
-    // [file] already sits in books/: checks it really is an epub, extracts its cover, adds the row.
-    private suspend fun importFile(context: Context, db: AkashicDatabase, file: File): Book {
-        val name = file.nameWithoutExtension
-        val epub = try {
-            Epub.open(file)
-        } catch (e: Exception) {
-            file.delete()
-            throw IllegalArgumentException(e.message ?: "Ce fichier n'est pas un epub lisible.")
+    // A title that is really a file name or an archive identifier ("lesmiserables0001hugo", a random id).
+    private fun looksLikeId(title: String, file: File) =
+        title.isBlank() || title == file.nameWithoutExtension || (' ' !in title.trim() && title.length > 12 && title.any { it.isDigit() })
+
+    // [file] (a .tmp in books/) is recognised from its content, renamed with its extension, its cover extracted
+    // (epub cover, or the first page of a PDF/CBZ, else the catalogue's), then the row is added.
+    private suspend fun importFile(context: Context, db: AkashicDatabase, tmp: File, hints: Hints): Book {
+        val format = BookFormat.sniff(tmp) ?: run {
+            tmp.delete()
+            throw IllegalArgumentException("Ce fichier n'est ni un epub, ni un PDF, ni une BD (CBZ).")
         }
-        val cover = epub.coverPath?.let { path ->
-            epub.read(path)?.let { bytes ->
-                val ext = path.substringAfterLast('.', "jpg").lowercase().take(4)
-                val dir = File(booksDir(context), "covers").apply { mkdirs() }
-                File(dir, "$name.$ext").writeBytes(bytes)
-                "books\\covers\\$name.$ext"
+        val name = tmp.nameWithoutExtension
+        val file = File(tmp.parentFile, "$name." + format.name.lowercase()).also { tmp.renameTo(it) }
+        val coversDir = File(booksDir(context), "covers").apply { mkdirs() }
+        var title: String
+        var author: String
+        var cover: String? = null
+
+        if (format == BookFormat.EPUB) {
+            val epub = try {
+                Epub.open(file)
+            } catch (e: Exception) {
+                file.delete()
+                throw IllegalArgumentException(e.message ?: "Ce fichier n'est pas un epub lisible.")
+            }
+            title = epub.title
+            author = epub.author
+            cover = epub.coverPath?.let { path ->
+                epub.read(path)?.let { bytes ->
+                    val ext = path.substringAfterLast('.', "jpg").lowercase().take(4)
+                    File(coversDir, "$name.$ext").writeBytes(bytes)
+                    "books\\covers\\$name.$ext"
+                }
+            }
+        } else {
+            val doc = try {
+                PageDoc.open(file)
+            } catch (e: Exception) {
+                file.delete()
+                throw IllegalArgumentException("Ce fichier ne s'ouvre pas : ${e.message}")
+            }
+            try {
+                if (doc.pageCount == 0) throw IllegalArgumentException("Ce fichier ne contient aucune page.")
+                cover = doc.render(0, 400)?.let { bmp ->
+                    File(coversDir, "$name.jpg").outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, it) }
+                    "books\\covers\\$name.jpg"
+                }
+            } catch (e: Exception) {
+                file.delete()
+                throw e
+            } finally {
+                doc.close()
+            }
+            title = ""
+            author = ""
+        }
+
+        if (looksLikeId(title, file)) title = hints.title?.takeIf { it.isNotBlank() } ?: title.ifBlank { "Sans titre" }
+        if (author.isBlank()) author = hints.author.orEmpty()
+        if (cover == null) cover = hints.coverUrl?.let { url ->
+            fetchBytes(url)?.let { bytes ->
+                File(coversDir, "$name.jpg").writeBytes(bytes)
+                "books\\covers\\$name.jpg"
             }
         }
+
         val book = Book(
-            Title = epub.title, Author = epub.author, FilePath = "books\\$name.epub", CoverPath = cover,
+            Title = title, Author = author, FilePath = "books\\${file.name}", CoverPath = cover,
             AddedAt = nowIso(), LastReadAt = null, Locator = null, Progress = 0.0, ArtworkId = null,
         )
         return book.copy(Id = db.bookDao().add(book).toInt())
     }
+
+    // Small download (a cover), following redirects; null on any failure.
+    private fun fetchBytes(start: String): ByteArray? = runCatching {
+        var url = start
+        repeat(5) {
+            val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+            c.instanceFollowRedirects = false
+            c.connectTimeout = 10_000
+            c.readTimeout = 20_000
+            try {
+                val code = c.responseCode
+                if (code in 300..399) { url = Catalog.absolute(url, c.getHeaderField("Location") ?: return null); return@repeat }
+                return if (code in 200..299) c.inputStream.use { it.readBytes() } else null
+            } finally {
+                c.disconnect()
+            }
+        }
+        null
+    }.getOrNull()
 
     // Where reading stopped; overall progress = chapters done + share of the current one.
     suspend fun savePosition(db: AkashicDatabase, bookId: Int, chapter: Int, progression: Double, chapterCount: Int) {

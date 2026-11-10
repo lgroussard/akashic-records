@@ -96,7 +96,7 @@ fun FindBooks(db: AkashicDatabase, config: ConfigStore, onOpen: (Int) -> Unit) {
         message = null
         scope.launch {
             try {
-                val book = ReadingStore.download(context, db) { file -> Catalog.download(b, file) }
+                val book = ReadingStore.download(context, db, ReadingStore.Hints(b.title, b.author, b.coverUrl)) { file -> Catalog.download(b, file) }
                 added = added + (key to book.Id)
                 message = "« ${book.Title} » ajouté à ta bibliothèque."
             } catch (e: Exception) {
