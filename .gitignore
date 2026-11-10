@@ -21,3 +21,6 @@ Thumbs.db
 
 # Locally-installed command-line tools (yt-dlp/ffmpeg) downloaded by setup-tools.ps1
 src/AkashicRecords.App/tools/
+# Data backups made by .github/rules/backup-data.ps1 before each build: personal data (journals,
+# config with API keys) and the whole music folder (~16 GB). Kept on disk, never in git.
+.github/data-backup/
