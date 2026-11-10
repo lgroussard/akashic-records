@@ -33,6 +33,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.akashicrecords.Palette
+import com.akashicrecords.SubTabs
+import com.akashicrecords.SwipePages
+import androidx.compose.runtime.saveable.rememberSaveable
 import com.akashicrecords.data.AkashicDatabase
 import com.akashicrecords.data.ArtisticProject
 import com.akashicrecords.data.Artwork
@@ -58,9 +61,21 @@ fun LectureSection(db: AkashicDatabase, config: ConfigStore) {
             config.saveLectureOpenBook(null)
         }
     } else {
-        Shelf(db) { id ->
-            openId = id
-            config.saveLectureOpenBook(id)
+        val openBook: (Int) -> Unit = { id -> openId = id; config.saveLectureOpenBook(id) }
+        // Two tabs, swiped like the rest of the app. The shelf is rebuilt when coming back to it, so a book just
+        // downloaded from "Trouver des livres" is there.
+        val tabs = listOf("Ma bibliothèque" to "Shelf", "Trouver des livres" to "Find")
+        var tab by rememberSaveable { mutableStateOf("Shelf") }
+        Column(Modifier.fillMaxSize()) {
+            SubTabs(tabs, tab) { tab = it }
+            SwipePages(
+                count = tabs.size,
+                page = tabs.indexOfFirst { it.second == tab }.coerceAtLeast(0),
+                onPageChange = { tab = tabs[it].second },
+                modifier = Modifier.fillMaxWidth().weight(1f),
+            ) { page ->
+                if (tabs[page].second == "Shelf") key(tab) { Shelf(db, openBook) } else FindBooks(db, config, openBook)
+            }
         }
     }
 }

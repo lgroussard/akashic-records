@@ -21,11 +21,30 @@ object ReadingStore {
 
     fun fileOf(context: Context, book: Book) = File(context.filesDir, book.FilePath.replace('\\', '/'))
 
-    // Copies the picked file in, checks it really is an epub, extracts its cover, adds the row.
+    // Copies the picked file in, then as importFile.
     suspend fun import(context: Context, db: AkashicDatabase, source: Uri): Book = withContext(Dispatchers.IO) {
         val name = UUID.randomUUID().toString().replace("-", "")
         val file = File(booksDir(context), "$name.epub")
         context.contentResolver.openInputStream(source)!!.use { input -> file.outputStream().use { input.copyTo(it) } }
+        importFile(context, db, file)
+    }
+
+    // Downloads a book from the catalogue (or a direct link) straight into the shelf.
+    suspend fun download(context: Context, db: AkashicDatabase, fetch: (File) -> Unit): Book = withContext(Dispatchers.IO) {
+        val name = UUID.randomUUID().toString().replace("-", "")
+        val file = File(booksDir(context), "$name.epub")
+        try {
+            fetch(file)
+        } catch (e: Exception) {
+            file.delete()
+            throw e
+        }
+        importFile(context, db, file)
+    }
+
+    // [file] already sits in books/: checks it really is an epub, extracts its cover, adds the row.
+    private suspend fun importFile(context: Context, db: AkashicDatabase, file: File): Book {
+        val name = file.nameWithoutExtension
         val epub = try {
             Epub.open(file)
         } catch (e: Exception) {
@@ -44,7 +63,7 @@ object ReadingStore {
             Title = epub.title, Author = epub.author, FilePath = "books\\$name.epub", CoverPath = cover,
             AddedAt = nowIso(), LastReadAt = null, Locator = null, Progress = 0.0, ArtworkId = null,
         )
-        book.copy(Id = db.bookDao().add(book).toInt())
+        return book.copy(Id = db.bookDao().add(book).toInt())
     }
 
     // Where reading stopped; overall progress = chapters done + share of the current one.

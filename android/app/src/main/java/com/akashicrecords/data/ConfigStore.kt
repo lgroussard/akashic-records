@@ -61,6 +61,19 @@ class ConfigStore(context: Context) {
     fun saveReaderLook(scale: Int, font: String, theme: String) =
         prefs.edit().putInt(READER_FONT_SCALE, scale).putString(READER_FONT, font).putString(READER_THEME, theme).apply()
 
+    // Lecture → "Trouver des livres": the user's own OPDS catalogues (name + address, in order) and the sources
+    // switched off in the search. Stored as JSON.
+    fun lectureCatalogs(): List<Pair<String, String>> = runCatching {
+        val a = org.json.JSONArray(prefs.getString(LECTURE_CATALOGS, null) ?: "[]")
+        (0 until a.length()).map { a.getJSONObject(it).let { o -> o.getString("name") to o.getString("url") } }
+    }.getOrDefault(emptyList())
+    fun saveLectureCatalogs(list: List<Pair<String, String>>) = putString(
+        LECTURE_CATALOGS,
+        org.json.JSONArray(list.map { (n, u) -> org.json.JSONObject().put("name", n).put("url", u) }).toString(),
+    )
+    fun lectureSourcesOff(): Set<String> = prefs.getStringSet(LECTURE_SOURCES_OFF, null)?.toSet() ?: emptySet()
+    fun saveLectureSourcesOff(off: Set<String>) = prefs.edit().putStringSet(LECTURE_SOURCES_OFF, off).apply()
+
     // Mobile-only: folder (relative to the shared storage root) scanned as the music library.
     // Mirrors the desktop <exe>/music/ folder: top-level subfolders are albums.
     fun musicFolder(): String = prefs.getString(MUSIC_FOLDER, null) ?: DEFAULT_MUSIC_FOLDER
@@ -73,6 +86,8 @@ class ConfigStore(context: Context) {
         const val READER_FONT_SCALE = "ReaderFontScale"
         const val READER_FONT = "ReaderFont"
         const val READER_THEME = "ReaderTheme"
+        const val LECTURE_CATALOGS = "LectureCatalogs"
+        const val LECTURE_SOURCES_OFF = "LectureSourcesOff"
         const val DEFAULT_MUSIC_FOLDER = "Music/Akashic"
     }
 
