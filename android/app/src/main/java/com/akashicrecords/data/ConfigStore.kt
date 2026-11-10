@@ -44,6 +44,14 @@ class ConfigStore(context: Context) {
     fun saveArchivesTab(tab: String?) = putString(ConfigKeys.ARCHIVES_ACTIVE_TAB, tab)
     fun saveCollectionsCategory(c: String?) = putString(ConfigKeys.COLLECTIONS_ACTIVE_CATEGORY, c)
 
+    // Modules switched off on THIS phone (see Modules.catalog). Same key as the desktop config, but never synced.
+    fun disabledModules(): Set<String> = prefs.getStringSet(DISABLED_MODULES, null)?.toSet() ?: emptySet()
+    fun setModuleEnabled(key: String, enabled: Boolean): Set<String> {
+        val next = disabledModules().let { if (enabled) it - key else it + key }
+        prefs.edit().putStringSet(DISABLED_MODULES, next).apply()
+        return next
+    }
+
     // Mobile-only: folder (relative to the shared storage root) scanned as the music library.
     // Mirrors the desktop <exe>/music/ folder: top-level subfolders are albums.
     fun musicFolder(): String = prefs.getString(MUSIC_FOLDER, null) ?: DEFAULT_MUSIC_FOLDER
@@ -51,6 +59,7 @@ class ConfigStore(context: Context) {
 
     companion object {
         const val MUSIC_FOLDER = "MobileMusicFolder"
+        const val DISABLED_MODULES = "DisabledModules"
         const val DEFAULT_MUSIC_FOLDER = "Music/Akashic"
     }
 

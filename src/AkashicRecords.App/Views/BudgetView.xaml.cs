@@ -54,7 +54,10 @@ public partial class BudgetView : UserControl, ISearchNavigable, IRemembersViewS
     // restore must not override them.
     private void RestorePersistedTab()
     {
-        if (_screenshotTabRequested || _pendingSearchResult is not null) return;
+        if (_screenshotTabRequested) return;
+        _config.BudgetActiveTab = ModuleTabs.Apply(_config, "Budget", _config.BudgetActiveTab, "Overview",
+            OverviewTab, TransactionsTab, PlansTab);
+        if (_pendingSearchResult is not null) return;
         // The plan last opened in "Plans" (RefreshPlans drops it if it was deleted since).
         _selectedPlanId = _config.BudgetActivePlanId;
         if (_config.BudgetActiveTab is not { } tab) return;

@@ -164,6 +164,8 @@ public partial class OrganisationView : UserControl, ISearchNavigable, IRemember
     // Reopens the exact project/transition the user last viewed (after the sub-tab).
     private void RestoreActiveItem()
     {
+        _config.OrganisationActiveTab = ModuleTabs.Apply(_config, "Organisation", _config.OrganisationActiveTab, "Projets",
+            ProjetsTab, TransitionsTab);
         switch (_config.OrganisationActiveTab)
         {
             case "Projets":

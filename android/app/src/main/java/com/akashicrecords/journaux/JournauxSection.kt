@@ -17,6 +17,7 @@ import com.akashicrecords.data.AkashicDatabase
 import com.akashicrecords.data.ArtisticProject
 import com.akashicrecords.data.CanvasElement
 import com.akashicrecords.data.ConfigStore
+import com.akashicrecords.data.Modules
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -25,15 +26,17 @@ import kotlinx.coroutines.withContext
 @Composable
 fun JournauxSection(db: AkashicDatabase, config: ConfigStore, openItem: Int? = null) {
     val restored = remember { config.load().journauxActiveTab }
-    var tab by remember { mutableStateOf(restored ?: "Personal") }
+    // Sub-tabs switched off in the settings are hidden; a saved tab that is now off falls back to the first one on.
+    val disabled = remember { config.disabledModules() }
+    var tab by remember { mutableStateOf(Modules.pickTab(disabled, "Journaux", restored, "Personal")) }
     Column(Modifier.fillMaxSize()) {
         SubTabs(
-            listOf(
+            Modules.visibleTabs(disabled, "Journaux", listOf(
                 "Journal personnel" to "Personal",
                 "Poésie" to "Poetry",
                 "Recettes" to "Recipes",
                 "Archive artistique" to "Artistic",
-            ),
+            )),
             tab,
         ) { tab = it; config.saveJournauxTab(it) }
         Spacer(Modifier.height(4.dp))

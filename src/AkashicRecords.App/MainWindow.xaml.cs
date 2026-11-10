@@ -88,6 +88,7 @@ public partial class MainWindow : Window
         _filmOfTheDayService = new FilmOfTheDayService(_watchlistRepository);
         new SchemaInitializer(new SqliteConnectionFactory()).EnsureCreated();
         FitToScreen();
+        ApplyModuleVisibility();
 
         _searchDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
         _searchDebounce.Tick += SearchDebounce_OnTick;
@@ -634,6 +635,7 @@ public partial class MainWindow : Window
         {
             _settingsView = new Views.SettingsView(_config, _configService);
             _settingsView.MusicSaveWidgetToggled += _ => UpdateSaveWidget();
+            _settingsView.ModulesChanged += OnModulesChanged;
             _settingsView.Show();
             return;
         }
@@ -648,6 +650,59 @@ public partial class MainWindow : Window
             _settingsView.Activate();
         }
     }
+
+    // --- Modules switched on/off in the settings (see Modules.Catalog) -------------------------
+
+    // Header entries follow the module settings: a section that is off (or whose sub-tabs are all off)
+    // loses its button, so the header only lists what this device actually uses.
+    private void ApplyModuleVisibility()
+    {
+        foreach (var (button, key) in new (FrameworkElement, string)[]
+                 {
+                     (OrganisationNav, "Organisation"), (JournauxNav, "Journaux"), (CollectionsNav, "Collections"),
+                     (ArchivesNav, "Archives"), (BudgetNav, "Budget"), (CalendarNav, "Calendrier"), (MusicButton, "Musique"),
+                 })
+        {
+            button.Visibility = _config.IsEnabled(key) ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    private void OnModulesChanged()
+    {
+        ApplyModuleVisibility();
+        if (_activeSection is null) return;
+
+        if (!_config.IsEnabled(_activeSection))
+        {
+            // The open section was just switched off: close it, as Escape would.
+            foreach (var button in new[] { OrganisationNav, JournauxNav, CollectionsNav, ArchivesNav, BudgetNav, CalendarNav })
+            {
+                button.IsChecked = false;
+            }
+            _activeSection = null;
+        }
+
+        // Rebuilt so its sub-tabs follow the new settings (each view hides its switched-off tabs on load).
+        UpdateSectionContent();
+    }
+
+    // The module a search hit belongs to, so hits from switched-off modules never show up.
+    private static string ModuleKeyFor(SearchResult result) => result.Kind switch
+    {
+        SearchResultKind.Artwork or SearchResultKind.Observation when result.Category is int category
+            => $"Collections.{(AkashicRecords.Domain.ArtworkCategory)category}",
+        SearchResultKind.Artwork or SearchResultKind.Observation => "Collections",
+        SearchResultKind.ArtisticProject => "Journaux.Artistic",
+        SearchResultKind.JournalEntry => "Journaux.Personal",
+        SearchResultKind.Recipe => "Journaux.Recipes",
+        SearchResultKind.Poem => "Journaux.Poetry",
+        SearchResultKind.Photo => "Archives.Photos",
+        SearchResultKind.PersonalProject => "Organisation.Projets",
+        SearchResultKind.Transition => "Organisation.Transitions",
+        SearchResultKind.MusicTrack => "Musique",
+        SearchResultKind.BudgetTransaction => "Budget.Transactions",
+        _ => result.Section,
+    };
 
     // Toggles the downloader queue window (queue-only utility; created lazily). Separate top-level
     // window so it survives the main window hiding; closed only on real app exit.
@@ -719,7 +774,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var results = _searchService.Search(query);
+        var results = _searchService.Search(query).Where(r => _config.IsEnabled(ModuleKeyFor(r))).ToList();
         SearchResultsList.ItemsSource = results;
         SearchResultsList.Visibility = results.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         NoResultsText.Visibility = results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;

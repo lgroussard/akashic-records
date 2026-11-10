@@ -32,13 +32,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.akashicrecords.data.AkashicDatabase
+import com.akashicrecords.data.ConfigStore
 import com.akashicrecords.data.DesktopImport
+import com.akashicrecords.data.Modules
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-fun SettingsDialog(db: AkashicDatabase, onDismiss: () -> Unit, onImported: () -> Unit) {
+fun SettingsDialog(
+    db: AkashicDatabase,
+    config: ConfigStore,
+    disabledModules: Set<String>,
+    onModulesChanged: (Set<String>) -> Unit,
+    onDismiss: () -> Unit,
+    onImported: () -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var picked by remember { mutableStateOf<Uri?>(null) }
@@ -54,6 +63,8 @@ fun SettingsDialog(db: AkashicDatabase, onDismiss: () -> Unit, onImported: () ->
         title = { Text("Réglages") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
+                ModuleSwitches(disabledModules) { key, on -> onModulesChanged(config.setModuleEnabled(key, on)) }
+                HorizontalDivider(color = Palette.BorderStrong, modifier = Modifier.padding(vertical = 12.dp))
                 HomeIconButtons()
                 HorizontalDivider(color = Palette.BorderStrong, modifier = Modifier.padding(vertical = 12.dp))
                 WidgetSwitches()
@@ -108,6 +119,42 @@ fun SettingsDialog(db: AkashicDatabase, onDismiss: () -> Unit, onImported: () ->
             },
             dismissButton = { TextButton(onClick = { picked = null }) { Text("Annuler") } },
         )
+    }
+}
+
+// One switch per section, its sub-tabs indented below it (greyed while the section itself is off).
+// Each switch shows its own entry; a section left on with every sub-tab off is hidden all the same.
+@Composable
+private fun ModuleSwitches(disabled: Set<String>, onToggle: (String, Boolean) -> Unit) {
+    Text("Modules de ce téléphone", fontSize = 15.sp)
+    Text(
+        "Désactive ce que tu n'utilises pas ici : la barre du bas, le menu Plus et les onglets s'adaptent. " +
+            "Rien n'est supprimé, et le PC garde ses propres réglages.",
+        fontSize = 12.sp,
+        color = Palette.TextMuted,
+    )
+    Modules.catalog.forEach { section ->
+        val sectionOn = section.key !in disabled
+        ModuleRow(section.label, sectionOn, enabled = true, indent = 0) { onToggle(section.key, it) }
+        section.children.forEach { child ->
+            ModuleRow(child.label, child.key !in disabled, enabled = sectionOn, indent = 20) { onToggle(child.key, it) }
+        }
+    }
+}
+
+@Composable
+private fun ModuleRow(label: String, checked: Boolean, enabled: Boolean, indent: Int, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = indent.dp, top = 0.dp, bottom = 0.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            fontSize = if (indent == 0) 14.sp else 13.sp,
+            color = if (enabled) Palette.Text else Palette.TextFaint,
+            modifier = Modifier.weight(1f),
+        )
+        Switch(checked = checked, enabled = enabled, onCheckedChange = onChange)
     }
 }
 

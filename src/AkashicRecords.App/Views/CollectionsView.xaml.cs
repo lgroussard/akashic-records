@@ -130,6 +130,12 @@ public partial class CollectionsView : UserControl, ISearchNavigable, IRemembers
         // category here would re-check the old tab pill over the captured one (e.g. "À voir" shots).
         if (_screenshotMode) return;
 
+        var savedCategory = _config.CollectionsActiveCategory;
+        _config.CollectionsActiveCategory = ModuleTabs.Apply(_config, "Collections", savedCategory, "Film",
+            FilmsTab, FilmAnimationTab, SeriesTab, AnimesTab, LivresTab, VideoGameTab, WatchlistTab);
+        // The fiche belonged to a category that is now hidden: don't reopen it over another one.
+        if (_config.CollectionsActiveCategory != savedCategory) _config.CollectionsActiveFilmId = null;
+
         if (_config.CollectionsActiveCategory == "Watchlist")
         {
             // Real tab path: closes any fiche, swaps the tier list for the watchlist.

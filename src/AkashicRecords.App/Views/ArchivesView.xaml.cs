@@ -144,6 +144,10 @@ public partial class ArchivesView : UserControl, ISearchNavigable, IRemembersVie
     // Reopens the exact photo the user last viewed, restoring the sub-tab, filters, and viewer.
     private void RestoreActiveItem()
     {
+        var savedTab = _config.ArchivesActiveTab;
+        _config.ArchivesActiveTab = ModuleTabs.Apply(_config, "Archives", savedTab, "Photos", PhotosTab, FamilialeTab);
+        // The photo viewer belongs to the Photos tab: not reopened if that tab was just swapped for another.
+        if (_config.ArchivesActiveTab != savedTab) _config.ArchivesActivePhotoId = null;
         PhotosTab.IsChecked = _config.ArchivesActiveTab != "Familiale";
         FamilialeTab.IsChecked = _config.ArchivesActiveTab == "Familiale";
         PhotosRoot.Visibility = PhotosTab.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;

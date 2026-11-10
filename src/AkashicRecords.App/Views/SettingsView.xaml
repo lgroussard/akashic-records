@@ -18,8 +18,15 @@
         <ScrollViewer VerticalScrollBarVisibility="Auto" PanningMode="VerticalOnly">
             <StackPanel Margin="24,20">
                 <TextBlock Text="PARAMÈTRES" FontSize="20" FontWeight="Bold" Foreground="White" Margin="0,0,0,4"/>
+
+                <TextBlock Text="Modules de cet ordinateur" FontSize="14" FontWeight="SemiBold"
+                           Foreground="#7FB0FF" Margin="0,8,0,4"/>
+                <TextBlock TextWrapping="Wrap" Foreground="#AAAAAA" FontSize="12" Margin="0,0,0,8"
+                           Text="Décochez ce que vous n'utilisez pas ici : la barre du haut, les onglets et la recherche s'adaptent. Rien n'est supprimé, et le téléphone garde ses propres réglages."/>
+                <StackPanel x:Name="ModulesPanel" Margin="0,0,0,16"/>
+
                 <TextBlock Text="Recherche d'images automatiques" FontSize="14" FontWeight="SemiBold"
-                           Foreground="#7FB0FF" Margin="0,0,0,12"/>
+                           Foreground="#7FB0FF" Margin="0,8,0,12"/>
 
                 <TextBlock TextWrapping="Wrap" Foreground="#CCCCCC" LineHeight="18" Margin="0,0,0,4">
                     <Run FontSize="13">Par défaut, l'ajout d'un élément tente de trouver sa couverture sur</Run>

@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.akashicrecords.data.AkashicDatabase
 import com.akashicrecords.data.ConfigStore
+import com.akashicrecords.data.Modules
 import com.akashicrecords.journaux.JournauxSection
 import com.akashicrecords.music.MiniPlayer
 import com.akashicrecords.music.MusicSection
@@ -119,9 +120,14 @@ private val SECTIONS = NAV.map { it.section } + MORE
 @Composable
 fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaunchHandled: () -> Unit) {
     val context = LocalContext.current
+    // Modules switched off in the settings (this phone only): the bar, the "Plus" sheet and the sub-tabs follow.
+    var disabled by remember { mutableStateOf(config.disabledModules()) }
+    val navItems = NAV.filter { Modules.isEnabled(disabled, it.section) }
+    val moreItems = MORE.filter { Modules.isEnabled(disabled, it) }
+    val enabledSections = navItems.map { it.section } + moreItems
     val restored = remember { config.load().lastActiveSection }
     var section by remember {
-        mutableStateOf(restored?.takeIf { SECTIONS.contains(it) } ?: "Journaux")
+        mutableStateOf(restored?.takeIf { it in enabledSections } ?: enabledSections.firstOrNull() ?: "Journaux")
     }
     var calendarDate by remember { mutableStateOf<LocalDate?>(null) }
     var musicTab by remember { mutableStateOf<String?>(null) }
@@ -141,9 +147,14 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
         musicTab = null
     }
 
+    // The open section was just switched off in the settings: move to the first one still on.
+    LaunchedEffect(disabled) {
+        if (section !in enabledSections) enabledSections.firstOrNull()?.let { go(it) }
+    }
+
     LaunchedEffect(launch) {
         val l = launch ?: return@LaunchedEffect
-        if (l.section in SECTIONS) {
+        if (l.section in SECTIONS && Modules.isEnabled(disabled, l.section)) {
             go(l.section)
             when (l.section) {
                 "Calendrier" -> calendarDate = l.date
@@ -173,9 +184,10 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
         contentWindowInsets = WindowInsets.systemBars,
         bottomBar = {
             Column {
-                MiniPlayer(player, db) { go("Musique") }
+                // Musique switched off: no mini-player either (its tap would open a hidden section).
+                if (Modules.isEnabled(disabled, "Musique")) MiniPlayer(player, db) { go("Musique") }
                 NavigationBar(containerColor = Palette.Surface1, tonalElevation = 0.dp) {
-                    NAV.forEach { item ->
+                    navItems.forEach { item ->
                         NavigationBarItem(
                             selected = section == item.section,
                             onClick = { go(item.section) },
@@ -214,16 +226,21 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
     if (showMore) {
         ModalBottomSheet(onDismissRequest = { showMore = false }, containerColor = Palette.Surface1) {
             Column(Modifier.padding(bottom = 24.dp)) {
-                MoreRow("Organisation", "Projets et transitions") { showMore = false; go("Organisation") }
-                MoreRow("Archives", "Photos et archive familiale") { showMore = false; go("Archives") }
+                if ("Organisation" in moreItems) MoreRow("Organisation", "Projets et transitions") { showMore = false; go("Organisation") }
+                if ("Archives" in moreItems) MoreRow("Archives", "Photos et archive familiale") { showMore = false; go("Archives") }
                 HorizontalDivider(color = Palette.BorderStrong, modifier = Modifier.padding(vertical = 6.dp))
-                MoreRow("Réglages", "Widgets, import des données du PC") { showMore = false; showSettings = true }
+                MoreRow("Réglages", "Modules, widgets, import des données du PC") { showMore = false; showSettings = true }
             }
         }
     }
 
     if (showSettings) {
-        SettingsDialog(db, onDismiss = { showSettings = false }, onImported = { dataVersion++ })
+        SettingsDialog(
+            db, config, disabled,
+            onModulesChanged = { disabled = it; dataVersion++ },
+            onDismiss = { showSettings = false },
+            onImported = { dataVersion++ },
+        )
     }
 }
 
@@ -299,9 +316,10 @@ private fun TierPill(tier: Int) {
 @Composable
 private fun OrganisationSection(db: AkashicDatabase, config: ConfigStore) {
     val restored = remember { config.load().organisationActiveTab }
-    var tab by remember { mutableStateOf(restored ?: "Projets") }
+    val disabled = remember { config.disabledModules() }
+    var tab by remember { mutableStateOf(Modules.pickTab(disabled, "Organisation", restored, "Projets")) }
     SubTabs(
-        listOf("Projets" to "Projets", "Transitions" to "Transitions"),
+        Modules.visibleTabs(disabled, "Organisation", listOf("Projets" to "Projets", "Transitions" to "Transitions")),
         tab,
     ) { tab = it; config.saveOrganisationTab(it) }
 
@@ -389,13 +407,17 @@ private val COLLECTION_CATEGORIES = listOf(
 @Composable
 private fun CollectionsSection(db: AkashicDatabase, config: ConfigStore) {
     val restored = remember { config.load().collectionsActiveCategory }
-    var cat by remember { mutableStateOf(restored?.toIntOrNull() ?: 0) }
+    val disabled = remember { config.disabledModules() }
+    var cat by remember {
+        val saved = restored?.toIntOrNull()?.let { Modules.COLLECTION_KEYS.getOrNull(it) }
+        mutableStateOf(Modules.COLLECTION_KEYS.indexOf(Modules.pickTab(disabled, "Collections", saved, "Film")).coerceAtLeast(0))
+    }
     Row(
         Modifier.fillMaxWidth()
             .horizontalScroll(rememberScrollState())
             .padding(horizontal = 12.dp),
     ) {
-        COLLECTION_CATEGORIES.forEach { (label, ord) ->
+        COLLECTION_CATEGORIES.filter { (_, ord) -> Modules.isEnabled(disabled, "Collections", Modules.COLLECTION_KEYS[ord]) }.forEach { (label, ord) ->
             Spacer(Modifier.width(4.dp))
             FilterChip(
                 selected = ord == cat,
@@ -468,9 +490,10 @@ private fun ArtworkDetailInner(db: AkashicDatabase, artworkId: Int) {
 @Composable
 private fun ArchivesSection(db: AkashicDatabase, config: ConfigStore) {
     val restored = remember { config.load().archivesActiveTab }
-    var tab by remember { mutableStateOf(restored ?: "Photos") }
+    val disabled = remember { config.disabledModules() }
+    var tab by remember { mutableStateOf(Modules.pickTab(disabled, "Archives", restored, "Photos")) }
     SubTabs(
-        listOf("Photos" to "Photos", "Archive familiale" to "Familiale"),
+        Modules.visibleTabs(disabled, "Archives", listOf("Photos" to "Photos", "Archive familiale" to "Familiale")),
         tab,
     ) { tab = it; config.saveArchivesTab(it) }
 

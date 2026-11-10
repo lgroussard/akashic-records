@@ -4,6 +4,10 @@ public sealed class AppConfig
 {
     public string? LastActiveSection { get; set; }
 
+    // Modules (sections or "Section.SubTab") switched off on THIS device — see Modules.Catalog. Never synced:
+    // the phone keeps its own list.
+    public List<string> DisabledModules { get; set; } = new();
+
     // Journaux sub-tab the user last had open (Personal/Recipes/Poetry/Artistic), so
     // reopening Journaux returns them there instead of defaulting to the personal diary.
     public string? JournauxActiveTab { get; set; }

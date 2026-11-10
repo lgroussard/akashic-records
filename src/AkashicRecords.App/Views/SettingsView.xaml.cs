@@ -27,6 +27,51 @@ public partial class SettingsView : Window
         TmdbKeyInput.Text = _config.TmdbApiKey ?? string.Empty;
         PinterestKeyInput.Text = _config.PinterestToken ?? string.Empty;
         MusicSaveWidgetInput.IsChecked = _config.ShowMusicSaveWidget;
+        BuildModulesPanel();
+    }
+
+    // Raised after a module is switched on/off (already saved), so MainWindow re-lays out the header.
+    public event Action? ModulesChanged;
+
+    // One checkbox per section, its sub-tabs indented below it (greyed while the section itself is off).
+    private void BuildModulesPanel()
+    {
+        ModulesPanel.Children.Clear();
+        foreach (var section in Modules.Catalog)
+        {
+            var sectionBox = ModuleCheckBox(section, 0);
+            ModulesPanel.Children.Add(sectionBox);
+            if (section.Children.Count == 0) continue;
+
+            var children = new WrapPanel { Margin = new Thickness(22, 0, 0, 6) };
+            foreach (var child in section.Children) children.Children.Add(ModuleCheckBox(child, 14));
+            children.IsEnabled = sectionBox.IsChecked == true;
+            sectionBox.Checked += (_, _) => children.IsEnabled = true;
+            sectionBox.Unchecked += (_, _) => children.IsEnabled = false;
+            ModulesPanel.Children.Add(children);
+        }
+    }
+
+    private CheckBox ModuleCheckBox(AppModule module, double rightMargin)
+    {
+        var box = new CheckBox
+        {
+            Content = module.Label,
+            Foreground = System.Windows.Media.Brushes.White,
+            FontSize = 13,
+            Margin = new Thickness(0, 3, rightMargin, 3),
+            // The box shows this entry's own switch; a section left on with every sub-tab off is hidden all the same.
+            IsChecked = !_config.DisabledModules.Contains(module.Key),
+        };
+        RoutedEventHandler changed = (_, _) =>
+        {
+            _config.SetEnabled(module.Key, box.IsChecked == true);
+            _configService.Save(_config);
+            ModulesChanged?.Invoke();
+        };
+        box.Checked += changed;
+        box.Unchecked += changed;
+        return box;
     }
 
     private void MusicSaveWidgetInput_OnChanged(object sender, RoutedEventArgs e)

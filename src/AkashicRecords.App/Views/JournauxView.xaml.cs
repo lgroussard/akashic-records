@@ -106,6 +106,8 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
     {
         InitializeComponent();
         _config = config;
+        config.JournauxActiveTab = ModuleTabs.Apply(config, "Journaux", config.JournauxActiveTab, "Personal",
+            PersonalJournalTab, RecipesJournalTab, PoetryJournalTab, ArtisticJournalTab);
         _activeTab = config.JournauxActiveTab;
         PopulateFontFamilies();
         if (!string.IsNullOrEmpty(_activeTab))
