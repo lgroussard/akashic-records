@@ -4,3 +4,6 @@ local.properties
 gradle/gradle-8.10/
 gradle/*.zip
 zz_*
+
+# Android Studio project settings (per machine)
+.idea/
