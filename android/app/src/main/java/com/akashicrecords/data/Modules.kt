@@ -20,6 +20,8 @@ object Modules {
         )),
         AppModule("Musique", "Musique"),
         AppModule("Calendrier", "Calendrier"),
+        // Phone only (no PC catalogue entry): epub reading.
+        AppModule("Lecture", "Lecture"),
         AppModule("Collections", "Collections", listOf(
             AppModule("Collections.Film", "Films"),
             AppModule("Collections.FilmAnimation", "Films d'animation"),

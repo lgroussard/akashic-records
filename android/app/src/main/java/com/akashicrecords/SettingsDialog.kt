@@ -107,7 +107,7 @@ fun SettingsDialog(
                     status = "Import en cours…"
                     scope.launch {
                         status = try {
-                            val r = withContext(Dispatchers.IO) { DesktopImport.run(context, uri, db) }
+                            val r = withContext(Dispatchers.IO) { DesktopImport.run(context, uri, db).also { com.akashicrecords.reading.ReadingLinks.relinkAfterImport(context, db) } }
                             onImported()
                             "Import terminé : ${r.rows} lignes dans ${r.tables} tables, ${r.mediaFiles} fichiers média."
                         } catch (e: Exception) {

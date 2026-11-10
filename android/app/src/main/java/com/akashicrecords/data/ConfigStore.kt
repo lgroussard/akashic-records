@@ -52,6 +52,15 @@ class ConfigStore(context: Context) {
         return next
     }
 
+    // Lecture (phone only): the book left open (reopened on return, like the other sections) and the reader look.
+    fun lectureOpenBook(): Int? = if (prefs.contains(LECTURE_OPEN_BOOK)) prefs.getInt(LECTURE_OPEN_BOOK, 0) else null
+    fun saveLectureOpenBook(id: Int?) = prefs.edit().apply { if (id == null) remove(LECTURE_OPEN_BOOK) else putInt(LECTURE_OPEN_BOOK, id) }.apply()
+    fun readerLook(): Triple<Int, String, String> = Triple(
+        prefs.getInt(READER_FONT_SCALE, 100), prefs.getString(READER_FONT, null) ?: "serif", prefs.getString(READER_THEME, null) ?: "dark",
+    )
+    fun saveReaderLook(scale: Int, font: String, theme: String) =
+        prefs.edit().putInt(READER_FONT_SCALE, scale).putString(READER_FONT, font).putString(READER_THEME, theme).apply()
+
     // Mobile-only: folder (relative to the shared storage root) scanned as the music library.
     // Mirrors the desktop <exe>/music/ folder: top-level subfolders are albums.
     fun musicFolder(): String = prefs.getString(MUSIC_FOLDER, null) ?: DEFAULT_MUSIC_FOLDER
@@ -60,6 +69,10 @@ class ConfigStore(context: Context) {
     companion object {
         const val MUSIC_FOLDER = "MobileMusicFolder"
         const val DISABLED_MODULES = "DisabledModules"
+        const val LECTURE_OPEN_BOOK = "LectureOpenBook"
+        const val READER_FONT_SCALE = "ReaderFontScale"
+        const val READER_FONT = "ReaderFont"
+        const val READER_THEME = "ReaderTheme"
         const val DEFAULT_MUSIC_FOLDER = "Music/Akashic"
     }
 

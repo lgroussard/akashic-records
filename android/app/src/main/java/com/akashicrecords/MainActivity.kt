@@ -103,7 +103,8 @@ data class Launch(val section: String, val tab: String?, val date: LocalDate?, v
     }
 }
 
-private data class NavItem(val section: String, val label: String, val icon: ImageVector)
+// icon = a Material vector, or iconRes = one of the app drawables (Lecture's open book is not in the core icon set).
+private data class NavItem(val section: String, val label: String, val icon: ImageVector? = null, val iconRes: Int = 0)
 
 // "Musique" is a floating window on the desktop; on the phone it is a section of its own, with
 // the mini-player above the navigation bar everywhere.
@@ -111,9 +112,10 @@ private val NAV = listOf(
     NavItem("Journaux", "Journaux", Icons.Filled.Create),
     NavItem("Musique", "Musique", Icons.Filled.PlayArrow),
     NavItem("Calendrier", "Calendrier", Icons.Filled.DateRange),
-    NavItem("Collections", "Collections", Icons.Filled.Star),
+    NavItem("Lecture", "Lecture", iconRes = R.drawable.g_book),
 )
-private val MORE = listOf("Organisation", "Archives")
+// Collections moved here when Lecture took its place in the bar (phone only).
+private val MORE = listOf("Organisation", "Collections", "Archives")
 private val SECTIONS = NAV.map { it.section } + MORE
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -191,7 +193,10 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
                         NavigationBarItem(
                             selected = section == item.section,
                             onClick = { go(item.section) },
-                            icon = { Icon(item.icon, contentDescription = item.label) },
+                            icon = {
+                                if (item.iconRes != 0) Icon(androidx.compose.ui.res.painterResource(item.iconRes), contentDescription = item.label)
+                                else Icon(item.icon!!, contentDescription = item.label)
+                            },
                             label = { Text(item.label, fontSize = 11.sp, maxLines = 1) },
                             colors = navColors(),
                         )
@@ -216,6 +221,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
                         "Musique" -> MusicSection(db, config, player, initialTab = musicTab)
                         "Calendrier" -> CalendarSection(db, openDate = calendarDate)
                         "Collections" -> CollectionsSection(db, config)
+                        "Lecture" -> com.akashicrecords.reading.LectureSection(db, config)
                         "Archives" -> ArchivesSection(db, config)
                     }
                 }
@@ -227,6 +233,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
         ModalBottomSheet(onDismissRequest = { showMore = false }, containerColor = Palette.Surface1) {
             Column(Modifier.padding(bottom = 24.dp)) {
                 if ("Organisation" in moreItems) MoreRow("Organisation", "Projets et transitions") { showMore = false; go("Organisation") }
+                if ("Collections" in moreItems) MoreRow("Collections", "Films, séries, livres, jeux — par tier") { showMore = false; go("Collections") }
                 if ("Archives" in moreItems) MoreRow("Archives", "Photos et archive familiale") { showMore = false; go("Archives") }
                 HorizontalDivider(color = Palette.BorderStrong, modifier = Modifier.padding(vertical = 6.dp))
                 MoreRow("Réglages", "Modules, widgets, import des données du PC") { showMore = false; showSettings = true }

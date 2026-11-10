@@ -66,6 +66,9 @@ interface ObservationDao {
 
     @Query("SELECT * FROM Observation WHERE ArtworkId = :artworkId ORDER BY CreatedAt")
     suspend fun forArtwork(artworkId: Int): List<Observation>
+
+    @Query("SELECT * FROM Observation WHERE Id = :id")
+    suspend fun getById(id: Int): Observation?
 }
 
 @Dao
@@ -177,6 +180,9 @@ interface ReferenceDao {
 
     @Query("SELECT * FROM Reference WHERE ProjectId = :projectId")
     suspend fun forProject(projectId: Int): List<Reference>
+
+    @Query("SELECT * FROM Reference WHERE ObservationId = :observationId")
+    suspend fun forObservation(observationId: Int): List<Reference>
 }
 
 @Dao

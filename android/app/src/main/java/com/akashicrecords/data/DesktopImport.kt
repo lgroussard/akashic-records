@@ -21,6 +21,10 @@ object DesktopImport {
 
     data class Result(val tables: Int, val rows: Int, val mediaFiles: Int)
 
+    // Tables the phone owns (the PC has them too, empty): never overwritten by an import. Their links into
+    // Artwork/Observation, which the import does refill, are repaired right after (ReadingLinks.relinkAfterImport).
+    private val PHONE_ONLY = setOf("Book", "BookHighlight")
+
     fun run(context: Context, source: Uri, db: AkashicDatabase): Result {
         val work = File(context.cacheDir, "import").apply { deleteRecursively(); mkdirs() }
         val dbFile = File(work, "akashic.db")
@@ -53,7 +57,7 @@ object DesktopImport {
             dest.beginTransaction()
             try {
                 for (table in destTables) {
-                    if (table !in srcTables) continue
+                    if (table !in srcTables || table in PHONE_ONLY) continue
                     val destCols = dest.query("PRAGMA table_info(`$table`)").use(::columns)
                     val srcCols = src.rawQuery("PRAGMA table_info(`$table`)", null).use(::columns)
                     val shared = destCols.keys.filter { it in srcCols.keys }

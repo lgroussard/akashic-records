@@ -56,4 +56,17 @@
             <extra android:name="akashic.tab" android:value="Downloads" />
         </intent>
     </shortcut>
+    <shortcut
+        android:shortcutId="reading"
+        android:enabled="true"
+        android:icon="@drawable/pin_reading"
+        android:shortcutShortLabel="@string/sc_reading_short"
+        android:shortcutLongLabel="@string/sc_reading_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.akashicrecords"
+            android:targetClass="com.akashicrecords.MainActivity">
+            <extra android:name="akashic.section" android:value="Lecture" />
+        </intent>
+    </shortcut>
 </shortcuts>

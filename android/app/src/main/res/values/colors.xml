@@ -3,6 +3,7 @@
     <!-- Home-screen icons: a bit of colour (app palette accents). -->
     <color name="pin_music">#F06CA8</color>
     <color name="pin_poetry">#9B7BFF</color>
+    <color name="pin_reading">#E8A33D</color>
     <color name="pin_calendar">#34C77B</color>
     <color name="pin_download">#F2A33C</color>
 </resources>

@@ -19,4 +19,6 @@
     <string name="widget_photo_desc">Une photo souvenir du jour</string>
     <string name="sc_poetry_short">Poésie</string>
     <string name="sc_poetry_long">Ouvrir le recueil de poésie</string>
+    <string name="sc_reading_short">Lecture</string>
+    <string name="sc_reading_long">Reprendre la lecture</string>
 </resources>

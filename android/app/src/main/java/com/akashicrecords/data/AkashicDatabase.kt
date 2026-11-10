@@ -45,8 +45,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         Birthday::class,
         CalendarEvent::class,
         CalendarEventLink::class,
+        Book::class,
+        BookHighlight::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -86,6 +88,8 @@ abstract class AkashicDatabase : RoomDatabase() {
     abstract fun birthdayDao(): BirthdayDao
     abstract fun calendarEventDao(): CalendarEventDao
     abstract fun calendarEventLinkDao(): CalendarEventLinkDao
+    abstract fun bookDao(): BookDao
+    abstract fun bookHighlightDao(): BookHighlightDao
 
     companion object {
         @Volatile
@@ -96,7 +100,7 @@ abstract class AkashicDatabase : RoomDatabase() {
                 context.applicationContext,
                 AkashicDatabase::class.java,
                 "akashic.db",
-            ).addMigrations(MIGRATION_1_2).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
 
         // v2: phone-only poem formatting next to the PC columns (the desktop schema has the same
         // columns, so imports and the future sync carry both layouts).
@@ -107,6 +111,23 @@ abstract class AkashicDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE `Poem` ADD COLUMN `MobileBold` INTEGER")
                 db.execSQL("ALTER TABLE `Poem` ADD COLUMN `MobileItalic` INTEGER")
                 db.execSQL("ALTER TABLE `Poem` ADD COLUMN `MobileRichContent` TEXT")
+            }
+        }
+
+        // v3: the Lecture module (phone only). Same two tables in the desktop SchemaInitializer, so both schemas
+        // stay identical for imports and the future sync.
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `Book` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`Title` TEXT NOT NULL, `Author` TEXT NOT NULL, `FilePath` TEXT NOT NULL, `CoverPath` TEXT, " +
+                        "`AddedAt` TEXT NOT NULL, `LastReadAt` TEXT, `Locator` TEXT, `Progress` REAL NOT NULL, `ArtworkId` INTEGER)",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `BookHighlight` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`BookId` INTEGER NOT NULL, `Chapter` INTEGER NOT NULL, `Text` TEXT NOT NULL, `Note` TEXT NOT NULL, " +
+                        "`Locator` TEXT NOT NULL, `CreatedAt` TEXT NOT NULL, `ObservationId` INTEGER)",
+                )
             }
         }
     }

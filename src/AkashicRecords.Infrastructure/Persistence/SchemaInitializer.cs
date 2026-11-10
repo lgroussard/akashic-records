@@ -317,6 +317,32 @@ public sealed class SchemaInitializer
                     SecondaryId INTEGER,
                     Category INTEGER
                 );
+
+                -- Lecture module (phone only, Room v3): declared here too so both schemas stay identical for the
+                -- phone import and the future sync. The PC has no screen for them.
+                CREATE TABLE IF NOT EXISTS Book (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Title TEXT NOT NULL,
+                    Author TEXT NOT NULL,
+                    FilePath TEXT NOT NULL,
+                    CoverPath TEXT,
+                    AddedAt TEXT NOT NULL,
+                    LastReadAt TEXT,
+                    Locator TEXT,
+                    Progress REAL NOT NULL,
+                    ArtworkId INTEGER
+                );
+
+                CREATE TABLE IF NOT EXISTS BookHighlight (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    BookId INTEGER NOT NULL,
+                    Chapter INTEGER NOT NULL,
+                    Text TEXT NOT NULL,
+                    Note TEXT NOT NULL,
+                    Locator TEXT NOT NULL,
+                    CreatedAt TEXT NOT NULL,
+                    ObservationId INTEGER
+                );
                 """;
             command.ExecuteNonQuery();
         }
