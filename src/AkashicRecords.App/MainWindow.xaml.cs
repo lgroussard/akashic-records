@@ -846,23 +846,35 @@ public partial class MainWindow : Window
         }
 
         _activeSection = null;
-        UpdateSectionContent();
+        // The snapshot was taken on the tunneling pass (MainWindow_OnEscapeSnapshot), before the section's
+        // own Escape handler stepped back a level (e.g. poem page → book): capturing again now would
+        // remember that intermediate screen instead of the one the user actually left.
+        UpdateSectionContent(captureOutgoing: false);
         e.Handled = true;
+    }
+
+    // Tunneling pass of Escape: records the screen as the user sees it, before any section handler
+    // reacts to the key. If a section handler swallows the key (closing an overlay), it re-points its
+    // own state right after, so this snapshot never outlives the screen it describes.
+    private void MainWindow_OnEscapeSnapshot(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape || _activeSection is null || _screenshotMode) return;
+        if (SectionContent.Content is IRemembersViewState view) view.CaptureViewState();
     }
 
     // Common "reopen where I left off" rule (see IRemembersViewState): the outgoing view records the
     // sub-tab + item it is showing, then the config hits the disk, so the next visit (or the next launch)
     // lands on the same screen. Skipped for headless captures, which must never rewrite the user's config.
-    private void PersistSectionState()
+    private void PersistSectionState(bool captureOutgoing = true)
     {
         if (_screenshotMode) return;
-        if (SectionContent.Content is IRemembersViewState view) view.CaptureViewState();
+        if (captureOutgoing && SectionContent.Content is IRemembersViewState view) view.CaptureViewState();
         _configService.Save(_config);
     }
 
-    private void UpdateSectionContent()
+    private void UpdateSectionContent(bool captureOutgoing = true)
     {
-        PersistSectionState();
+        PersistSectionState(captureOutgoing);
 
         SectionContent.Content = _activeSection switch
         {

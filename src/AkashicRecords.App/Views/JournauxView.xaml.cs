@@ -123,8 +123,12 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
 
         Loaded += (_, _) =>
         {
+            // Restore BEFORE the tab's first refresh: with nothing selected yet, RefreshRecipesList and
+            // RefreshProjectsList open the first item and re-point the config at it, wiping the saved item.
+            RestoreActiveItem();
+
             // Populate the content for whichever tab was restored, so the view isn't blank
-            // until a re-layout triggers a refresh.
+            // until a re-layout triggers a refresh. Each refresh keeps the item restored above.
             if (!string.IsNullOrEmpty(_activeTab))
             {
                 if (_activeTab == "Recipes") RefreshRecipesList();
@@ -132,8 +136,6 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
                 else if (_activeTab == "Artistic") RefreshProjectsList();
                 else RefreshCalendarChips();
             }
-
-            RestoreActiveItem();
 
             RefreshProjectsList();
             RefreshCalendarChips();
