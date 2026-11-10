@@ -18,6 +18,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import com.akashicrecords.calendar.CalendarSection
 import com.akashicrecords.calendar.Reminders
+import com.akashicrecords.widgets.Widgets
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -71,6 +74,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Leaving the app: the widgets reflect what was just written (journal, agenda).
+    override fun onStop() {
+        super.onStop()
+        lifecycleScope.launch { Widgets.refreshAll(applicationContext) }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         launch = Launch.from(intent)
@@ -79,14 +88,16 @@ class MainActivity : ComponentActivity() {
 
 // A deep link into a section: from a reminder notification (Calendrier + day) or a launcher
 // shortcut (section + sub-tab).
-data class Launch(val section: String, val tab: String?, val date: LocalDate?) {
+data class Launch(val section: String, val tab: String?, val date: LocalDate?, val item: Int? = null) {
     companion object {
         const val EXTRA_TAB = "akashic.tab"
+        const val EXTRA_ITEM = "akashic.item" // a poem or recipe id, opened directly
 
         fun from(intent: Intent?): Launch? {
             val section = intent?.getStringExtra(Reminders.EXTRA_SECTION) ?: return null
             val date = intent.getStringExtra(Reminders.EXTRA_DATE)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
-            return Launch(section, intent.getStringExtra(EXTRA_TAB), date)
+            val item = intent.getIntExtra(EXTRA_ITEM, -1).takeIf { it > 0 }
+            return Launch(section, intent.getStringExtra(EXTRA_TAB), date, item)
         }
     }
 }
@@ -114,6 +125,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
     }
     var calendarDate by remember { mutableStateOf<LocalDate?>(null) }
     var musicTab by remember { mutableStateOf<String?>(null) }
+    var journalItem by remember { mutableStateOf<Int?>(null) }
     val player = rememberPlayerConnection()
     var showSettings by remember { mutableStateOf(false) }
     var showMore by remember { mutableStateOf(false) }
@@ -123,17 +135,24 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
     fun go(s: String) {
         section = s
         config.saveSection(s)
+        // A deep-linked poem/recipe/day/tab applies once, not to the next visits of the section.
+        journalItem = null
+        calendarDate = null
+        musicTab = null
     }
 
     LaunchedEffect(launch) {
         val l = launch ?: return@LaunchedEffect
         if (l.section in SECTIONS) {
+            go(l.section)
             when (l.section) {
                 "Calendrier" -> calendarDate = l.date
-                "Journaux" -> l.tab?.let { config.saveJournauxTab(it) }
+                "Journaux" -> {
+                    l.tab?.let { config.saveJournauxTab(it) }
+                    journalItem = l.item
+                }
                 "Musique" -> musicTab = l.tab
             }
-            go(l.section)
             dataVersion++
         }
         onLaunchHandled()
@@ -181,7 +200,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
                 Column(Modifier.fillMaxSize().padding(top = 4.dp)) {
                     when (section) {
                         "Organisation" -> OrganisationSection(db, config)
-                        "Journaux" -> JournauxSection(db, config)
+                        "Journaux" -> JournauxSection(db, config, openItem = journalItem)
                         "Musique" -> MusicSection(db, config, player, initialTab = musicTab)
                         "Calendrier" -> CalendarSection(db, openDate = calendarDate)
                         "Collections" -> CollectionsSection(db, config)
@@ -198,7 +217,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
                 MoreRow("Organisation", "Projets et transitions") { showMore = false; go("Organisation") }
                 MoreRow("Archives", "Photos et archive familiale") { showMore = false; go("Archives") }
                 HorizontalDivider(color = Palette.BorderStrong, modifier = Modifier.padding(vertical = 6.dp))
-                MoreRow("Réglages", "Importer les données du PC") { showMore = false; showSettings = true }
+                MoreRow("Réglages", "Widgets, import des données du PC") { showMore = false; showSettings = true }
             }
         }
     }

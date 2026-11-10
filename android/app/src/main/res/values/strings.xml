@@ -9,4 +9,14 @@
     <string name="sc_music_long">Ouvrir la bibliothèque musicale</string>
     <string name="sc_download_short">Téléchargements</string>
     <string name="sc_download_long">File de téléchargement</string>
+    <string name="widget_agenda_desc">Le programme du jour et les prochains anniversaires</string>
+    <string name="widget_journal_desc">La page du jour du journal personnel</string>
+    <string name="widget_music_desc">Lecture en cours, avec suivant et téléchargement</string>
+    <string name="widget_poem_desc">Un poème du jour, présenté comme une page</string>
+    <string name="widget_recipe_desc">Une recette du jour</string>
+    <string name="widget_watch_desc">Un film « À voir » pour ce soir</string>
+    <string name="widget_organisation_desc">Projets actifs et rappels</string>
+    <string name="widget_photo_desc">Une photo souvenir du jour</string>
+    <string name="sc_poetry_short">Poésie</string>
+    <string name="sc_poetry_long">Ouvrir le recueil de poésie</string>
 </resources>

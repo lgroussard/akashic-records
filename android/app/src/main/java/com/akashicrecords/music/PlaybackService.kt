@@ -106,11 +106,15 @@ class PlaybackService : MediaSessionService() {
         player.addListener(object : Player.Listener {
             override fun onEvents(p: Player, events: Player.Events) {
                 if (events.containsAny(Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_TIMELINE_CHANGED)) refreshLayout()
+                if (events.containsAny(Player.EVENT_IS_PLAYING_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_MEDIA_METADATA_CHANGED)) publishNowPlaying()
             }
         })
         // A ⤓ from the app's mini-player also turns the notification button into ✓.
         scope.launch {
-            Downloader.state.collect { st -> if (st.running) refreshLayout() }
+            Downloader.state.collect { st ->
+                if (st.running) refreshLayout()
+                publishNowPlaying()
+            }
         }
     }
 
@@ -152,7 +156,33 @@ class PlaybackService : MediaSessionService() {
         scope.launch {
             val added = withContext(Dispatchers.IO) { Downloader.enqueue(db, Downloader.searchQuery(title, artist), "$title — $artist", album) }
             session?.setCustomLayout(listOf(downloadButton(queued = true)))
+            publishNowPlaying()
             if (added) Downloader.runQueue(this@PlaybackService, db, ConfigStore(this@PlaybackService).musicFolder())
+        }
+    }
+
+    // Home-screen music widget: what plays, and whether the suggestion is already downloaded.
+    private fun publishNowPlaying() {
+        val p = session?.player ?: return
+        val item = p.currentMediaItem
+        val md = item?.mediaMetadata
+        val suggestion = currentSuggestion()
+        val playing = p.isPlaying
+        scope.launch {
+            val saved = suggestion != null && withContext(Dispatchers.IO) {
+                AkashicDatabase.get(this@PlaybackService).downloadItemDao().countByUrl(Downloader.searchQuery(suggestion.first, suggestion.second)) > 0
+            }
+            com.akashicrecords.widgets.NowPlaying.write(
+                this@PlaybackService,
+                com.akashicrecords.widgets.NowPlaying.State(
+                    title = md?.title?.toString() ?: "",
+                    artist = md?.artist?.toString() ?: "",
+                    playing = playing,
+                    suggestion = suggestion != null,
+                    saved = saved,
+                ),
+            )
+            com.akashicrecords.widgets.Widgets.refreshMusic(this@PlaybackService)
         }
     }
 

@@ -2,23 +2,23 @@
 <!-- Launcher long-press shortcuts: each opens a section (and sub-tab) through MainActivity extras. -->
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
     <shortcut
-        android:shortcutId="journal"
+        android:shortcutId="poetry"
         android:enabled="true"
-        android:icon="@drawable/sc_journal"
-        android:shortcutShortLabel="@string/sc_journal_short"
-        android:shortcutLongLabel="@string/sc_journal_long">
+        android:icon="@drawable/pin_poetry"
+        android:shortcutShortLabel="@string/sc_poetry_short"
+        android:shortcutLongLabel="@string/sc_poetry_long">
         <intent
             android:action="android.intent.action.VIEW"
             android:targetPackage="com.akashicrecords"
             android:targetClass="com.akashicrecords.MainActivity">
             <extra android:name="akashic.section" android:value="Journaux" />
-            <extra android:name="akashic.tab" android:value="Personal" />
+            <extra android:name="akashic.tab" android:value="Poetry" />
         </intent>
     </shortcut>
     <shortcut
         android:shortcutId="calendar"
         android:enabled="true"
-        android:icon="@drawable/sc_calendar"
+        android:icon="@drawable/pin_calendar"
         android:shortcutShortLabel="@string/sc_calendar_short"
         android:shortcutLongLabel="@string/sc_calendar_long">
         <intent
@@ -31,7 +31,7 @@
     <shortcut
         android:shortcutId="music"
         android:enabled="true"
-        android:icon="@drawable/sc_music"
+        android:icon="@drawable/pin_music"
         android:shortcutShortLabel="@string/sc_music_short"
         android:shortcutLongLabel="@string/sc_music_long">
         <intent
@@ -45,7 +45,7 @@
     <shortcut
         android:shortcutId="downloads"
         android:enabled="true"
-        android:icon="@drawable/sc_download"
+        android:icon="@drawable/pin_download"
         android:shortcutShortLabel="@string/sc_download_short"
         android:shortcutLongLabel="@string/sc_download_long">
         <intent

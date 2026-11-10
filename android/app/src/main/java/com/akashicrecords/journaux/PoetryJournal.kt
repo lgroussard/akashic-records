@@ -38,13 +38,13 @@ import kotlinx.coroutines.withContext
 // poem from Text, keeping the words but losing per-word formatting from the PC. Poems only
 // read on the phone are left untouched.
 @Composable
-internal fun PoetryJournal(db: AkashicDatabase) {
+internal fun PoetryJournal(db: AkashicDatabase, initialOpen: Int? = null) {
     val scope = rememberCoroutineScope()
     var poems by remember { mutableStateOf<List<Poem>>(emptyList()) }
     var recueils by remember { mutableStateOf<List<Recueil>>(emptyList()) }
     var search by remember { mutableStateOf("") }
     var recueilFilter by remember { mutableStateOf<Int?>(null) }
-    var openId by remember { mutableStateOf<Int?>(null) }
+    var openId by remember { mutableStateOf(initialOpen) }
     var newRecueil by remember { mutableStateOf(false) }
 
     suspend fun reload() {
@@ -172,7 +172,8 @@ private fun PoemPage(db: AkashicDatabase, original: Poem, recueils: List<Recueil
 
     AutoSave(p) { v -> withContext(Dispatchers.IO) { db.poemDao().update(v) } }
 
-    val align = when (p.TextAlignment) {
+    val look = p.look()
+    val align = when (look.align) {
         "Center" -> TextAlign.Center
         "Right" -> TextAlign.Right
         "Justify" -> TextAlign.Justify
@@ -182,10 +183,10 @@ private fun PoemPage(db: AkashicDatabase, original: Poem, recueils: List<Recueil
     val poemStyle = TextStyle(
         color = Palette.Text,
         fontFamily = if (serif) FontFamily.Serif else FontFamily.SansSerif,
-        fontStyle = if (p.Italic) FontStyle.Italic else FontStyle.Normal,
-        fontWeight = if (p.Bold) FontWeight.Bold else FontWeight.Normal,
-        fontSize = (p.FontSize * 0.9).coerceIn(12.0, 32.0).sp,
-        lineHeight = (p.FontSize * 1.35).coerceIn(18.0, 44.0).sp,
+        fontStyle = if (look.italic) FontStyle.Italic else FontStyle.Normal,
+        fontWeight = if (look.bold) FontWeight.Bold else FontWeight.Normal,
+        fontSize = (look.fontSize * 0.9).coerceIn(12.0, 32.0).sp,
+        lineHeight = (look.fontSize * 1.35).coerceIn(18.0, 44.0).sp,
         textAlign = align,
     )
 
@@ -210,25 +211,20 @@ private fun PoemPage(db: AkashicDatabase, original: Poem, recueils: List<Recueil
                 }
             }
         }
-        // Formatting bar (desktop: Left/Center/Right/Justify + italic/bold).
+        // Phone formatting bar (alignment, italic, bold, size): writes the phone columns only.
         Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
             listOf("Left" to "⇤", "Center" to "≡", "Right" to "⇥", "Justify" to "☰").forEach { (key, glyph) ->
-                FilterChip(selected = p.TextAlignment == key, onClick = { p = p.copy(TextAlignment = key) }, label = { Text(glyph) })
+                FilterChip(selected = look.align == key, onClick = { p = p.withMobileAlign(key) }, label = { Text(glyph) })
                 Spacer(Modifier.width(4.dp))
             }
-            FilterChip(selected = p.Italic, onClick = { p = p.copy(Italic = !p.Italic) }, label = { Text("I", fontStyle = FontStyle.Italic) })
+            FilterChip(selected = look.italic, onClick = { p = p.withMobileItalic(!look.italic) }, label = { Text("I", fontStyle = FontStyle.Italic) })
             Spacer(Modifier.width(4.dp))
-            FilterChip(selected = p.Bold, onClick = { p = p.copy(Bold = !p.Bold) }, label = { Text("B", fontWeight = FontWeight.Bold) })
+            FilterChip(selected = look.bold, onClick = { p = p.withMobileBold(!look.bold) }, label = { Text("B", fontWeight = FontWeight.Bold) })
             Spacer(Modifier.width(4.dp))
-            TextButton(onClick = { p = p.copy(FontSize = (p.FontSize - 1).coerceAtLeast(12.0)) }) { Text("A−") }
-            TextButton(onClick = { p = p.copy(FontSize = (p.FontSize + 1).coerceAtMost(36.0)) }) { Text("A+") }
-        }
-        if (p.RichContent.isNotEmpty()) {
-            Text(
-                "Mise en forme fine du PC conservée tant que le texte n'est pas modifié ici.",
-                fontSize = 10.sp,
-                color = Palette.TextFaint,
-            )
+            TextButton(onClick = { p = p.withMobileSize((look.fontSize - 1).coerceAtLeast(12.0)) }) { Text("A−") }
+            TextButton(onClick = { p = p.withMobileSize((look.fontSize + 1).coerceAtMost(36.0)) }) { Text("A+") }
+            // Only once the phone has its own layout: back to the PC one, to start over.
+            if (look.ownLayout) TextButton(onClick = { p = p.withPcLayout() }) { Text("Reprendre celle du PC", fontSize = 12.sp) }
         }
         BasicTextField(
             value = p.Text,

@@ -59,6 +59,8 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     // Calendar reminders (periodic check, survives reboots).
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+    // Home-screen widgets (agenda, journal, music).
+    implementation("androidx.glance:glance-appwidget:1.1.0")
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-session:1.4.1")

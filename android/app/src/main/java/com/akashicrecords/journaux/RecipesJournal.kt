@@ -34,12 +34,12 @@ import kotlinx.coroutines.withContext
 // Desktop "Journal de recettes": search (title/tags/ingredients) + category chips + list,
 // then one recipe page with photo and auto-saved fields; Préc./Suiv. walk the filtered set.
 @Composable
-internal fun RecipesJournal(db: AkashicDatabase) {
+internal fun RecipesJournal(db: AkashicDatabase, initialOpen: Int? = null) {
     val scope = rememberCoroutineScope()
     var recipes by remember { mutableStateOf<List<Recipe>>(emptyList()) }
     var search by remember { mutableStateOf("") }
     var category by remember { mutableStateOf<String?>(null) }
-    var openId by remember { mutableStateOf<Int?>(null) }
+    var openId by remember { mutableStateOf(initialOpen) }
 
     suspend fun reload() {
         recipes = withContext(Dispatchers.IO) { db.recipeDao().getAll() }

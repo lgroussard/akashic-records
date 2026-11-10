@@ -27,6 +27,7 @@ data class PlayerUi(
     val isPreview: Boolean = false, // a suggestion (full track or 30 s clip), not a library track
     val suggestionTitle: String? = null, // original title/artist of a suggestion, for the ⤓
     val suggestionArtist: String? = null,
+    val fromSimilarTab: Boolean = false, // started by a tap in Similaires (not chained)
     val isPlaying: Boolean = false,
     val positionMs: Long = 0,
     val durationMs: Long = 0,
@@ -69,6 +70,7 @@ class PlayerConnection(context: Context) {
             isPreview = PlayerItems.isSuggestion(c.currentMediaItem),
             suggestionTitle = if (PlayerItems.isSuggestion(c.currentMediaItem)) md.extras?.getString(PlayerItems.EXTRA_TITLE) ?: md.title?.toString() else null,
             suggestionArtist = if (PlayerItems.isSuggestion(c.currentMediaItem)) md.extras?.getString(PlayerItems.EXTRA_ARTIST) ?: "" else null,
+            fromSimilarTab = c.currentMediaItem?.mediaId?.startsWith(PREVIEW_PREFIX) == true,
             isPlaying = c.isPlaying,
             positionMs = c.currentPosition.coerceAtLeast(0),
             durationMs = c.duration.takeIf { it > 0 } ?: 0,

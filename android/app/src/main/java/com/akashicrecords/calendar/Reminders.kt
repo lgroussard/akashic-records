@@ -173,6 +173,8 @@ object Reminders {
 class ReminderWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         Reminders.check(applicationContext)
+        // Same cadence keeps the home-screen widgets current (agenda of the day, journal page).
+        com.akashicrecords.widgets.Widgets.refreshAll(applicationContext)
         return Result.success()
     }
 }

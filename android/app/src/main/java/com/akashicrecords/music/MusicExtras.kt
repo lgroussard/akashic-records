@@ -33,14 +33,16 @@ internal fun SimilarPanel(
 ) {
     val scope = rememberCoroutineScope()
     val ui = player.ui
-    // Seed = the playing library track; a clip being played does not reseed the list.
+    // Seed = what is playing: a library track or a suggestion (chained or not), with the
+    // suggestion's clean title/artist. Only a title started from this list keeps the current list
+    // (tapping a row must not swap the list under the finger) — unless there is no list yet.
     var seed by remember { mutableStateOf<Pair<String, String>?>(null) }
     var album by remember { mutableStateOf("") }
-    LaunchedEffect(ui.title, ui.artist, ui.isPreview) {
-        if (ui.title.isNotBlank() && !ui.isPreview) {
-            seed = ui.title to ui.artist
-            album = ui.album
-        }
+    LaunchedEffect(ui.title, ui.artist, ui.fromSimilarTab) {
+        if (ui.title.isBlank()) return@LaunchedEffect
+        if (ui.fromSimilarTab && seed != null) return@LaunchedEffect
+        seed = (ui.suggestionTitle ?: ui.title) to (ui.suggestionArtist ?: ui.artist)
+        album = ui.album
     }
     var list by remember { mutableStateOf<List<SimilarTrack>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }

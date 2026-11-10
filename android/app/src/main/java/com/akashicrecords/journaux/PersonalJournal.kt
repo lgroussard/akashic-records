@@ -27,6 +27,7 @@ import com.akashicrecords.Palette
 import com.akashicrecords.data.AkashicDatabase
 import com.akashicrecords.data.JournalEntry
 import com.akashicrecords.data.JournalPhoto
+import com.akashicrecords.calendar.MONTH_TITLE
 import com.akashicrecords.media.LocalImage
 import com.akashicrecords.media.MediaFiles
 import kotlinx.coroutines.Dispatchers
@@ -227,7 +228,7 @@ private fun MonthCalendar(
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = { onMonth(month.minusMonths(1)) }) { Text("‹") }
             Text(
-                "${month.month.getDisplayName(TextStyle.FULL_STANDALONE, Locale.FRENCH).replaceFirstChar { it.uppercase() }} ${month.year}",
+                month.format(MONTH_TITLE).replaceFirstChar { it.uppercase() },
                 textAlign = TextAlign.Center,
                 modifier = Modifier.weight(1f),
             )

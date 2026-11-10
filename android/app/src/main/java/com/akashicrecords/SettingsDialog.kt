@@ -4,6 +4,22 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Switch
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import com.akashicrecords.widgets.WidgetCatalog
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.AlertDialog
@@ -37,7 +53,11 @@ fun SettingsDialog(db: AkashicDatabase, onDismiss: () -> Unit, onImported: () ->
         onDismissRequest = { if (!busy) onDismiss() },
         title = { Text("Réglages") },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                HomeIconButtons()
+                HorizontalDivider(color = Palette.BorderStrong, modifier = Modifier.padding(vertical = 12.dp))
+                WidgetSwitches()
+                HorizontalDivider(color = Palette.BorderStrong, modifier = Modifier.padding(vertical = 12.dp))
                 Text("Importer les données du PC", fontSize = 15.sp)
                 Spacer(Modifier.height(4.dp))
                 Text(
@@ -89,4 +109,58 @@ fun SettingsDialog(db: AkashicDatabase, onDismiss: () -> Unit, onImported: () ->
             dismissButton = { TextButton(onClick = { picked = null }) { Text("Annuler") } },
         )
     }
+}
+
+// One switch per home-screen widget: off = hidden from the launcher's widget picker.
+@Composable
+private fun WidgetSwitches() {
+    val context = LocalContext.current
+    Text("Widgets", fontSize = 15.sp)
+    Text(
+        "Ceux activés apparaissent dans la liste des widgets du téléphone (appui long sur l'accueil → Widgets → Akashic).",
+        fontSize = 12.sp,
+        color = Palette.TextMuted,
+    )
+    WidgetCatalog.all.forEach { e ->
+        var on by remember { mutableStateOf(WidgetCatalog.isEnabled(context, e)) }
+        Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(e.label, fontSize = 14.sp)
+                Text(e.description, fontSize = 11.sp, color = Palette.TextFaint)
+            }
+            Switch(checked = on, onCheckedChange = {
+                on = it
+                WidgetCatalog.setEnabled(context, e, it)
+            })
+        }
+    }
+}
+
+// Colored home-screen icons for Musique, Poésie and Calendrier.
+@Composable
+private fun HomeIconButtons() {
+    val context = LocalContext.current
+    var message by remember { mutableStateOf<String?>(null) }
+    Text("Icônes sur l'écran d'accueil", fontSize = 15.sp)
+    Text("Une icône qui ouvre directement la section.", fontSize = 12.sp, color = Palette.TextMuted)
+    HomeIcons.all.forEach { icon ->
+        Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Preview of the icon (the adaptive-icon resource itself is for the launcher only).
+            androidx.compose.foundation.layout.Box(
+                Modifier.size(36.dp).clip(CircleShape).background(androidx.compose.ui.graphics.Color(icon.color)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(painterResource(icon.glyphRes), contentDescription = null, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(icon.label, fontSize = 14.sp)
+                Text(icon.description, fontSize = 11.sp, color = Palette.TextFaint)
+            }
+            TextButton(onClick = {
+                message = if (HomeIcons.pin(context, icon)) null else "Ton écran d'accueil ne permet pas d'ajouter des icônes."
+            }) { Text("Ajouter") }
+        }
+    }
+    message?.let { Text(it, fontSize = 12.sp, color = Palette.TextMuted) }
 }

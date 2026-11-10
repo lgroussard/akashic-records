@@ -5,6 +5,8 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [
@@ -44,7 +46,7 @@ import androidx.room.TypeConverters
         CalendarEvent::class,
         CalendarEventLink::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -94,6 +96,18 @@ abstract class AkashicDatabase : RoomDatabase() {
                 context.applicationContext,
                 AkashicDatabase::class.java,
                 "akashic.db",
-            ).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2).build().also { instance = it }
+
+        // v2: phone-only poem formatting next to the PC columns (the desktop schema has the same
+        // columns, so imports and the future sync carry both layouts).
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `Poem` ADD COLUMN `MobileTextAlignment` TEXT")
+                db.execSQL("ALTER TABLE `Poem` ADD COLUMN `MobileFontSize` REAL")
+                db.execSQL("ALTER TABLE `Poem` ADD COLUMN `MobileBold` INTEGER")
+                db.execSQL("ALTER TABLE `Poem` ADD COLUMN `MobileItalic` INTEGER")
+                db.execSQL("ALTER TABLE `Poem` ADD COLUMN `MobileRichContent` TEXT")
+            }
+        }
     }
 }

@@ -100,6 +100,15 @@ data class Poem(
     val Italic: Boolean,
     val RichContent: String,
     val EditorWidth: Double,
+    // Phone-only formatting (schema v2), separate from the PC columns above so one poem can be
+    // laid out differently on each. Null = not set on the phone yet: the PC value is used.
+    // MobileRichContent is reserved for per-word formatting on the phone (the PC equivalent is
+    // RichContent, a XAML FlowDocument); unused for now.
+    val MobileTextAlignment: String? = null,
+    val MobileFontSize: Double? = null,
+    val MobileBold: Boolean? = null,
+    val MobileItalic: Boolean? = null,
+    val MobileRichContent: String? = null,
 )
 
 // ---- Canvas / artistic projects ----

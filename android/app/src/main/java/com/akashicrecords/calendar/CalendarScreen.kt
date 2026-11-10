@@ -8,6 +8,14 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -44,6 +52,8 @@ import java.util.Locale
 
 private val DAY_HEADER = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.FRENCH)
 private val SHORT_DAY = DateTimeFormatter.ofPattern("EEE d MMM", Locale.FRENCH)
+// "décembre 2026": the format form. TextStyle.FULL_STANDALONE gave an empty name for December.
+internal val MONTH_TITLE: DateTimeFormatter = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.FRENCH)
 
 private sealed interface Editing {
     data class Event(val event: CalendarEvent?, val day: LocalDate) : Editing
@@ -90,7 +100,32 @@ fun CalendarSection(db: AkashicDatabase, openDate: LocalDate? = null) {
                     month = YearMonth.now()
                     selected = LocalDate.now()
                 }
-                MonthGrid(month, selected, monthItems) { selected = it }
+                // Swipe left/right to change month; the grid slides in from the swipe side.
+                var drag by remember { mutableStateOf(0f) }
+                AnimatedContent(
+                    targetState = month,
+                    transitionSpec = {
+                        val forward = targetState > initialState
+                        (slideInHorizontally { w -> if (forward) w else -w } + fadeIn()) togetherWith
+                            (slideOutHorizontally { w -> if (forward) -w else w } + fadeOut())
+                    },
+                    label = "month",
+                    modifier = Modifier.pointerInput(Unit) {
+                        detectHorizontalDragGestures(
+                            onDragStart = { drag = 0f },
+                            onHorizontalDrag = { _, dx -> drag += dx },
+                            onDragEnd = {
+                                val threshold = 60.dp.toPx()
+                                if (drag < -threshold) month = month.plusMonths(1)
+                                else if (drag > threshold) month = month.minusMonths(1)
+                                drag = 0f
+                            },
+                        )
+                    },
+                ) { shown ->
+                    // Dots come from the loaded month; during the slide the other month shows none.
+                    MonthGrid(shown, selected, if (shown == month) monthItems else emptyList()) { selected = it }
+                }
                 Text(
                     selected.format(DAY_HEADER).replaceFirstChar { it.uppercase() },
                     fontWeight = FontWeight.Bold,
@@ -137,17 +172,20 @@ fun CalendarSection(db: AkashicDatabase, openDate: LocalDate? = null) {
 
 @Composable
 private fun MonthHeader(month: YearMonth, onPrev: () -> Unit, onNext: () -> Unit, onToday: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = onPrev) { Text("‹", fontSize = 20.sp) }
+    // Month on the left on one line, controls on the right: "Décembre 2026" never wraps (it used
+    // to, squeezed by "Auj.", and only "2026" stayed visible).
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(
-            "${month.month.getDisplayName(TextStyle.FULL_STANDALONE, Locale.FRENCH).replaceFirstChar { it.uppercase() }} ${month.year}",
+            month.format(MONTH_TITLE).replaceFirstChar { it.uppercase() },
             fontWeight = FontWeight.Bold,
-            fontSize = 17.sp,
-            textAlign = TextAlign.Center,
+            fontSize = 18.sp,
+            maxLines = 1,
+            softWrap = false,
             modifier = Modifier.weight(1f),
         )
-        TextButton(onClick = onNext) { Text("›", fontSize = 20.sp) }
         if (month != YearMonth.now()) TextButton(onClick = onToday) { Text("Auj.") }
+        TextButton(onClick = onPrev) { Text("‹", fontSize = 22.sp) }
+        TextButton(onClick = onNext) { Text("›", fontSize = 22.sp) }
     }
 }
 

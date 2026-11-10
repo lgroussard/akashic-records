@@ -23,15 +23,15 @@ import kotlinx.coroutines.withContext
 // Journaux: four tabs, each with its own paradigm (as on the desktop). Personal journal,
 // recipes and poetry are fully editable; the artistic canvas stays read-only on the phone.
 @Composable
-fun JournauxSection(db: AkashicDatabase, config: ConfigStore) {
+fun JournauxSection(db: AkashicDatabase, config: ConfigStore, openItem: Int? = null) {
     val restored = remember { config.load().journauxActiveTab }
     var tab by remember { mutableStateOf(restored ?: "Personal") }
     Column(Modifier.fillMaxSize()) {
         SubTabs(
             listOf(
                 "Journal personnel" to "Personal",
-                "Recettes" to "Recipes",
                 "Poésie" to "Poetry",
+                "Recettes" to "Recipes",
                 "Archive artistique" to "Artistic",
             ),
             tab,
@@ -41,8 +41,8 @@ fun JournauxSection(db: AkashicDatabase, config: ConfigStore) {
             Column(Modifier.fillMaxSize()) {
                 when (tab) {
                     "Personal" -> PersonalJournal(db)
-                    "Recipes" -> RecipesJournal(db)
-                    "Poetry" -> PoetryJournal(db)
+                    "Recipes" -> RecipesJournal(db, openItem)
+                    "Poetry" -> PoetryJournal(db, openItem)
                     "Artistic" -> ArtisticJournal(db)
                 }
             }
