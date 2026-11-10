@@ -373,7 +373,7 @@ public partial class CollectionsView : UserControl, ISearchNavigable
             ? new ImageBrush(LoadImage(MediaStorage.ResolveFullPath(path))) { Stretch = Stretch.Uniform }
             : (Brush)FindResource("Surface3Brush");
 
-        var title = new TextBlock
+        var title = new Emoji.Wpf.TextBlock
         {
             Text = film.Title,
             FontSize = 12.5,
@@ -403,7 +403,7 @@ public partial class CollectionsView : UserControl, ISearchNavigable
             };
             foreach (var badge in badges)
             {
-                badgesPanel.Children.Add(new TextBlock
+                badgesPanel.Children.Add(new Emoji.Wpf.TextBlock
                 {
                     Text = badge,
                     FontSize = 10.5,
@@ -487,7 +487,7 @@ public partial class CollectionsView : UserControl, ISearchNavigable
             Margin = new Thickness(16),
             Children =
             {
-                new TextBlock { Text = label, Margin = new Thickness(0, 0, 0, 6) },
+                new Emoji.Wpf.TextBlock { Text = label, Margin = new Thickness(0, 0, 0, 6) },
                 textBox,
                 new StackPanel
                 {
@@ -931,8 +931,8 @@ public partial class CollectionsView : UserControl, ISearchNavigable
 
         // Info in the middle.
         var info = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        info.Children.Add(new TextBlock { Text = item.Title, Foreground = (Brush)FindResource("TextBrush"), FontSize = 13, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
-        info.Children.Add(new TextBlock
+        info.Children.Add(new Emoji.Wpf.TextBlock { Text = item.Title, Foreground = (Brush)FindResource("TextBrush"), FontSize = 13, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
+        info.Children.Add(new Emoji.Wpf.TextBlock
         {
             Text = item.Category == WatchlistCategory.Film ? "Film" : "Film d'animation",
             Foreground = (Brush)FindResource("TextMutedBrush"),

@@ -1,6 +1,7 @@
 <UserControl x:Class="AkashicRecords.App.Views.JournauxView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:emoji="clr-namespace:Emoji.Wpf;assembly=Emoji.Wpf"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:System="clr-namespace:System;assembly=System.Private.CoreLib"
@@ -234,7 +235,7 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <Button Grid.Column="0" Content="◀ Précédent" Style="{StaticResource SecondaryButtonStyle}" Click="PreviousRecipeButton_OnClick" HorizontalAlignment="Left"/>
-                            <TextBlock Grid.Column="1" x:Name="RecipePageTitleText" HorizontalAlignment="Center" VerticalAlignment="Center"
+                            <emoji:TextBlock Grid.Column="1" x:Name="RecipePageTitleText" HorizontalAlignment="Center" VerticalAlignment="Center"
                                        Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="17" TextWrapping="Wrap" TextAlignment="Center"
                                        Margin="16,0"/>
                             <Button Grid.Column="2" Content="Suivant ▶" Style="{StaticResource SecondaryButtonStyle}" Click="NextRecipeButton_OnClick" HorizontalAlignment="Right"/>
@@ -483,7 +484,7 @@
                             <Button DockPanel.Dock="Left" Content="← Bibliothèque" x:Name="BookshelfBackButton" Style="{StaticResource SecondaryButtonStyle}"
                                     Click="BookshelfBackButton_OnClick" Margin="0,0,16,0"
                                     ToolTip="Retour à l'étagère"/>
-                            <TextBlock DockPanel.Dock="Left" x:Name="BookTitle" Text="" FontSize="24" FontFamily="Georgia"
+                            <emoji:TextBlock DockPanel.Dock="Left" x:Name="BookTitle" Text="" FontSize="24" FontFamily="Georgia"
                                        FontWeight="Bold" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"/>
                             <ToggleButton DockPanel.Dock="Right" x:Name="PoetryMenuButton" Content="⋯" Width="34" Height="30"
                                          Style="{StaticResource MiniToggleButtonStyle}" Click="PoetryMenuButton_OnToggle"

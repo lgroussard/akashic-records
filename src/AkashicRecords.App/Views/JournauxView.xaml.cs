@@ -1005,7 +1005,7 @@ public partial class JournauxView : UserControl, ISearchNavigable
             CanvasElementType.TextNote => CreateTextNoteContent(element),
             CanvasElementType.Image => CreateImageContent(element),
             CanvasElementType.ObservationReference => CreateReferenceContent(element),
-            _ => new TextBlock { Text = "?" }
+            _ => new Emoji.Wpf.TextBlock { Text = "?" }
         };
         // Reserve space so long text/images don't render underneath the delete button or resize handle.
         content.Margin = new Thickness(0, 0, 16, 12);
@@ -1185,7 +1185,7 @@ public partial class JournauxView : UserControl, ISearchNavigable
         var body = observation?.Content ?? string.Empty;
 
         var panel = new StackPanel();
-        panel.Children.Add(new TextBlock
+        panel.Children.Add(new Emoji.Wpf.TextBlock
         {
             Text = header,
             Foreground = Brushes.White,
@@ -1196,7 +1196,7 @@ public partial class JournauxView : UserControl, ISearchNavigable
         });
         if (body.Length > 0)
         {
-            panel.Children.Add(new TextBlock
+            panel.Children.Add(new Emoji.Wpf.TextBlock
             {
                 Text = body,
                 Foreground = (Brush)Application.Current.FindResource("TextBrush"),
@@ -1717,7 +1717,7 @@ public partial class JournauxView : UserControl, ISearchNavigable
         cancelButton.Click += (_, _) => input.Close();
 
         var stack = new StackPanel { Margin = new Thickness(8) };
-        stack.Children.Add(new TextBlock { Text = "Catégorie", Foreground = (Brush)FindResource("TextBrush"), Margin = new Thickness(0, 0, 0, 4) });
+        stack.Children.Add(new Emoji.Wpf.TextBlock { Text = "Catégorie", Foreground = (Brush)FindResource("TextBrush"), Margin = new Thickness(0, 0, 0, 4) });
         stack.Children.Add(textBox);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
         buttons.Children.Add(okButton);

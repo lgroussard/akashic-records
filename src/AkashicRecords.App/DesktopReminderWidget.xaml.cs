@@ -58,7 +58,7 @@ public partial class DesktopReminderWidget : Window
     private static FrameworkElement BuildReminder(string title, string text)
     {
         var panel = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
-        panel.Children.Add(new TextBlock
+        panel.Children.Add(new Emoji.Wpf.TextBlock
         {
             Text = title,
             Foreground = Brushes.White,
@@ -69,7 +69,7 @@ public partial class DesktopReminderWidget : Window
 
         if (!string.IsNullOrWhiteSpace(text))
         {
-            panel.Children.Add(new TextBlock
+            panel.Children.Add(new Emoji.Wpf.TextBlock
             {
                 Text = text,
                 Foreground = new SolidColorBrush(Color.FromRgb(0xCC, 0xCC, 0xDD)),

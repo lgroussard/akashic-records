@@ -136,7 +136,7 @@ public partial class DownloaderWindow : Window
         foreach (var item in visible)
             listHost.Children.Add(BuildCard(item, folderId));
         if (visible.Count == 0)
-            listHost.Children.Add(new TextBlock
+            listHost.Children.Add(new Emoji.Wpf.TextBlock
             {
                 Text = "Deposer une fiche ici.",
                 Foreground = new SolidColorBrush(Color.FromRgb(0x66, 0x66, 0x88)),
@@ -164,11 +164,11 @@ public partial class DownloaderWindow : Window
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var title = new StackPanel();
-        title.Children.Add(new TextBlock
+        title.Children.Add(new Emoji.Wpf.TextBlock
         {
             Text = name, Foreground = Brushes.White, FontWeight = FontWeights.SemiBold, FontSize = 12
         });
-        title.Children.Add(new TextBlock
+        title.Children.Add(new Emoji.Wpf.TextBlock
         {
             Text = "→ music\\" + (SanitizeSubfolderName(subfolder) is { Length: > 0 } s ? s : "(racine)"),
             Foreground = new SolidColorBrush(Color.FromRgb(0x4A, 0xDE, 0x80)), FontSize = 9
@@ -232,7 +232,7 @@ public partial class DownloaderWindow : Window
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        var badge = new TextBlock
+        var badge = new Emoji.Wpf.TextBlock
         {
             Text = StatusSymbol(item.Status), Foreground = StatusBrush(item.Status),
             FontSize = 12, Width = 18, VerticalAlignment = VerticalAlignment.Center
@@ -240,7 +240,7 @@ public partial class DownloaderWindow : Window
         Grid.SetColumn(badge, 0);
         row.Children.Add(badge);
 
-        var label = new TextBlock
+        var label = new Emoji.Wpf.TextBlock
         {
             Text = DisplayOf(item), Foreground = Brushes.White, FontSize = 11,
             VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis,
@@ -420,7 +420,7 @@ public partial class DownloaderWindow : Window
             Margin = new Thickness(16),
             Children =
             {
-                new TextBlock { Text = label, Margin = new Thickness(0, 0, 0, 6) },
+                new Emoji.Wpf.TextBlock { Text = label, Margin = new Thickness(0, 0, 0, 6) },
                 textBox,
                 new StackPanel
                 {

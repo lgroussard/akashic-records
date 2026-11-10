@@ -237,7 +237,7 @@ public partial class ArchivesView : UserControl, ISearchNavigable
         // Favorite star, top-right.
         if (photo.IsFavorite)
         {
-            content.Children.Add(new TextBlock
+            content.Children.Add(new Emoji.Wpf.TextBlock
             {
                 Text = "★",
                 Foreground = Brushes.Gold,
@@ -251,7 +251,7 @@ public partial class ArchivesView : UserControl, ISearchNavigable
         // Caption overlay at the bottom (only when there is a title).
         if (!string.IsNullOrEmpty(photo.Title))
         {
-            content.Children.Add(new TextBlock
+            content.Children.Add(new Emoji.Wpf.TextBlock
             {
                 Text = photo.Title,
                 Foreground = Brushes.White,
@@ -310,7 +310,7 @@ public partial class ArchivesView : UserControl, ISearchNavigable
             Margin = new Thickness(16),
             Children =
             {
-                new TextBlock { Text = label, Margin = new Thickness(0, 0, 0, 6) },
+                new Emoji.Wpf.TextBlock { Text = label, Margin = new Thickness(0, 0, 0, 6) },
                 textBox,
                 new StackPanel
                 {
@@ -396,7 +396,7 @@ public partial class ArchivesView : UserControl, ISearchNavigable
             BorderThickness = new Thickness(1)
         };
 
-        var titleBlock = new TextBlock
+        var titleBlock = new Emoji.Wpf.TextBlock
         {
             Text = title,
             FontSize = 13.5,
@@ -405,7 +405,7 @@ public partial class ArchivesView : UserControl, ISearchNavigable
             VerticalAlignment = VerticalAlignment.Center
         };
 
-        var countBlock = new TextBlock
+        var countBlock = new Emoji.Wpf.TextBlock
         {
             Text = count.ToString(),
             FontSize = 11,

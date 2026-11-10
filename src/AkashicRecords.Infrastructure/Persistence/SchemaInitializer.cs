@@ -336,6 +336,14 @@ public sealed class SchemaInitializer
         AddColumnIfMissing(connection, "Poem", "Italic", "INTEGER NOT NULL DEFAULT 1");
         AddColumnIfMissing(connection, "Poem", "RichContent", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing(connection, "Poem", "EditorWidth", "REAL NOT NULL DEFAULT 900");
+        // Phone-only poem formatting (Android schema v2), next to the PC columns above so one poem
+        // can be laid out differently on each device. NULL = not set on the phone (it falls back to
+        // the PC values). The desktop never reads or writes them; it only keeps them across imports.
+        AddColumnIfMissing(connection, "Poem", "MobileTextAlignment", "TEXT");
+        AddColumnIfMissing(connection, "Poem", "MobileFontSize", "REAL");
+        AddColumnIfMissing(connection, "Poem", "MobileBold", "INTEGER");
+        AddColumnIfMissing(connection, "Poem", "MobileItalic", "INTEGER");
+        AddColumnIfMissing(connection, "Poem", "MobileRichContent", "TEXT");
         // Download items now sit in a placement zone (DownloadFolder.Id); null = the "Unfiled" bucket.
         AddColumnIfMissing(connection, "DownloadItem", "FolderId", "INTEGER");
         AddColumnIfMissing(connection, "CalendarEvent", "EndDate", "TEXT");

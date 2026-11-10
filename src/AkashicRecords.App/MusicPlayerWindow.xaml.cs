@@ -539,7 +539,7 @@ public partial class MusicPlayerWindow : Window
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        row.Children.Add(new TextBlock
+        row.Children.Add(new Emoji.Wpf.TextBlock
         {
             Text = "· " + label,
             Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
@@ -851,7 +851,7 @@ public partial class MusicPlayerWindow : Window
                 // Handled so playing doesn't also toggle the accordion open/closed.
                 playAlbum.Click += (_, ev) => { ev.Handled = true; if (albumTracks.Count > 0) PlayQueue(albumTracks, 0); };
                 header.Children.Add(playAlbum);
-                header.Children.Add(new TextBlock
+                header.Children.Add(new Emoji.Wpf.TextBlock
                 {
                     Text = string.IsNullOrEmpty(group.Key) ? "Sans album" : group.Key,
                     Foreground = Brushes.White,
@@ -893,7 +893,7 @@ public partial class MusicPlayerWindow : Window
         row.Children.Add(playButton);
 
         var info = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        info.Children.Add(new TextBlock
+        info.Children.Add(new Emoji.Wpf.TextBlock
         {
             Text = string.IsNullOrWhiteSpace(track.Title) ? "(sans titre)" : track.Title,
             Foreground = Brushes.White,
@@ -902,7 +902,7 @@ public partial class MusicPlayerWindow : Window
         });
         var sub = track.Artist;
         if (track.DurationSeconds is { } d) sub = sub.Length == 0 ? FormatTime(d) : $"{sub} · {FormatTime(d)}";
-        info.Children.Add(new TextBlock { Text = sub, Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)), FontSize = 10 });
+        info.Children.Add(new Emoji.Wpf.TextBlock { Text = sub, Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)), FontSize = 10 });
         Grid.SetColumn(info, 1);
         row.Children.Add(info);
 
@@ -940,9 +940,9 @@ public partial class MusicPlayerWindow : Window
 
         var titleBox = new TextBox { Text = track.Title, Background = InputBg(), Foreground = Brushes.White, BorderBrush = Accent(), Padding = new Thickness(5, 2, 5, 2), Margin = new Thickness(0, 0, 0, 4) };
         var artistBox = new TextBox { Text = track.Artist, Background = InputBg(), Foreground = Brushes.White, BorderBrush = Accent(), Padding = new Thickness(5, 2, 5, 2), Margin = new Thickness(0, 0, 0, 4) };
-        panel.Children.Add(new TextBlock { Text = "Titre", Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0xAA)), FontSize = 10 });
+        panel.Children.Add(new Emoji.Wpf.TextBlock { Text = "Titre", Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0xAA)), FontSize = 10 });
         panel.Children.Add(titleBox);
-        panel.Children.Add(new TextBlock { Text = "Artiste", Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0xAA)), FontSize = 10 });
+        panel.Children.Add(new Emoji.Wpf.TextBlock { Text = "Artiste", Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0xAA)), FontSize = 10 });
         panel.Children.Add(artistBox);
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
@@ -1012,7 +1012,7 @@ public partial class MusicPlayerWindow : Window
 
         if (panel.Children.Count == 0)
         {
-            panel.Children.Add(new TextBlock { Text = "Aucune ambiance définie.", Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0xAA)), FontSize = 10 });
+            panel.Children.Add(new Emoji.Wpf.TextBlock { Text = "Aucune ambiance définie.", Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0xAA)), FontSize = 10 });
         }
         return panel;
     }

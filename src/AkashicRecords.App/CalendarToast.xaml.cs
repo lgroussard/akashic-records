@@ -84,7 +84,7 @@ public partial class CalendarToast : Window
 
         if (line.TimeText.Length > 0)
         {
-            var time = new TextBlock
+            var time = new Emoji.Wpf.TextBlock
             {
                 Text = line.TimeText,
                 Foreground = new SolidColorBrush(Color.FromRgb(0x7F, 0xB0, 0xFF)),
@@ -98,7 +98,7 @@ public partial class CalendarToast : Window
         }
 
         var stack = new StackPanel();
-        stack.Children.Add(new TextBlock
+        stack.Children.Add(new Emoji.Wpf.TextBlock
         {
             Text = line.Title,
             Foreground = Brushes.White,
@@ -108,7 +108,7 @@ public partial class CalendarToast : Window
         });
         if (line.Subtitle.Length > 0)
         {
-            stack.Children.Add(new TextBlock
+            stack.Children.Add(new Emoji.Wpf.TextBlock
             {
                 Text = line.Subtitle,
                 Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xC8)),

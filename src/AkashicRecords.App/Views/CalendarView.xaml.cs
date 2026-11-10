@@ -160,7 +160,7 @@ public partial class CalendarView : UserControl
             Focusable = false,
         };
         var stack = new StackPanel();
-        stack.Children.Add(new TextBlock
+        stack.Children.Add(new Emoji.Wpf.TextBlock
         {
             Text = date.Day.ToString(),
             FontSize = 14,
@@ -190,7 +190,7 @@ public partial class CalendarView : UserControl
             var chipText = item.Source == AgendaSource.Birthday
                 ? CalendarService.BirthdayChipName(item.Title)
                 : item.Title;
-            chip.Child = new TextBlock
+            chip.Child = new Emoji.Wpf.TextBlock
             {
                 Text = chipText,
                 FontSize = 10.5,
@@ -202,7 +202,7 @@ public partial class CalendarView : UserControl
         }
         if (dayItems.Count > 3)
         {
-            stack.Children.Add(new TextBlock
+            stack.Children.Add(new Emoji.Wpf.TextBlock
             {
                 Text = $"+{dayItems.Count - 3} autre(s)",
                 FontSize = 10,
@@ -332,7 +332,7 @@ public partial class CalendarView : UserControl
                 ? "Demain"
                 : Capitalize(day.ToString("dddd d MMMM", CultureInfo.CurrentCulture));
 
-        return new TextBlock
+        return new Emoji.Wpf.TextBlock
         {
             Text = label,
             FontSize = 10.5,
@@ -386,7 +386,7 @@ public partial class CalendarView : UserControl
                     VerticalAlignment = VerticalAlignment.Center,
                     Stretch = Stretch.Uniform,
                 });
-            row.Children.Add(new TextBlock
+            row.Children.Add(new Emoji.Wpf.TextBlock
             {
                 Text = SectionBadge(link.Section),
                 FontSize = 8.5,
@@ -395,7 +395,7 @@ public partial class CalendarView : UserControl
                 Margin = new Thickness(0, 0, 5, 0),
                 VerticalAlignment = VerticalAlignment.Center,
             });
-            row.Children.Add(new TextBlock
+            row.Children.Add(new Emoji.Wpf.TextBlock
             {
                 Text = preview is null ? link.Title + " (introuvable)" : link.Title,
                 FontSize = 10.5,
@@ -413,7 +413,7 @@ public partial class CalendarView : UserControl
             strip.Children.Add(chip);
         }
         if (links.Count > 4)
-            strip.Children.Add(new TextBlock
+            strip.Children.Add(new Emoji.Wpf.TextBlock
             {
                 Text = $"+{links.Count - 4}",
                 FontSize = 10,
@@ -448,7 +448,7 @@ public partial class CalendarView : UserControl
         Grid.SetColumn(dot, 0);
         grid.Children.Add(dot);
 
-        var when = new TextBlock
+        var when = new Emoji.Wpf.TextBlock
         {
             Text = item.TimeText.Length > 0 ? item.TimeText : "—",
             FontSize = 11.5,
@@ -462,7 +462,7 @@ public partial class CalendarView : UserControl
         grid.Children.Add(when);
 
         var titleStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        titleStack.Children.Add(new TextBlock
+        titleStack.Children.Add(new Emoji.Wpf.TextBlock
         {
             Text = item.Title,
             FontSize = 13,
@@ -478,7 +478,7 @@ public partial class CalendarView : UserControl
             subtitle = subtitle.Length > 0 ? subtitle + " · toute la journée" : "toute la journée";
         if (subtitle.Length > 0)
         {
-            titleStack.Children.Add(new TextBlock
+            titleStack.Children.Add(new Emoji.Wpf.TextBlock
             {
                 Text = subtitle,
                 FontSize = 11,
@@ -488,7 +488,7 @@ public partial class CalendarView : UserControl
         }
         else if (item.Source == AgendaSource.Event)
         {
-            titleStack.Children.Add(new TextBlock
+            titleStack.Children.Add(new Emoji.Wpf.TextBlock
             {
                 Text = SourceLabel(item),
                 FontSize = 11,
@@ -916,7 +916,7 @@ public partial class CalendarView : UserControl
                 row.Children.Add(image);
             }
 
-            row.Children.Add(new TextBlock
+            row.Children.Add(new Emoji.Wpf.TextBlock
             {
                 Text = SectionBadge(link.Section),
                 FontSize = 9.5,
@@ -925,7 +925,7 @@ public partial class CalendarView : UserControl
                 Margin = new Thickness(0, 0, 6, 0),
                 VerticalAlignment = VerticalAlignment.Center,
             });
-            var title = new TextBlock
+            var title = new Emoji.Wpf.TextBlock
             {
                 Text = live ?? link.Title + " (introuvable)",
                 FontSize = 11.5,
@@ -1094,7 +1094,7 @@ public partial class CalendarView : UserControl
             Orientation = Orientation.Horizontal,
             Children =
             {
-                new TextBlock
+                new Emoji.Wpf.TextBlock
                 {
                     Text = SectionBadge(link.Section),
                     FontSize = 9,
@@ -1103,7 +1103,7 @@ public partial class CalendarView : UserControl
                     Margin = new Thickness(0, 0, 7, 0),
                     VerticalAlignment = VerticalAlignment.Center,
                 },
-                new TextBlock
+                new Emoji.Wpf.TextBlock
                 {
                     Text = link.Title,
                     FontSize = 12.5,
@@ -1132,7 +1132,7 @@ public partial class CalendarView : UserControl
                     },
                 });
             if (preview.Body is { Length: > 0 } verses)
-                body.Children.Add(new TextBlock
+                body.Children.Add(new Emoji.Wpf.TextBlock
                 {
                     Text = verses.Length > 600 ? verses[..600] + "…" : verses,
                     FontFamily = new FontFamily(poem.FontFamily),
@@ -1166,7 +1166,7 @@ public partial class CalendarView : UserControl
                 },
             });
             if (preview.Body is { Length: > 0 } caption)
-                body.Children.Add(new TextBlock
+                body.Children.Add(new Emoji.Wpf.TextBlock
                 {
                     Text = ClipTip(caption),
                     FontSize = 11,
@@ -1177,7 +1177,7 @@ public partial class CalendarView : UserControl
         }
         else if (preview.Body is { Length: > 0 } text)
         {
-            body.Children.Add(new TextBlock
+            body.Children.Add(new Emoji.Wpf.TextBlock
             {
                 Text = text.Length > 400 ? text[..400] + "…" : text,
                 FontSize = 11.5,
@@ -1187,7 +1187,7 @@ public partial class CalendarView : UserControl
             });
         }
 
-        body.Children.Add(new TextBlock
+        body.Children.Add(new Emoji.Wpf.TextBlock
         {
             Text = "Cliquer pour ouvrir",
             FontSize = 9.5,
