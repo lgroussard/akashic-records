@@ -76,18 +76,15 @@ internal fun PersonalJournal(db: AkashicDatabase) {
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = { prev?.let(::go) }, enabled = prev != null) { Text("‹") }
+            // One row: tapping the date opens/closes the month picker (▾/▴), "Auj." jumps back.
             Text(
-                frenchDate(date),
+                frenchDate(date) + if (showCalendar) "  ▴" else "  ▾",
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.weight(1f).clickable { showCalendar = !showCalendar },
+                modifier = Modifier.weight(1f).clickable { showCalendar = !showCalendar }.padding(vertical = 8.dp),
             )
+            if (date != LocalDate.now()) TextButton(onClick = { go(LocalDate.now()) }) { Text("Auj.") }
             TextButton(onClick = { next?.let(::go) }, enabled = next != null) { Text("›") }
-        }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-            TextButton(onClick = { showCalendar = !showCalendar }) { Text(if (showCalendar) "Masquer le calendrier" else "📅 Calendrier") }
-            Spacer(Modifier.weight(1f))
-            if (date != LocalDate.now()) TextButton(onClick = { go(LocalDate.now()) }) { Text("Aujourd'hui") }
         }
         if (showCalendar) {
             MonthCalendar(month, date, byDate.keys, onMonth = { month = it }) { go(it); showCalendar = false }

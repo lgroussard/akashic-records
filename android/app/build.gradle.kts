@@ -57,6 +57,9 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
+    // Calendar reminders (periodic check, survives reboots).
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+    implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-session:1.4.1")
     // yt-dlp + Python + ffmpeg bundled for on-phone downloads (same tool as the desktop downloader).

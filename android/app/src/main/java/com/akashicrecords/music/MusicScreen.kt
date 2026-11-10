@@ -26,7 +26,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.akashicrecords.Palette
-import com.akashicrecords.SectionTitle
 import com.akashicrecords.SubTabs
 import com.akashicrecords.data.AkashicDatabase
 import com.akashicrecords.data.ConfigStore
@@ -43,7 +42,7 @@ private fun audioPermission() =
 // flat filtered list), per-track edit + ambiance toggles, queue. Playback lives in
 // PlaybackService; the persistent mini-player is drawn by MiniPlayer at the app level.
 @Composable
-fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnection) {
+fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnection, initialTab: String? = null) {
     val context = LocalContext.current
     val library = remember { MusicLibrary.get(context) }
     val scope = rememberCoroutineScope()
@@ -60,7 +59,7 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
     var moodTrackIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
     var search by remember { mutableStateOf("") }
     var scanning by remember { mutableStateOf(false) }
-    var tab by remember { mutableStateOf("Library") }
+    var tab by remember { mutableStateOf(initialTab ?: "Library") }
     var editingFolder by remember { mutableStateOf(false) }
     var creatingMood by remember { mutableStateOf(false) }
     var confirmDeleteMood by remember { mutableStateOf<Mood?>(null) }
@@ -99,7 +98,6 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
     }
 
     Column(Modifier.fillMaxSize()) {
-        SectionTitle("Musique", "Ambiances, bibliothèque et file d'attente.")
 
         if (!granted) {
             Column(Modifier.padding(12.dp)) {
@@ -108,19 +106,6 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
                 Button(onClick = { askPermission.launch(audioPermission()) }) { Text("Autoriser") }
             }
             return@Column
-        }
-
-        // Folder + rescan
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "Dossier : $folder",
-                fontSize = 11.sp,
-                color = Palette.TextFaint,
-                modifier = Modifier.weight(1f).clickable { editingFolder = true },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            TextButton(onClick = { rescan() }, enabled = !scanning) { Text(if (scanning) "Scan…" else "⟳ Rescanner") }
         }
 
         SubTabs(
@@ -143,6 +128,19 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
                 DownloadsPanel(db, folder) { rescan() }
                 return@Column
             }
+        }
+
+        // Folder + rescan
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Dossier : $folder",
+                fontSize = 11.sp,
+                color = Palette.TextFaint,
+                modifier = Modifier.weight(1f).clickable { editingFolder = true },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            TextButton(onClick = { rescan() }, enabled = !scanning) { Text(if (scanning) "Scan…" else "⟳ Rescanner") }
         }
 
         // Ambiances

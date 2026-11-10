@@ -12,7 +12,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.akashicrecords.CardBlock
 import com.akashicrecords.Palette
-import com.akashicrecords.SectionTitle
 import com.akashicrecords.SubTabs
 import com.akashicrecords.data.AkashicDatabase
 import com.akashicrecords.data.ArtisticProject
@@ -28,7 +27,6 @@ fun JournauxSection(db: AkashicDatabase, config: ConfigStore) {
     val restored = remember { config.load().journauxActiveTab }
     var tab by remember { mutableStateOf(restored ?: "Personal") }
     Column(Modifier.fillMaxSize()) {
-        SectionTitle("Journaux")
         SubTabs(
             listOf(
                 "Journal personnel" to "Personal",

@@ -1,6 +1,24 @@
 package com.akashicrecords
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Create
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import com.akashicrecords.calendar.CalendarSection
+import com.akashicrecords.calendar.Reminders
+import java.time.LocalDate
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -30,73 +48,158 @@ import com.akashicrecords.music.rememberPlayerConnection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-// Mobile entry point. Mirrors the desktop header + section-switcher paradigm:
-// four nav sections (Organisation / Journaux / Collections / Archives), each keeping
-// its own sub-tab paradigm, rendered over the same Room database. The Pi hub is offline
-// for now, so everything reads the on-device SQLite copy directly (100% local).
+// Mobile entry point, rendered over the same Room database as the desktop schema (100% local
+// until the hub exists). The desktop header + section switcher becomes a bottom navigation bar:
+// the four everyday sections, plus "Plus" for Organisation, Archives and the settings.
 class MainActivity : ComponentActivity() {
+    // Latest launch request (notification tap, launcher shortcut): section + optional extras.
+    private var launch by mutableStateOf<Launch?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val db = AkashicDatabase.get(applicationContext)
         val config = ConfigStore(applicationContext)
+        Reminders.schedule(applicationContext)
+        launch = Launch.from(intent)
         setContent {
             MaterialTheme(colorScheme = AkashicColorScheme, typography = AkashicTypography) {
                 // Default text colour for every Text that sets none (M3 falls back to black otherwise).
                 CompositionLocalProvider(LocalContentColor provides Palette.Text) {
-                    AkashicApp(db, config)
+                    AkashicApp(db, config, launch) { launch = null }
                 }
             }
         }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        launch = Launch.from(intent)
+    }
 }
 
-// "Musique" is a header button (♪ floating player) on the desktop; on the phone it is a
-// section of its own, with a persistent mini-player at the bottom of every section.
-private val SECTIONS = listOf("Journaux", "Musique", "Organisation", "Collections", "Archives")
+// A deep link into a section: from a reminder notification (Calendrier + day) or a launcher
+// shortcut (section + sub-tab).
+data class Launch(val section: String, val tab: String?, val date: LocalDate?) {
+    companion object {
+        const val EXTRA_TAB = "akashic.tab"
 
+        fun from(intent: Intent?): Launch? {
+            val section = intent?.getStringExtra(Reminders.EXTRA_SECTION) ?: return null
+            val date = intent.getStringExtra(Reminders.EXTRA_DATE)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+            return Launch(section, intent.getStringExtra(EXTRA_TAB), date)
+        }
+    }
+}
+
+private data class NavItem(val section: String, val label: String, val icon: ImageVector)
+
+// "Musique" is a floating window on the desktop; on the phone it is a section of its own, with
+// the mini-player above the navigation bar everywhere.
+private val NAV = listOf(
+    NavItem("Journaux", "Journaux", Icons.Filled.Create),
+    NavItem("Musique", "Musique", Icons.Filled.PlayArrow),
+    NavItem("Calendrier", "Calendrier", Icons.Filled.DateRange),
+    NavItem("Collections", "Collections", Icons.Filled.Star),
+)
+private val MORE = listOf("Organisation", "Archives")
+private val SECTIONS = NAV.map { it.section } + MORE
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AkashicApp(db: AkashicDatabase, config: ConfigStore) {
+fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaunchHandled: () -> Unit) {
+    val context = LocalContext.current
     val restored = remember { config.load().lastActiveSection }
     var section by remember {
         mutableStateOf(restored?.takeIf { SECTIONS.contains(it) } ?: "Journaux")
     }
+    var calendarDate by remember { mutableStateOf<LocalDate?>(null) }
+    var musicTab by remember { mutableStateOf<String?>(null) }
     val player = rememberPlayerConnection()
     var showSettings by remember { mutableStateOf(false) }
-    // Bumped after a PC import so every section re-reads the database.
+    var showMore by remember { mutableStateOf(false) }
+    // Bumped after a PC import (and on deep links) so the section re-reads its state.
     var dataVersion by remember { mutableStateOf(0) }
 
-    Box(Modifier.fillMaxSize().background(Palette.AppBg).systemBarsPadding().imePadding()) {
-        Column(Modifier.fillMaxSize()) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Row(Modifier.weight(1f).horizontalScroll(rememberScrollState())) {
-                    SECTIONS.forEach { s ->
-                        Spacer(Modifier.width(6.dp))
-                        FilterChip(
-                            selected = s == section,
-                            onClick = { section = s; config.saveSection(s) },
-                            label = { Text(s, maxLines = 1) },
+    fun go(s: String) {
+        section = s
+        config.saveSection(s)
+    }
+
+    LaunchedEffect(launch) {
+        val l = launch ?: return@LaunchedEffect
+        if (l.section in SECTIONS) {
+            when (l.section) {
+                "Calendrier" -> calendarDate = l.date
+                "Journaux" -> l.tab?.let { config.saveJournauxTab(it) }
+                "Musique" -> musicTab = l.tab
+            }
+            go(l.section)
+            dataVersion++
+        }
+        onLaunchHandled()
+    }
+
+    // Reminders need the notification permission (Android 13+); asked once, at first launch.
+    val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    Scaffold(
+        containerColor = Palette.AppBg,
+        contentWindowInsets = WindowInsets.systemBars,
+        bottomBar = {
+            Column {
+                MiniPlayer(player, db) { go("Musique") }
+                NavigationBar(containerColor = Palette.Surface1, tonalElevation = 0.dp) {
+                    NAV.forEach { item ->
+                        NavigationBarItem(
+                            selected = section == item.section,
+                            onClick = { go(item.section) },
+                            icon = { Icon(item.icon, contentDescription = item.label) },
+                            label = { Text(item.label, fontSize = 11.sp, maxLines = 1) },
+                            colors = navColors(),
                         )
                     }
+                    NavigationBarItem(
+                        selected = section in MORE,
+                        onClick = { showMore = true },
+                        icon = { Icon(Icons.Filled.Menu, contentDescription = "Plus") },
+                        label = { Text(if (section in MORE) section else "Plus", fontSize = 11.sp, maxLines = 1) },
+                        colors = navColors(),
+                    )
                 }
-                TextButton(onClick = { showSettings = true }) { Text("⚙", fontSize = 18.sp) }
             }
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                key(dataVersion) {
-                    Column(Modifier.fillMaxSize()) {
-                        when (section) {
-                            "Organisation" -> OrganisationSection(db, config)
-                            "Journaux" -> JournauxSection(db, config)
-                            "Musique" -> MusicSection(db, config, player)
-                            "Collections" -> CollectionsSection(db, config)
-                            "Archives" -> ArchivesSection(db, config)
-                        }
+        },
+    ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
+            key(dataVersion) {
+                Column(Modifier.fillMaxSize().padding(top = 4.dp)) {
+                    when (section) {
+                        "Organisation" -> OrganisationSection(db, config)
+                        "Journaux" -> JournauxSection(db, config)
+                        "Musique" -> MusicSection(db, config, player, initialTab = musicTab)
+                        "Calendrier" -> CalendarSection(db, openDate = calendarDate)
+                        "Collections" -> CollectionsSection(db, config)
+                        "Archives" -> ArchivesSection(db, config)
                     }
                 }
             }
-            MiniPlayer(player, db) { section = "Musique"; config.saveSection("Musique") }
+        }
+    }
+
+    if (showMore) {
+        ModalBottomSheet(onDismissRequest = { showMore = false }, containerColor = Palette.Surface1) {
+            Column(Modifier.padding(bottom = 24.dp)) {
+                MoreRow("Organisation", "Projets et transitions") { showMore = false; go("Organisation") }
+                MoreRow("Archives", "Photos et archive familiale") { showMore = false; go("Archives") }
+                HorizontalDivider(color = Palette.BorderStrong, modifier = Modifier.padding(vertical = 6.dp))
+                MoreRow("Réglages", "Importer les données du PC") { showMore = false; showSettings = true }
+            }
         }
     }
 
@@ -105,18 +208,26 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore) {
     }
 }
 
-// ---- Shared building blocks ----
+@Composable
+private fun navColors() = NavigationBarItemDefaults.colors(
+    selectedIconColor = Palette.Text,
+    selectedTextColor = Palette.Text,
+    indicatorColor = Palette.AccentSoft,
+    unselectedIconColor = Palette.TextMuted,
+    unselectedTextColor = Palette.TextMuted,
+)
 
 @Composable
-internal fun SectionTitle(title: String, subtitle: String? = null) {
-    Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        if (subtitle != null) {
-            Text(subtitle, fontSize = 11.5.sp, color = Palette.TextMuted)
-        }
+private fun MoreRow(title: String, subtitle: String, onClick: () -> Unit) {
+    Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 24.dp, vertical = 12.dp)) {
+        Text(title, fontSize = 16.sp)
+        Text(subtitle, fontSize = 12.sp, color = Palette.TextMuted)
     }
 }
 
+// ---- Shared building blocks ----
+
+// Sub-section switcher (desktop sub-tabs), kept to one compact scrollable row.
 @Composable
 internal fun SubTabs(options: List<Pair<String, String>>, active: String, onSelect: (String) -> Unit) {
     Row(
@@ -170,7 +281,6 @@ private fun TierPill(tier: Int) {
 private fun OrganisationSection(db: AkashicDatabase, config: ConfigStore) {
     val restored = remember { config.load().organisationActiveTab }
     var tab by remember { mutableStateOf(restored ?: "Projets") }
-    SectionTitle("Organisation", "Projets et transitions — suivi de progression graduée.")
     SubTabs(
         listOf("Projets" to "Projets", "Transitions" to "Transitions"),
         tab,
@@ -261,7 +371,6 @@ private val COLLECTION_CATEGORIES = listOf(
 private fun CollectionsSection(db: AkashicDatabase, config: ConfigStore) {
     val restored = remember { config.load().collectionsActiveCategory }
     var cat by remember { mutableStateOf(restored?.toIntOrNull() ?: 0) }
-    SectionTitle("Collections", "Œuvres classées par tier — S en tête.")
     Row(
         Modifier.fillMaxWidth()
             .horizontalScroll(rememberScrollState())
@@ -341,7 +450,6 @@ private fun ArtworkDetailInner(db: AkashicDatabase, artworkId: Int) {
 private fun ArchivesSection(db: AkashicDatabase, config: ConfigStore) {
     val restored = remember { config.load().archivesActiveTab }
     var tab by remember { mutableStateOf(restored ?: "Photos") }
-    SectionTitle("Archives", "Photos et archive familiale.")
     SubTabs(
         listOf("Photos" to "Photos", "Archive familiale" to "Familiale"),
         tab,
@@ -350,6 +458,9 @@ private fun ArchivesSection(db: AkashicDatabase, config: ConfigStore) {
     if (tab == "Photos") {
         val photos = remember { mutableStateOf<List<com.akashicrecords.data.Photo>>(emptyList()) }
         LaunchedEffect(db) { withContext(Dispatchers.IO) { photos.value = db.photoDao().getAll() } }
+        if (photos.value.isEmpty()) {
+            Text("Aucune photo. Elles arrivent avec l'import des données du PC (Plus → Réglages).", color = Palette.TextMuted, modifier = Modifier.padding(16.dp))
+        }
         LazyColumn(Modifier.fillMaxWidth()) {
             items(photos.value) { p ->
                 CardBlock {
@@ -360,27 +471,12 @@ private fun ArchivesSection(db: AkashicDatabase, config: ConfigStore) {
             }
         }
     } else {
-        val events = remember { mutableStateOf<List<com.akashicrecords.data.CalendarEvent>>(emptyList()) }
-        val birthdays = remember { mutableStateOf<List<com.akashicrecords.data.Birthday>>(emptyList()) }
-        LaunchedEffect(db) {
-            withContext(Dispatchers.IO) {
-                events.value = db.calendarEventDao().getAll()
-                birthdays.value = db.birthdayDao().getAll()
-            }
-        }
-        LazyColumn(Modifier.fillMaxWidth()) {
-            items(events.value) { e ->
-                CardBlock {
-                    Text("${e.Date}  ${e.Title}", fontWeight = FontWeight.Bold)
-                    e.StartHour?.let {
-                        val m = e.StartMinute ?: 0
-                        Text("$it:${m.toString().padStart(2, '0')} · ${e.Location}", fontSize = 11.sp, color = Palette.TextMuted)
-                    }
-                }
-            }
-            items(birthdays.value) { b ->
-                CardBlock { Text("${b.Name} — ${b.Day}/${b.Month}", fontSize = 12.sp, color = Palette.TextMuted) }
-            }
-        }
+        // Same as the desktop: the family-blog archive (scraper) is not built yet. Calendar events
+        // and birthdays live in the Calendrier section, not here.
+        Text(
+            "Archive familiale : à venir (l'import du blog familial n'est pas encore construit, ni sur PC ni ici).",
+            color = Palette.TextMuted,
+            modifier = Modifier.padding(16.dp),
+        )
     }
 }

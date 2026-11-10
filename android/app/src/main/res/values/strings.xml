@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Akashic Records</string>
+    <string name="sc_journal_short">Journal du jour</string>
+    <string name="sc_journal_long">Écrire dans le journal du jour</string>
+    <string name="sc_calendar_short">Calendrier</string>
+    <string name="sc_calendar_long">Ouvrir le calendrier</string>
+    <string name="sc_music_short">Musique</string>
+    <string name="sc_music_long">Ouvrir la bibliothèque musicale</string>
+    <string name="sc_download_short">Téléchargements</string>
+    <string name="sc_download_long">File de téléchargement</string>
+</resources>
