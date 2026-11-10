@@ -8,14 +8,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -36,6 +28,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.akashicrecords.Palette
+import com.akashicrecords.SwipeInList
+import com.akashicrecords.SwipePages
 import com.akashicrecords.data.AkashicDatabase
 import com.akashicrecords.data.Birthday
 import com.akashicrecords.data.CalendarEvent
@@ -46,10 +40,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.YearMonth
+import java.time.temporal.ChronoUnit
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
 
+// Calendar pager size: 200 years of months, today in the middle.
+private const val MONTH_PAGES = 2400
 private val DAY_HEADER = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.FRENCH)
 private val SHORT_DAY = DateTimeFormatter.ofPattern("EEE d MMM", Locale.FRENCH)
 // "décembre 2026": the format form. TextStyle.FULL_STANDALONE gave an empty name for December.
@@ -100,31 +97,21 @@ fun CalendarSection(db: AkashicDatabase, openDate: LocalDate? = null) {
                     month = YearMonth.now()
                     selected = LocalDate.now()
                 }
-                // Swipe left/right to change month; the grid slides in from the swipe side.
-                var drag by remember { mutableStateOf(0f) }
-                AnimatedContent(
-                    targetState = month,
-                    transitionSpec = {
-                        val forward = targetState > initialState
-                        (slideInHorizontally { w -> if (forward) w else -w } + fadeIn()) togetherWith
-                            (slideOutHorizontally { w -> if (forward) -w else w } + fadeOut())
-                    },
-                    label = "month",
-                    modifier = Modifier.pointerInput(Unit) {
-                        detectHorizontalDragGestures(
-                            onDragStart = { drag = 0f },
-                            onHorizontalDrag = { _, dx -> drag += dx },
-                            onDragEnd = {
-                                val threshold = 60.dp.toPx()
-                                if (drag < -threshold) month = month.plusMonths(1)
-                                else if (drag > threshold) month = month.minusMonths(1)
-                                drag = 0f
-                            },
-                        )
-                    },
-                ) { shown ->
-                    // Dots come from the loaded month; during the slide the other month shows none.
-                    MonthGrid(shown, selected, if (shown == month) monthItems else emptyList()) { selected = it }
+                // Swipe left/right to change month: the grid follows the finger (SwipePages). Pages are
+                // months counted from a fixed origin, ±100 years around it.
+                val origin = remember { YearMonth.now() }
+                SwipePages(
+                    count = MONTH_PAGES,
+                    page = MONTH_PAGES / 2 + ChronoUnit.MONTHS.between(origin, month).toInt(),
+                    onPageChange = { month = origin.plusMonths((it - MONTH_PAGES / 2).toLong()) },
+                    modifier = SwipeInList,
+                ) { p ->
+                    val shown = origin.plusMonths((p - MONTH_PAGES / 2).toLong())
+                    // Each month loads its own dots, so the neighbour already has them when it slides in.
+                    val items by produceState(emptyList<AgendaItem>(), shown, version) {
+                        value = withContext(Dispatchers.IO) { Agenda.month(db, shown) }
+                    }
+                    MonthGrid(shown, selected, items) { selected = it }
                 }
                 Text(
                     selected.format(DAY_HEADER).replaceFirstChar { it.uppercase() },

@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.akashicrecords.CardBlock
 import com.akashicrecords.Palette
+import com.akashicrecords.SwipePages
 import com.akashicrecords.data.AkashicDatabase
 import com.akashicrecords.data.Recipe
 import com.akashicrecords.media.LocalImage
@@ -47,10 +48,10 @@ internal fun RecipesJournal(db: AkashicDatabase, initialOpen: Int? = null) {
     LaunchedEffect(Unit) { reload() }
 
     val categories = recipes.map { it.Category.trim() }.filter { it.isNotEmpty() }.distinct().sorted()
-    val filtered = recipes.filter { r ->
-        (category == null || r.Category.trim() == category) &&
+    fun inCategory(r: Recipe, c: String?) =
+        (c == null || r.Category.trim() == c) &&
             (search.isBlank() || listOf(r.Title, r.Tags, r.Ingredients).any { it.contains(search, true) })
-    }
+    val filtered = recipes.filter { inCategory(it, category) }
 
     val open = openId
     if (open != null) {
@@ -62,11 +63,29 @@ internal fun RecipesJournal(db: AkashicDatabase, initialOpen: Int? = null) {
             onNext = filtered.getOrNull(index + 1)?.takeIf { index >= 0 }?.let { n -> { openId = n.Id } },
             onDelete = null,
         )
-        key(open) {
-            RecipeLoader(db, open, onDeleted = { openId = null; scope.launch { reload() } }, onSaved = { scope.launch { reload() } })
+        if (index < 0) {
+            // Not in the loaded list yet (e.g. a deep link before the first load): plain page, no swipe.
+            key(open) {
+                RecipeLoader(db, open, onDeleted = { openId = null; scope.launch { reload() } }, onSaved = { scope.launch { reload() } })
+            }
+            return
+        }
+        // An open recipe swipes through the recipes of the list it was opened from (same filter).
+        val pages = filtered
+        SwipePages(
+            count = pages.size,
+            page = index,
+            onPageChange = { openId = pages[it].Id },
+            key = { pages[it].Id },
+            modifier = Modifier.fillMaxSize(),
+        ) { p ->
+            RecipeLoader(db, pages[p].Id, onDeleted = { openId = null; scope.launch { reload() } }, onSaved = { scope.launch { reload() } })
         }
         return
     }
+
+    // List pages: "Toutes" then one per category — the chips and a swipe move between them.
+    val pagesByCategory: List<String?> = listOf<String?>(null) + categories
 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -102,20 +121,28 @@ internal fun RecipesJournal(db: AkashicDatabase, initialOpen: Int? = null) {
                 }
             }
         }
-        if (filtered.isEmpty()) {
-            Text(if (recipes.isEmpty()) "Aucune recette. « + » pour en créer une." else "Aucun résultat.", color = Palette.TextMuted, modifier = Modifier.padding(12.dp))
-        }
-        LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
-            items(filtered, key = { it.Id }) { r ->
-                Row(
-                    Modifier.fillMaxWidth().clickable { openId = r.Id }.padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    LocalImage(r.CoverImagePath, Modifier.size(48.dp).clip(RoundedCornerShape(6.dp)), maxSide = 200)
-                    Spacer(Modifier.width(10.dp))
-                    Column {
-                        Text(r.Title, fontWeight = FontWeight.Bold)
-                        if (r.Category.isNotBlank()) Text(r.Category, fontSize = 11.sp, color = Palette.TextMuted)
+        SwipePages(
+            count = pagesByCategory.size,
+            page = pagesByCategory.indexOf(category).coerceAtLeast(0),
+            onPageChange = { category = pagesByCategory[it] },
+            modifier = Modifier.fillMaxWidth().weight(1f),
+        ) { page ->
+            val shown = recipes.filter { inCategory(it, pagesByCategory[page]) }
+            LazyColumn(Modifier.fillMaxSize()) {
+                if (shown.isEmpty()) item {
+                    Text(if (recipes.isEmpty()) "Aucune recette. « + » pour en créer une." else "Aucun résultat.", color = Palette.TextMuted, modifier = Modifier.padding(12.dp))
+                }
+                items(shown, key = { it.Id }) { r ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { openId = r.Id }.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        LocalImage(r.CoverImagePath, Modifier.size(48.dp).clip(RoundedCornerShape(6.dp)), maxSide = 200)
+                        Spacer(Modifier.width(10.dp))
+                        Column {
+                            Text(r.Title, fontWeight = FontWeight.Bold)
+                            if (r.Category.isNotBlank()) Text(r.Category, fontSize = 11.sp, color = Palette.TextMuted)
+                        }
                     }
                 }
             }

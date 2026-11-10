@@ -22,6 +22,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.akashicrecords.Palette
+import com.akashicrecords.SwipePages
 import com.akashicrecords.data.AkashicDatabase
 import com.akashicrecords.data.Poem
 import com.akashicrecords.data.Recueil
@@ -55,26 +56,42 @@ internal fun PoetryJournal(db: AkashicDatabase, initialOpen: Int? = null) {
     }
     LaunchedEffect(Unit) { reload() }
 
-    val filtered = poems.filter { p ->
-        (recueilFilter == null || p.RecueilId == recueilFilter) &&
+    fun inBook(p: Poem, book: Int?) =
+        (book == null || p.RecueilId == book) &&
             (search.isBlank() || listOf(p.Title, p.Text, p.Tags).any { it.contains(search, true) })
-    }
 
     val open = openId
     if (open != null) {
         BackHandler { openId = null; scope.launch { reload() } }
-        val index = filtered.indexOfFirst { it.Id == open }
+        // An open poem swipes through the poems of ITS recueil (whatever the list filter was), in list order.
+        val book = poems.firstOrNull { it.Id == open }?.RecueilId
+        val siblings = poems.filter { it.RecueilId == book }.ifEmpty { listOfNotNull(poems.firstOrNull { it.Id == open }) }
+        val index = siblings.indexOfFirst { it.Id == open }
         PageNav(
             onBack = { openId = null; scope.launch { reload() } },
-            onPrev = filtered.getOrNull(index - 1)?.let { p -> { openId = p.Id } },
-            onNext = filtered.getOrNull(index + 1)?.takeIf { index >= 0 }?.let { n -> { openId = n.Id } },
+            onPrev = siblings.getOrNull(index - 1)?.let { p -> { openId = p.Id } },
+            onNext = siblings.getOrNull(index + 1)?.takeIf { index >= 0 }?.let { n -> { openId = n.Id } },
             onDelete = null,
         )
-        key(open) {
-            PoemLoader(db, open, recueils, onDeleted = { openId = null; scope.launch { reload() } })
+        if (index < 0) {
+            // Not in the loaded list yet (e.g. a deep link before the first load): plain page, no swipe.
+            key(open) { PoemLoader(db, open, recueils, onDeleted = { openId = null; scope.launch { reload() } }) }
+            return
+        }
+        SwipePages(
+            count = siblings.size,
+            page = index,
+            onPageChange = { openId = siblings[it].Id },
+            key = { siblings[it].Id },
+            modifier = Modifier.fillMaxSize(),
+        ) { p ->
+            PoemLoader(db, siblings[p].Id, recueils, onDeleted = { openId = null; scope.launch { reload() } })
         }
         return
     }
+
+    // List pages: "Tous" then one per recueil — the chips and a swipe move between them.
+    val books: List<Int?> = listOf<Int?>(null) + recueils.map { it.Id }
 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -117,17 +134,29 @@ internal fun PoetryJournal(db: AkashicDatabase, initialOpen: Int? = null) {
             }
             TextButton(onClick = { newRecueil = true }) { Text("+ recueil") }
         }
-        if (filtered.isEmpty()) {
-            Text(if (poems.isEmpty()) "Aucun poème. « + » pour en écrire un." else "Aucun résultat.", color = Palette.TextMuted, modifier = Modifier.padding(12.dp))
-        }
         val names = recueils.associate { it.Id to it.Title }
-        LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
-            items(filtered, key = { it.Id }) { p ->
-                Column(Modifier.fillMaxWidth().clickable { openId = p.Id }.padding(horizontal = 12.dp, vertical = 7.dp)) {
-                    Text(p.Title.ifBlank { "Sans titre" }, fontFamily = FontFamily.Serif, fontStyle = FontStyle.Italic, fontSize = 16.sp)
-                    val first = p.Text.lineSequence().firstOrNull { it.isNotBlank() }
-                    val sub = listOfNotNull(p.RecueilId?.let { names[it] }, first).joinToString(" · ")
-                    if (sub.isNotEmpty()) Text(sub, fontSize = 11.sp, color = Palette.TextMuted, maxLines = 1)
+        SwipePages(
+            count = books.size,
+            page = books.indexOf(recueilFilter).coerceAtLeast(0),
+            onPageChange = { recueilFilter = books[it] },
+            modifier = Modifier.fillMaxWidth().weight(1f),
+        ) { page ->
+            val shown = poems.filter { inBook(it, books[page]) }
+            LazyColumn(Modifier.fillMaxSize()) {
+                if (shown.isEmpty()) item {
+                    Text(
+                        if (poems.isEmpty()) "Aucun poème. « + » pour en écrire un."
+                        else if (search.isBlank()) "Aucun poème dans ce recueil." else "Aucun résultat.",
+                        color = Palette.TextMuted, modifier = Modifier.padding(12.dp),
+                    )
+                }
+                items(shown, key = { it.Id }) { p ->
+                    Column(Modifier.fillMaxWidth().clickable { openId = p.Id }.padding(horizontal = 12.dp, vertical = 7.dp)) {
+                        Text(p.Title.ifBlank { "Sans titre" }, fontFamily = FontFamily.Serif, fontStyle = FontStyle.Italic, fontSize = 16.sp)
+                        val first = p.Text.lineSequence().firstOrNull { it.isNotBlank() }
+                        val sub = listOfNotNull(p.RecueilId?.let { names[it] }, first).joinToString(" · ")
+                        if (sub.isNotEmpty()) Text(sub, fontSize = 11.sp, color = Palette.TextMuted, maxLines = 1)
+                    }
                 }
             }
         }

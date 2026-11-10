@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.akashicrecords.SwipePages
 import com.akashicrecords.Palette
 import com.akashicrecords.SubTabs
 import com.akashicrecords.data.AkashicDatabase
@@ -108,17 +109,23 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
             return@Column
         }
 
-        SubTabs(
-            listOf(
-                "Bibliothèque" to "Library",
-                "File d'attente (${player.ui.queue.size})" to "Queue",
-                "Similaires" to "Similar",
-                "Téléchargements" to "Downloads",
-            ),
-            tab,
-        ) { tab = it }
+        val tabs = listOf(
+            "Bibliothèque" to "Library",
+            "File d'attente (${player.ui.queue.size})" to "Queue",
+            "Similaires" to "Similar",
+            "Téléchargements" to "Downloads",
+        )
+        SubTabs(tabs, tab) { tab = it }
 
-        when (tab) {
+        // The four tabs are pages: a swipe moves between them like a tap on the chips.
+        SwipePages(
+            count = tabs.size,
+            page = tabs.indexOfFirst { it.second == tab }.coerceAtLeast(0),
+            onPageChange = { tab = tabs[it].second },
+            modifier = Modifier.fillMaxWidth().weight(1f),
+        ) { page ->
+        Column(Modifier.fillMaxSize()) {
+        when (tabs[page].second) {
             "Queue" -> { QueueList(player); return@Column }
             "Similar" -> {
                 SimilarPanel(db, player, playable) { t -> library.uriFor(t)?.let { player.playNext(t, it) } }
@@ -227,6 +234,8 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
                 if (filtered.isEmpty()) item { Text("Aucun résultat.", color = Palette.TextMuted, modifier = Modifier.padding(12.dp)) }
             }
         }
+        } // page Column
+        } // SwipePages
     }
 
     if (editingFolder) {
