@@ -10,7 +10,7 @@ using AkashicRecords.Infrastructure.Persistence;
 
 namespace AkashicRecords.App.Views;
 
-public partial class OrganisationView : UserControl, ISearchNavigable
+public partial class OrganisationView : UserControl, ISearchNavigable, IRemembersViewState
 {
     // Display-only wrappers so list items carry their db Id plus pre-computed progress/status text.
     private sealed record ProjectListItem(int Id, string Title, string StatusLabel, string SubText, double ProgressPercent);
@@ -158,6 +158,8 @@ public partial class OrganisationView : UserControl, ISearchNavigable
             _config.OrganisationActiveTransitionId = _selectedTransition?.Id;
         }
     }
+
+    public void CaptureViewState() => SaveActiveItem();
 
     // Reopens the exact project/transition the user last viewed (after the sub-tab).
     private void RestoreActiveItem()

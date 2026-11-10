@@ -22,7 +22,7 @@ namespace AkashicRecords.App.Views;
 // keyword rules auto-tag rows at import. Plans are saved scenarios of envelopes. Amounts are signed
 // (negative = money out). Every money parse/format is culture-invariant on purpose (the machine is
 // fr-BE) — see the repo memory note on StatementImporter.
-public partial class BudgetView : UserControl, ISearchNavigable
+public partial class BudgetView : UserControl, ISearchNavigable, IRemembersViewState
 {
     private readonly BudgetTransactionRepository _txnRepo = new(new SqliteConnectionFactory());
     private readonly BudgetCategoryRepository _catRepo = new(new SqliteConnectionFactory());
@@ -55,12 +55,21 @@ public partial class BudgetView : UserControl, ISearchNavigable
     private void RestorePersistedTab()
     {
         if (_screenshotTabRequested || _pendingSearchResult is not null) return;
+        // The plan last opened in "Plans" (RefreshPlans drops it if it was deleted since).
+        _selectedPlanId = _config.BudgetActivePlanId;
         if (_config.BudgetActiveTab is not { } tab) return;
         if (tab is not ("Overview" or "Transactions" or "Plans")) return;
         OverviewTab.IsChecked = tab == "Overview";
         TransactionsTab.IsChecked = tab == "Transactions";
         PlansTab.IsChecked = tab == "Plans";
         ShowTab(tab);
+    }
+
+    // Tab and month are already recorded as they change; the plan is picked up here.
+    public void CaptureViewState()
+    {
+        if (_screenshotTabRequested) return;
+        _config.BudgetActivePlanId = _selectedPlanId;
     }
 
     // =================================================================== tabs

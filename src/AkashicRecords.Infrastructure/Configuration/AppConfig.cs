@@ -33,6 +33,7 @@ public sealed class AppConfig
     // Budget: last sub-tab (Overview/Transactions/Plans) and the month period last shown (yyyy-MM).
     public string? BudgetActiveTab { get; set; }
     public string? BudgetActivePeriod { get; set; }
+    public int? BudgetActivePlanId { get; set; }
 
     // Optional TMDB API key (v3, free) for movie/anime/series poster lookup. TMDB has no
     // regional restriction like the Custom Search JSON API, so it's the reliable source for

@@ -15,7 +15,7 @@ using Microsoft.Win32;
 
 namespace AkashicRecords.App.Views;
 
-public partial class ArchivesView : UserControl, ISearchNavigable
+public partial class ArchivesView : UserControl, ISearchNavigable, IRemembersViewState
 {
     private const double ThumbnailSize = 150;
     private const int ThumbnailDecodeWidth = 200;
@@ -133,11 +133,13 @@ public partial class ArchivesView : UserControl, ISearchNavigable
     // Archives returns them to the same view, not just the right sub-tab.
     private void SaveActiveItem()
     {
-        _config.ArchivesActiveTab ??= PhotosTab.IsChecked == true ? "Photos" : "Familiale";
+        _config.ArchivesActiveTab = FamilialeTab.IsChecked == true ? "Familiale" : "Photos";
         _config.ArchivesAlbumFilterId = _albumFilterId;
         _config.ArchivesFavoritesOnly = _favoritesOnly;
         _config.ArchivesActivePhotoId = CurrentPhoto?.Id;
     }
+
+    public void CaptureViewState() => SaveActiveItem();
 
     // Reopens the exact photo the user last viewed, restoring the sub-tab, filters, and viewer.
     private void RestoreActiveItem()
@@ -624,6 +626,8 @@ public partial class ArchivesView : UserControl, ISearchNavigable
         ViewerOverlay.Visibility = Visibility.Collapsed;
         ViewerImage.Source = null;
         _viewerIndex = -1;
+        // Forget the photo, or the next visit would reopen the one the user just closed.
+        SaveActiveItem();
     }
 
     private void CloseViewerButton_OnClick(object sender, RoutedEventArgs e) => CloseViewer();

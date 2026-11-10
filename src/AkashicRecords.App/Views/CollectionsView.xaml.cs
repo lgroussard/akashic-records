@@ -16,7 +16,7 @@ using Microsoft.Win32;
 
 namespace AkashicRecords.App.Views;
 
-public partial class CollectionsView : UserControl, ISearchNavigable
+public partial class CollectionsView : UserControl, ISearchNavigable, IRemembersViewState
 {
     private static readonly Tier[] TierOrder = { Tier.S, Tier.A, Tier.B, Tier.C, Tier.D };
 
@@ -113,11 +113,15 @@ public partial class CollectionsView : UserControl, ISearchNavigable
 
     // Records the exact category + fiche the user last viewed so reopening Collections
     // returns them to the same view, not just the default category.
+    // The "À voir" tab isn't an ArtworkCategory, so it is stored under its own tag ("Watchlist").
     private void SaveActiveItem()
     {
-        _config.CollectionsActiveCategory = _selectedCategory.ToString();
+        if (_screenshotMode) return;
+        _config.CollectionsActiveCategory = WatchlistTab.IsChecked == true ? "Watchlist" : _selectedCategory.ToString();
         _config.CollectionsActiveFilmId = _selectedFilm?.Id;
     }
+
+    public void CaptureViewState() => SaveActiveItem();
 
     // Reopens the exact category + fiche the user last viewed.
     private void RestoreActiveItem()
@@ -125,6 +129,13 @@ public partial class CollectionsView : UserControl, ISearchNavigable
         // Screenshot capture drives the view itself (ShowTabForScreenshot) — replaying the persisted
         // category here would re-check the old tab pill over the captured one (e.g. "À voir" shots).
         if (_screenshotMode) return;
+
+        if (_config.CollectionsActiveCategory == "Watchlist")
+        {
+            // Real tab path: closes any fiche, swaps the tier list for the watchlist.
+            CategoryTab_OnClick(WatchlistTab, new RoutedEventArgs());
+            return;
+        }
 
         if (!string.IsNullOrEmpty(_config.CollectionsActiveCategory) &&
             Enum.TryParse<ArtworkCategory>(_config.CollectionsActiveCategory, out var category))
@@ -257,6 +268,7 @@ public partial class CollectionsView : UserControl, ISearchNavigable
             CategoryHeaderText.Visibility = Visibility.Collapsed;
             CategorySubText.Visibility = Visibility.Collapsed;
             RefreshWatchlist();
+            SaveActiveItem();
             return;
         }
 
@@ -647,6 +659,8 @@ public partial class CollectionsView : UserControl, ISearchNavigable
         FicheOverlay.Visibility = Visibility.Collapsed;
         // Show the tier list again when the fiche is closed.
         ListRoot.Visibility = Visibility.Visible;
+        // Forget the fiche, or the next visit would reopen the one the user just closed.
+        SaveActiveItem();
     }
 
     private void CloseFicheButton_OnClick(object sender, RoutedEventArgs e) => CloseFiche();

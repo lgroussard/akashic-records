@@ -19,7 +19,7 @@ using Microsoft.Win32;
 
 namespace AkashicRecords.App.Views;
 
-public partial class JournauxView : UserControl, ISearchNavigable
+public partial class JournauxView : UserControl, ISearchNavigable, IRemembersViewState
 {
     private interface ICanvasCommand
     {
@@ -138,7 +138,8 @@ public partial class JournauxView : UserControl, ISearchNavigable
             RefreshProjectsList();
             RefreshCalendarChips();
             UpdateMonthHeader();
-            NavigateToDate(DateTime.Today);
+            // Today, unless RestoreActiveItem brought back the diary page the user left open.
+            NavigateToDate(_currentPageDate);
 
             // Last, so a requested book/editor capture overrides whatever RestoreActiveItem reopened.
             ApplyPendingPoetryPane();
@@ -299,7 +300,7 @@ public partial class JournauxView : UserControl, ISearchNavigable
 
         var payload = _activeTab switch
         {
-            "Personal" => $"Personal:Personal:",
+            "Personal" => $"Personal:Personal:{_currentPageDate:yyyy-MM-dd}",
             "Recipes" => _selectedRecipe is null ? null : $"Recipes:Recipe:{_selectedRecipe.Id}",
             "Poetry" => _selectedPoem is not null ? $"Poetry:Poem:{_selectedPoem.Id}"
                        : _openRecueil is not null ? $"Poetry:Recueil:{_openRecueil.Id}"
@@ -311,6 +312,8 @@ public partial class JournauxView : UserControl, ISearchNavigable
         _config.JournauxActiveItem = payload;
     }
 
+    public void CaptureViewState() => SaveActiveItem();
+
     // Reopens the exact item the user last viewed (after the tab), mirroring ApplySearchResult. The pointer
     // is replayed on every Loaded, which is now correct: it always tracks the real screen (see SaveActiveItem),
     // so returning from another section lands the user back on the very book/page they left, not the shelf.
@@ -321,12 +324,21 @@ public partial class JournauxView : UserControl, ISearchNavigable
         var parts = _config.JournauxActiveItem.Split(':', 3);
         if (parts.Length < 3) return;
 
+        // The sub-tab is rewritten on every tab click, the item pointer only when an item changes: if they
+        // disagree, the tab is the newer truth and the pointer belongs to a tab the user has since left.
+        if (!string.IsNullOrEmpty(_config.JournauxActiveTab) && parts[0] != _config.JournauxActiveTab) return;
+
         var kind = parts[1];
         var id = parts[2].Length > 0 ? int.TryParse(parts[2], out var parsed) ? parsed : -1 : -1;
 
         switch (kind)
         {
             case "Personal":
+                if (DateTime.TryParseExact(parts[2], "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                        DateTimeStyles.None, out var pageDate))
+                {
+                    _currentPageDate = pageDate;
+                }
                 NavigateToDate(_currentPageDate);
                 break;
             case "Recipe":
@@ -410,6 +422,9 @@ public partial class JournauxView : UserControl, ISearchNavigable
 
         if (type == "Recipes") RefreshRecipesList();
         if (type == "Poetry") RefreshPoetry();
+
+        // Re-point at what the new tab shows, so the item of the tab just left can't drag the user back there.
+        SaveActiveItem();
     }
 
     // Two-finger horizontal touchpad swipes arrive as the native WM_MOUSEHWHEEL message, which WPF's
@@ -1981,6 +1996,17 @@ public partial class JournauxView : UserControl, ISearchNavigable
             if (_openRecueil is not null) OpenRecueilBook(_openRecueil);
             else ShowStandalonePoems();
             OpenPoemPage(_selectedPoem);
+        }
+        // A book (or the standalone list) left open without a page: back on this tab, show it again
+        // rather than the shelf. Leaving a book for the shelf clears these fields first.
+        else if (_openRecueil is not null
+                 && _recueilRepository.GetAll().FirstOrDefault(r => r.Id == _openRecueil.Id) is { } openBook)
+        {
+            OpenRecueilBook(openBook);
+        }
+        else if (_poetryStandaloneActive)
+        {
+            ShowStandalonePoems();
         }
         else
         {

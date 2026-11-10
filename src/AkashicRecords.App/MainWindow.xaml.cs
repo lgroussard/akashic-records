@@ -539,6 +539,7 @@ public partial class MainWindow : Window
         {
             var (left, top, right, _) = HeaderScreenBounds();
             _screenEdgeDock?.ReleaseSpace(left, top, right);
+            PersistSectionState();
             Hide();
         }
         else
@@ -849,8 +850,20 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    // Common "reopen where I left off" rule (see IRemembersViewState): the outgoing view records the
+    // sub-tab + item it is showing, then the config hits the disk, so the next visit (or the next launch)
+    // lands on the same screen. Skipped for headless captures, which must never rewrite the user's config.
+    private void PersistSectionState()
+    {
+        if (_screenshotMode) return;
+        if (SectionContent.Content is IRemembersViewState view) view.CaptureViewState();
+        _configService.Save(_config);
+    }
+
     private void UpdateSectionContent()
     {
+        PersistSectionState();
+
         SectionContent.Content = _activeSection switch
         {
             "Organisation" => new OrganisationView(_config),
@@ -945,7 +958,7 @@ public partial class MainWindow : Window
     private void ExitApplication()
     {
         _isExiting = true;
-        _configService.Save(_config);
+        PersistSectionState();
         _screenEdgeDock?.Remove();
         _hotkey?.Dispose();
         _trayIcon?.Dispose();
@@ -971,7 +984,7 @@ public partial class MainWindow : Window
         // only the tray "Exit" menu actually terminates the app.
         if (_isExiting) return;
         e.Cancel = true;
-        _configService.Save(_config);
+        PersistSectionState();
         var (left, top, right, _) = HeaderScreenBounds();
         _screenEdgeDock?.ReleaseSpace(left, top, right);
         Hide();
