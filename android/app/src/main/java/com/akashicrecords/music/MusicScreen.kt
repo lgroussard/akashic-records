@@ -111,13 +111,14 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
 
         val tabs = listOf(
             "Bibliothèque" to "Library",
+            "Rechercher" to "Search",
             "File d'attente (${player.ui.queue.size})" to "Queue",
             "Similaires" to "Similar",
             "Téléchargements" to "Downloads",
         )
         SubTabs(tabs, tab) { tab = it }
 
-        // The four tabs are pages: a swipe moves between them like a tap on the chips.
+        // The tabs are pages: a swipe moves between them like a tap on the chips.
         SwipePages(
             count = tabs.size,
             page = tabs.indexOfFirst { it.second == tab }.coerceAtLeast(0),
@@ -127,6 +128,10 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
         Column(Modifier.fillMaxSize()) {
         when (tabs[page].second) {
             "Queue" -> { QueueList(player); return@Column }
+            "Search" -> {
+                SearchPanel(db, player, playable) { t -> library.uriFor(t)?.let { player.playNext(t, it) } }
+                return@Column
+            }
             "Similar" -> {
                 SimilarPanel(db, player, playable) { t -> library.uriFor(t)?.let { player.playNext(t, it) } }
                 return@Column

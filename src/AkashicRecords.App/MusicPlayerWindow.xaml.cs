@@ -96,6 +96,7 @@ public partial class MusicPlayerWindow : Window
         Loaded += (_, _) =>
         {
             _scanner.ScanAndSync();
+            InvalidateLibrary();
             RefreshMoods();
             RefreshLibrary();
             RefreshQueue();
@@ -372,7 +373,7 @@ public partial class MusicPlayerWindow : Window
         {
             track.DurationSeconds = total;
             _trackRepository.UpdateDuration(track.Id, total);
-            RefreshLibrary();
+            // No full library rebuild just for a duration: the row shows it on the next refresh.
         }
 
         // Fire-and-forget similar-tracks lookup for the freshly opened track.
@@ -393,7 +394,7 @@ public partial class MusicPlayerWindow : Window
         if (gen != _similarGeneration) return;
 
         // Already-owned titles (pocket + full library) are not proposed again.
-        var library = _trackRepository.GetAll();
+        var library = AllTracks();
         bool SameAsSeed(SimilarTrack s)
         {
             var a = Normalize(seedTitle);
@@ -473,7 +474,7 @@ public partial class MusicPlayerWindow : Window
         {
             var s = _similarList[_chainIndex++];
             if (PlayedAlready(s.Title)) continue;
-            var local = _trackRepository.GetAll().FirstOrDefault(t => MatchesSimilar(t, s));
+            var local = AllTracks().FirstOrDefault(t => MatchesSimilar(t, s));
             if (local is not null) return new QueueEntry { Local = local };
             if (!string.IsNullOrWhiteSpace(s.PreviewUrl)) return new QueueEntry { Remote = s };
         }
@@ -504,19 +505,280 @@ public partial class MusicPlayerWindow : Window
         return key.Length > 0 && _playedKeys.Any(k => k.Contains(key) || key.Contains(k));
     }
 
+    // --- RECHERCHER EN LIGNE, Spotify-style: best match, songs (re-ranked), artists, albums; an artist or an album
+    // opens its songs. Song lines are the SIMILAIRES rows (BuildSimilarRow), with the iTunes cover. ---
+
+    private readonly OnlineMusicSearch _onlineSearch = new();
+    private int _onlineSearchToken;
+    private IReadOnlyList<SimilarTrack>? _onlineTracks;
+    private OnlineExtras? _onlineExtras;
+    private string _onlineExtrasFor = string.Empty;
+    private bool _showAllOnlineTracks;
+    // Artist/album page currently open over the results (title line + its songs), null = the results.
+    private (string Title, string Subtitle, string? Artwork, IReadOnlyList<SimilarTrack>? Tracks)? _onlinePage;
+
+    // Search as you type. Every keystroke bumps the token, which drops the searches still waiting: songs come 350 ms
+    // after the last key (1 request), artists + albums once the typing has paused ~0.9 s (2 requests) — iTunes allows
+    // ~20 requests a minute. The previous results stay visible until the new ones arrive.
+    private async void OnlineSearchInput_OnTextChanged(object sender, TextChangedEventArgs e)
+    {
+        var token = ++_onlineSearchToken;
+        var query = OnlineSearchInput.Text.Trim();
+        _showAllOnlineTracks = false;
+        if (query.Length < 2)
+        {
+            _onlineTracks = null;
+            _onlineExtras = null;
+            _onlinePage = null;
+            OnlineResultsPanel.Children.Clear();
+            OnlineSearchStatus.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        await Task.Delay(350);
+        if (token != _onlineSearchToken) return;
+        _onlinePage = null;
+        OnlineSearchStatus.Text = "Recherche…";
+        OnlineSearchStatus.Visibility = Visibility.Visible;
+        var libraryArtists = AllTracks().Select(t => SearchRanking.Norm(t.Artist)).ToHashSet();
+        var tracks = await RetryWhenLimitedAsync(token, () => _onlineSearch.TracksAsync(query, libraryArtists));
+        if (token != _onlineSearchToken || tracks is null) return;
+        _onlineTracks = tracks;
+        ShowOnlineStatus();
+        RenderOnlineResults();
+
+        await Task.Delay(550);
+        if (token != _onlineSearchToken) return;
+        var extras = await RetryWhenLimitedAsync(token, () => _onlineSearch.ExtrasAsync(query));
+        if (token != _onlineSearchToken || extras is null) return;
+        _onlineExtras = extras;
+        _onlineExtrasFor = query;
+        ShowOnlineStatus();
+        if (_onlinePage is null) RenderOnlineResults();
+    }
+
+    // Runs a search step; when the iTunes limit holds it back (see ItunesGate), says so with a countdown, waits and
+    // tries again — the previous results stay on screen. Null when a newer keystroke took over meanwhile.
+    private async Task<T?> RetryWhenLimitedAsync<T>(int token, Func<Task<T>> step) where T : class
+    {
+        while (true)
+        {
+            try
+            {
+                return await step();
+            }
+            catch (ItunesRateLimitedException ex)
+            {
+                for (var left = (int)Math.Ceiling(Math.Max(ex.Wait.TotalSeconds, 1)); left > 0; left--)
+                {
+                    if (token != _onlineSearchToken) return null;
+                    OnlineSearchStatus.Text = $"Trop de recherches d'affilée pour iTunes : reprise automatique dans {left} s. Les suggestions restent prioritaires.";
+                    OnlineSearchStatus.Visibility = Visibility.Visible;
+                    await Task.Delay(1000);
+                }
+                if (token != _onlineSearchToken) return null;
+            }
+        }
+    }
+
+    // A song was chosen: back to an empty search, as in any search bar (clearing the field clears the results and
+    // closes an artist/album page, see OnlineSearchInput_OnTextChanged). The player's own status shows the loading.
+    private void ResetOnlineSearch() => OnlineSearchInput.Text = string.Empty;
+
+    private void ShowOnlineStatus()
+    {
+        var nothing = (_onlineTracks?.Count ?? 0) == 0 && (_onlineExtras?.Artists.Count ?? 0) == 0 && (_onlineExtras?.Albums.Count ?? 0) == 0;
+        OnlineSearchStatus.Text = nothing
+            ? "Aucun résultat (ou pas de réseau)."
+            : "▶ écoute le titre entier, ⤓ l'ajoute au téléchargeur (dossier de son album).";
+    }
+
+    private void RenderOnlineResults()
+    {
+        OnlineResultsPanel.Children.Clear();
+        if (_onlinePage is { } page)
+        {
+            var back = new Button { Content = "← Résultats", Style = SmallButton(), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 6) };
+            back.Click += (_, _) => { _onlinePage = null; RenderOnlineResults(); };
+            OnlineResultsPanel.Children.Add(back);
+            OnlineResultsPanel.Children.Add(OnlineHeaderCard(page.Title, page.Subtitle, page.Artwork, 48));
+            if (page.Tracks is null) OnlineResultsPanel.Children.Add(OnlineNote("Chargement…"));
+            else if (page.Tracks.Count == 0) OnlineResultsPanel.Children.Add(OnlineNote("Aucun titre trouvé."));
+            else foreach (var t in page.Tracks) OnlineResultsPanel.Children.Add(BuildSimilarRow(t, onPicked: ResetOnlineSearch));
+            return;
+        }
+
+        if (_onlineTracks is not { } found) return;
+        // Artists/albums may still be those of a few letters ago while the typing goes on; the artist only takes the
+        // best-match slot once they belong to the current query.
+        var artists = _onlineExtras?.Artists ?? Array.Empty<OnlineArtist>();
+        var albums = _onlineExtras?.Albums ?? Array.Empty<OnlineAlbum>();
+        var bestArtist = _onlineExtrasFor == OnlineSearchInput.Text.Trim() ? _onlineExtras?.TopArtist : null;
+        // Best match: the artist when the query is exactly their name, else the best-ranked song.
+        var topTrack = bestArtist is null ? found.FirstOrDefault() : null;
+        if (bestArtist is { } topArtist)
+        {
+            OnlineResultsPanel.Children.Add(OnlineSection("MEILLEUR RÉSULTAT"));
+            var card = new Button { Style = ChipButton(), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left, Background = InputBg() };
+            card.Content = OnlineHeaderCard(topArtist.Name, "Artiste" + (topArtist.Genre is { } g ? " · " + g : ""), null, 48);
+            card.Click += (_, _) => OpenOnlineArtist(topArtist);
+            OnlineResultsPanel.Children.Add(card);
+        }
+        else if (topTrack is not null)
+        {
+            OnlineResultsPanel.Children.Add(OnlineSection("MEILLEUR RÉSULTAT"));
+            OnlineResultsPanel.Children.Add(BuildSimilarRow(topTrack, coverSize: 56, onPicked: ResetOnlineSearch));
+        }
+
+        var others = topTrack is null ? found : found.Skip(1).ToList();
+        if (others.Count > 0)
+        {
+            OnlineResultsPanel.Children.Add(OnlineSection("TITRES"));
+            foreach (var t in _showAllOnlineTracks ? others : others.Take(6)) OnlineResultsPanel.Children.Add(BuildSimilarRow(t, onPicked: ResetOnlineSearch));
+            if (others.Count > 6)
+            {
+                var more = new Button
+                {
+                    Content = _showAllOnlineTracks ? "Moins de titres" : $"Tous les titres ({others.Count})",
+                    Style = SmallButton(), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 2, 0, 0)
+                };
+                more.Click += (_, _) => { _showAllOnlineTracks = !_showAllOnlineTracks; RenderOnlineResults(); };
+                OnlineResultsPanel.Children.Add(more);
+            }
+        }
+
+        if (artists.Count > 0)
+        {
+            OnlineResultsPanel.Children.Add(OnlineSection("ARTISTES"));
+            var wrap = new WrapPanel();
+            foreach (var a in artists)
+            {
+                // Homonyms are common in iTunes (several "Angèle"): the genre tells them apart.
+                var chip = new Button { Content = a.Genre is { } g ? $"{a.Name} · {g}" : a.Name, Style = ChipButton(), Margin = new Thickness(0, 0, 6, 6) };
+                chip.Click += (_, _) => OpenOnlineArtist(a);
+                wrap.Children.Add(chip);
+            }
+            OnlineResultsPanel.Children.Add(wrap);
+        }
+
+        if (albums.Count > 0)
+        {
+            OnlineResultsPanel.Children.Add(OnlineSection("ALBUMS"));
+            var wrap = new WrapPanel();
+            foreach (var al in albums)
+            {
+                var tile = new StackPanel { Width = 92 };
+                tile.Children.Add(OnlineCover(al.Artwork, 84));
+                tile.Children.Add(new TextBlock { Text = al.Title, Foreground = Brushes.White, FontSize = 11, TextWrapping = TextWrapping.Wrap, MaxHeight = 30, TextTrimming = TextTrimming.CharacterEllipsis });
+                tile.Children.Add(new TextBlock
+                {
+                    Text = string.Join(" · ", new[] { al.Artist, al.Year }.Where(s => !string.IsNullOrWhiteSpace(s))),
+                    Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0xAA)), FontSize = 10, TextTrimming = TextTrimming.CharacterEllipsis
+                });
+                var button = new Button { Content = tile, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Padding = new Thickness(0), Margin = new Thickness(0, 0, 8, 8), Cursor = Cursors.Hand };
+                button.Click += (_, _) => OpenOnlineAlbum(al);
+                wrap.Children.Add(button);
+            }
+            OnlineResultsPanel.Children.Add(wrap);
+        }
+    }
+
+    private async void OpenOnlineArtist(OnlineArtist artist)
+    {
+        var token = _onlineSearchToken;
+        var subtitle = "Artiste" + (artist.Genre is { } g ? " · " + g : "");
+        _onlinePage = (artist.Name, subtitle, null, null);
+        RenderOnlineResults();
+        var tracks = await RetryWhenLimitedAsync(token, () => _onlineSearch.ArtistTracksAsync(artist));
+        if (token != _onlineSearchToken || _onlinePage?.Title != artist.Name) return;
+        _onlinePage = (artist.Name, subtitle, null, tracks);
+        RenderOnlineResults();
+    }
+
+    private async void OpenOnlineAlbum(OnlineAlbum album)
+    {
+        var token = _onlineSearchToken;
+        var subtitle = string.Join(" · ", new[] { album.Artist, album.Year }.Where(s => !string.IsNullOrWhiteSpace(s)));
+        _onlinePage = (album.Title, subtitle, album.Artwork, null);
+        RenderOnlineResults();
+        var tracks = await RetryWhenLimitedAsync(token, () => _onlineSearch.AlbumTracksAsync(album));
+        if (token != _onlineSearchToken || _onlinePage?.Title != album.Title) return;
+        _onlinePage = (album.Title, subtitle, album.Artwork, tracks);
+        RenderOnlineResults();
+    }
+
+    private static TextBlock OnlineSection(string text) => new()
+    {
+        Text = text, Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0xAA)), FontSize = 10,
+        FontWeight = FontWeights.Bold, Margin = new Thickness(0, 10, 0, 4)
+    };
+
+    private static TextBlock OnlineNote(string text) => new()
+    {
+        Text = text, Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0xAA)), FontSize = 11, Margin = new Thickness(0, 4, 0, 4)
+    };
+
+    // Cover (or, for an artist — iTunes has no artist pictures — a round badge with the initial) + two lines.
+    private static FrameworkElement OnlineHeaderCard(string title, string subtitle, string? artwork, double size)
+    {
+        var grid = new Grid { Margin = new Thickness(0, 2, 0, 6) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        FrameworkElement picture = artwork is not null
+            ? OnlineCover(artwork, size)
+            : new Border
+            {
+                Width = size, Height = size, CornerRadius = new CornerRadius(size / 2), Background = InputBg(),
+                Child = new TextBlock
+                {
+                    Text = title.Trim().Length > 0 ? title.Trim()[..1].ToUpperInvariant() : "?", FontSize = size * 0.4, FontWeight = FontWeights.Bold,
+                    Foreground = new SolidColorBrush(Color.FromRgb(0x7F, 0xB0, 0xFF)), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center
+                }
+            };
+        picture.Margin = new Thickness(0, 0, 10, 0);
+        grid.Children.Add(picture);
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        text.Children.Add(new TextBlock { Text = title, Foreground = Brushes.White, FontSize = 14, FontWeight = FontWeights.Bold, TextWrapping = TextWrapping.Wrap });
+        text.Children.Add(new TextBlock { Text = subtitle, Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0xAA)), FontSize = 11 });
+        Grid.SetColumn(text, 1);
+        grid.Children.Add(text);
+        return grid;
+    }
+
+    // iTunes cover from its URL; WPF downloads it in the background, the slot stays empty until then.
+    private static FrameworkElement OnlineCover(string? url, double size)
+    {
+        var slot = new Border { Width = size, Height = size, CornerRadius = new CornerRadius(4), Background = InputBg(), ClipToBounds = true };
+        if (url is null) return slot;
+        try
+        {
+            var bitmap = new BitmapImage();
+            bitmap.BeginInit();
+            bitmap.UriSource = new Uri(url);
+            bitmap.DecodePixelWidth = (int)Math.Max(size * 2, 100);
+            bitmap.EndInit();
+            slot.Child = new Image { Source = bitmap, Stretch = Stretch.UniformToFill };
+        }
+        catch { /* bad URL: empty slot */ }
+        return slot;
+    }
+
     // One similar-tracks line:
     //   * present in the local library  -> a chip that plays the local .mp3 next.
     //   * otherwise                     -> "· Titre — Artiste", a ▶ that streams it next and a ⤓
     //     that queues it in the existing downloader board (yt-dlp writes the full file).
-    private FrameworkElement BuildSimilarRow(SimilarTrack similar)
+    // onPicked: called when the song is chosen to play (▶ or the library chip), never by ⤓ — the online search uses it to reset.
+    private FrameworkElement BuildSimilarRow(SimilarTrack similar, double coverSize = 36, Action? onPicked = null)
     {
         var container = new StackPanel { Margin = new Thickness(0, 0, 0, 3) };
 
-        var local = _trackRepository.GetAll().FirstOrDefault(t => MatchesSimilar(t, similar));
+        var local = AllTracks().FirstOrDefault(t => MatchesSimilar(t, similar));
 
         var label = string.IsNullOrWhiteSpace(similar.Artist)
             ? similar.Title
             : $"{similar.Title} — {similar.Artist}";
+        // Search hits carry their album (suggestions don't): shown so two versions can be told apart.
+        if (!string.IsNullOrWhiteSpace(similar.Album)) label += $" · {similar.Album}";
 
         if (local is not null)
         {
@@ -529,9 +791,9 @@ public partial class MusicPlayerWindow : Window
                 Background = InputBg(),
                 HorizontalAlignment = HorizontalAlignment.Stretch
             };
-            button.Click += (_, _) => PlayNext(new QueueEntry { Local = local });
+            button.Click += (_, _) => { PlayNext(new QueueEntry { Local = local }); onPicked?.Invoke(); };
             container.Children.Add(button);
-            return container;
+            return WithCover(container, similar, coverSize);
         }
 
         var row = new Grid();
@@ -548,7 +810,9 @@ public partial class MusicPlayerWindow : Window
             VerticalAlignment = VerticalAlignment.Center
         });
 
-        if (!string.IsNullOrWhiteSpace(similar.PreviewUrl))
+        // ▶ fetches the full track through yt-dlp (the clip is only the fallback), so a hit without a clip
+        // is playable too.
+        if (!string.IsNullOrWhiteSpace(similar.PreviewUrl) || !string.IsNullOrWhiteSpace(similar.Title))
         {
             var pv = new Button
             {
@@ -557,7 +821,7 @@ public partial class MusicPlayerWindow : Window
                 VerticalAlignment = VerticalAlignment.Center,
                 ToolTip = "Écouter le titre entier"
             };
-            pv.Click += (_, _) => PlayNext(new QueueEntry { Remote = similar });
+            pv.Click += (_, _) => { PlayNext(new QueueEntry { Remote = similar }); onPicked?.Invoke(); };
             Grid.SetColumn(pv, 1);
             row.Children.Add(pv);
         }
@@ -581,7 +845,7 @@ public partial class MusicPlayerWindow : Window
             var title = similar.Title;
             dl.Click += (_, _) =>
             {
-                QueueDownload(url, title);
+                QueueDownload(url, title, similar.Album);
                 UpdateSaveButton();
             };
             Grid.SetColumn(dl, 2);
@@ -589,7 +853,24 @@ public partial class MusicPlayerWindow : Window
         }
 
         container.Children.Add(row);
-        return container;
+        return WithCover(container, similar, coverSize);
+    }
+
+    // Search hits carry an iTunes cover (suggestions don't): shown left of the line.
+    private static FrameworkElement WithCover(FrameworkElement line, SimilarTrack similar, double size)
+    {
+        if (similar.Artwork is null) return line;
+        var grid = new Grid { Margin = new Thickness(0, 0, 0, 3) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var cover = OnlineCover(similar.Artwork, size);
+        cover.Margin = new Thickness(0, 0, 8, 0);
+        cover.VerticalAlignment = VerticalAlignment.Center;
+        grid.Children.Add(cover);
+        line.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(line, 1);
+        grid.Children.Add(line);
+        return grid;
     }
 
     // Plays a suggestion right after the current entry, so Prev returns to what was playing
@@ -706,11 +987,12 @@ public partial class MusicPlayerWindow : Window
     {
         if (_currentIndex < 0 || _currentIndex >= _queue.Count) return;
         if (_queue[_currentIndex].Remote is not { } remote) return;
-        QueueDownload(DownloadUrlFor(remote), remote.Title);
+        QueueDownload(DownloadUrlFor(remote), remote.Title, remote.Album);
         UpdateSaveButton();
     }
 
-    private void QueueDownload(string url, string title)
+    // Suggestions go into the folder of the album being played; a search hit (album known) into its own album's.
+    private void QueueDownload(string url, string title, string? album = null)
     {
         if (_downloadRepository.ExistsByUrl(url)) return;
         _downloadRepository.Add(new DownloadItem
@@ -719,22 +1001,25 @@ public partial class MusicPlayerWindow : Window
             Title = title,
             Status = DownloadStatus.Queued,
             AddedAt = DateTime.Now,
-            FolderId = ZoneForRun()
+            FolderId = ZoneFor(string.IsNullOrWhiteSpace(album) ? _runAlbum : album)
         });
         DownloadQueued?.Invoke();
     }
 
     // The downloader zone pointing at the run's album folder, created on first use so the board
     // shows where each suggestion came from. Root-level tracks stay in "Non classé".
-    private int? ZoneForRun()
+    // A search hit names its own album instead (see QueueDownload); characters Windows refuses in a folder
+    // name are dropped.
+    private int? ZoneFor(string? album)
     {
-        if (string.IsNullOrWhiteSpace(_runAlbum)) return null;
+        var name = string.Concat((album ?? string.Empty).Where(c => !System.IO.Path.GetInvalidFileNameChars().Contains(c))).Trim().TrimEnd('.');
+        if (string.IsNullOrWhiteSpace(name)) return null;
         var zones = _folderRepository.GetAll();
-        var zone = zones.FirstOrDefault(z => string.Equals(z.Subfolder?.Trim(), _runAlbum, StringComparison.OrdinalIgnoreCase));
+        var zone = zones.FirstOrDefault(z => string.Equals(z.Subfolder?.Trim(), name, StringComparison.OrdinalIgnoreCase));
         return zone?.Id ?? _folderRepository.Add(new DownloadFolder
         {
-            Name = _runAlbum,
-            Subfolder = _runAlbum,
+            Name = name,
+            Subfolder = name,
             SortOrder = zones.Count
         });
     }
@@ -806,10 +1091,40 @@ public partial class MusicPlayerWindow : Window
     private void CloseButton_OnClick(object sender, RoutedEventArgs e) => Hide();
 
     // --- Library -------------------------------------------------------------
+    //
+    // Kept cheap on purpose (it used to rebuild everything, hidden parts included, on every keystroke): the tracks
+    // are read once and kept in memory until the folder is rescanned; album contents are built when an album is
+    // unfolded; the ✎/☾ panels when they are opened; a flat list shows LibraryPage rows at a time; the search waits
+    // for a short pause in the typing; the colour-emoji text engine (slow) is only used for texts that need it.
+
+    private const int LibraryPage = 150;
+    private List<MusicTrack>? _allTracks;
+    private int _libraryShown = LibraryPage;
+    private DispatcherTimer? _librarySearchTimer;
+
+    private IReadOnlyList<MusicTrack> AllTracks() => _allTracks ??= _trackRepository.GetAll().ToList();
+
+    // After a scan (new or removed files): the next read goes back to the database.
+    private void InvalidateLibrary() => _allTracks = null;
+
+    private static bool HasEmoji(string s)
+    {
+        foreach (var c in s)
+            if (char.IsSurrogate(c) || c is >= '☀' and <= '➿') return true;
+        return false;
+    }
+
+    // Plain TextBlock unless the text holds an emoji (then Emoji.Wpf, for the colour glyphs).
+    private static FrameworkElement LibraryText(string text, Brush foreground, double fontSize, bool trim = false)
+    {
+        if (HasEmoji(text))
+            return new Emoji.Wpf.TextBlock { Text = text, Foreground = foreground, FontSize = fontSize, TextTrimming = trim ? TextTrimming.CharacterEllipsis : TextTrimming.None };
+        return new TextBlock { Text = text, Foreground = foreground, FontSize = fontSize, TextTrimming = trim ? TextTrimming.CharacterEllipsis : TextTrimming.None };
+    }
 
     private IReadOnlyList<MusicTrack> CurrentLibraryTracks()
     {
-        IEnumerable<MusicTrack> tracks = _selectedMoodId is { } moodId ? _trackRepository.GetByMood(moodId) : _trackRepository.GetAll();
+        IEnumerable<MusicTrack> tracks = _selectedMoodId is { } moodId ? _trackRepository.GetByMood(moodId) : AllTracks();
         if (!string.IsNullOrWhiteSpace(_librarySearch))
         {
             var q = _librarySearch.Trim();
@@ -820,15 +1135,28 @@ public partial class MusicPlayerWindow : Window
         return tracks.ToList();
     }
 
+    // Filters on a short pause in the typing (the list is in memory, so the pause only spares the redraws).
     private void LibrarySearchInput_OnTextChanged(object sender, TextChangedEventArgs e)
     {
-        _librarySearch = LibrarySearchInput.Text;
-        RefreshLibrary();
+        if (_librarySearchTimer is null)
+        {
+            _librarySearchTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
+            _librarySearchTimer.Tick += (_, _) =>
+            {
+                _librarySearchTimer.Stop();
+                _librarySearch = LibrarySearchInput.Text;
+                _libraryShown = LibraryPage;
+                RefreshLibrary();
+            };
+        }
+        _librarySearchTimer.Stop();
+        _librarySearchTimer.Start();
     }
 
     private void RescanButton_OnClick(object sender, RoutedEventArgs e)
     {
         _scanner.ScanAndSync();
+        InvalidateLibrary();
         RefreshMoods();
         RefreshLibrary();
     }
@@ -840,38 +1168,64 @@ public partial class MusicPlayerWindow : Window
 
         if (_selectedMoodId is null && string.IsNullOrWhiteSpace(_librarySearch))
         {
-            foreach (var group in _trackRepository.GetAll()
+            foreach (var group in AllTracks()
                          .GroupBy(t => t.Album)
                          .OrderBy(g => string.IsNullOrEmpty(g.Key) ? "\uFFFF" : g.Key))
             {
                 var albumTracks = group.OrderBy(t => t.Title).ToList();
+                var album = group.Key ?? string.Empty;
 
                 var header = new StackPanel { Orientation = Orientation.Horizontal };
                 var playAlbum = new Button { Content = "▶", Style = SmallButton(), Margin = new Thickness(0, 0, 6, 0), ToolTip = "Lire l'album" };
                 // Handled so playing doesn't also toggle the accordion open/closed.
                 playAlbum.Click += (_, ev) => { ev.Handled = true; if (albumTracks.Count > 0) PlayQueue(albumTracks, 0); };
                 header.Children.Add(playAlbum);
-                header.Children.Add(new Emoji.Wpf.TextBlock
+                var name = LibraryText(album.Length == 0 ? "Sans album" : album, Brushes.White, 12);
+                name.VerticalAlignment = VerticalAlignment.Center;
+                header.Children.Add(name);
+                header.Children.Add(new TextBlock
                 {
-                    Text = string.IsNullOrEmpty(group.Key) ? "Sans album" : group.Key,
-                    Foreground = Brushes.White,
-                    VerticalAlignment = VerticalAlignment.Center
+                    Text = $"  {albumTracks.Count}", FontSize = 10, VerticalAlignment = VerticalAlignment.Center,
+                    Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0xAA))
                 });
 
                 var expander = new Expander { Header = header, Foreground = Brushes.White, Margin = new Thickness(0, 0, 0, 4) };
-                var inner = new StackPanel { Margin = new Thickness(8, 4, 0, 4) };
-                foreach (var track in albumTracks) inner.Children.Add(BuildTrackRow(track));
-                expander.Content = inner;
+                // Rows built on first unfold only; which albums are open survives a refresh.
+                void Fill()
+                {
+                    if (expander.Content is not null) return;
+                    var inner = new StackPanel { Margin = new Thickness(8, 4, 0, 4) };
+                    foreach (var track in albumTracks) inner.Children.Add(BuildTrackRow(track));
+                    expander.Content = inner;
+                }
+                expander.Expanded += (_, _) => { _openAlbums.Add(album); Fill(); };
+                expander.Collapsed += (_, _) => _openAlbums.Remove(album);
+                if (_openAlbums.Contains(album)) { Fill(); expander.IsExpanded = true; }
                 LibraryPanel.Children.Add(expander);
             }
             return;
         }
 
-        foreach (var track in CurrentLibraryTracks())
+        var tracks = CurrentLibraryTracks();
+        foreach (var track in tracks.Take(_libraryShown)) LibraryPanel.Children.Add(BuildTrackRow(track));
+        if (tracks.Count > _libraryShown)
         {
-            LibraryPanel.Children.Add(BuildTrackRow(track));
+            var more = new Button
+            {
+                Content = $"Afficher plus ({tracks.Count - _libraryShown} restants)", Style = SmallButton(),
+                HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 2, 0, 6)
+            };
+            more.Click += (_, _) => { _libraryShown += LibraryPage; RefreshLibrary(); };
+            LibraryPanel.Children.Add(more);
+        }
+        else if (tracks.Count == 0)
+        {
+            LibraryPanel.Children.Add(LibraryText("Aucune piste.", new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0xAA)), 11));
         }
     }
+
+    // Albums unfolded by the user, kept open across refreshes.
+    private readonly HashSet<string> _openAlbums = new();
 
     private FrameworkElement BuildTrackRow(MusicTrack track)
     {
@@ -893,16 +1247,10 @@ public partial class MusicPlayerWindow : Window
         row.Children.Add(playButton);
 
         var info = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        info.Children.Add(new Emoji.Wpf.TextBlock
-        {
-            Text = string.IsNullOrWhiteSpace(track.Title) ? "(sans titre)" : track.Title,
-            Foreground = Brushes.White,
-            FontSize = 12,
-            TextTrimming = TextTrimming.CharacterEllipsis
-        });
+        info.Children.Add(LibraryText(string.IsNullOrWhiteSpace(track.Title) ? "(sans titre)" : track.Title, Brushes.White, 12, trim: true));
         var sub = track.Artist;
         if (track.DurationSeconds is { } d) sub = sub.Length == 0 ? FormatTime(d) : $"{sub} · {FormatTime(d)}";
-        info.Children.Add(new Emoji.Wpf.TextBlock { Text = sub, Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)), FontSize = 10 });
+        info.Children.Add(LibraryText(sub, SubtleText, 10));
         Grid.SetColumn(info, 1);
         row.Children.Add(info);
 
@@ -919,19 +1267,31 @@ public partial class MusicPlayerWindow : Window
 
         container.Children.Add(row);
 
-        var editPanel = BuildEditPanel(track);
-        editPanel.Visibility = Visibility.Collapsed;
-        container.Children.Add(editPanel);
+        // ✎ and ☾ panels are built on first open (the ☾ one reads the database), then just shown/hidden.
+        FrameworkElement? editPanel = null;
         editButton.Click += (_, _) =>
+        {
+            if (editPanel is null) { editPanel = BuildEditPanel(track); container.Children.Insert(1, editPanel); return; }
             editPanel.Visibility = editPanel.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+        };
 
-        var moodPanel = BuildMoodEditPanel(track);
-        moodPanel.Visibility = Visibility.Collapsed;
-        container.Children.Add(moodPanel);
+        FrameworkElement? moodPanel = null;
         moodButton.Click += (_, _) =>
+        {
+            if (moodPanel is null) { moodPanel = BuildMoodEditPanel(track); container.Children.Add(moodPanel); return; }
             moodPanel.Visibility = moodPanel.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+        };
 
         return container;
+    }
+
+    private static readonly SolidColorBrush SubtleText = Frozen(Color.FromRgb(0xAA, 0xAA, 0xAA));
+
+    private static SolidColorBrush Frozen(Color c)
+    {
+        var brush = new SolidColorBrush(c);
+        brush.Freeze();
+        return brush;
     }
 
     private FrameworkElement BuildEditPanel(MusicTrack track)
@@ -1147,6 +1507,7 @@ public partial class MusicPlayerWindow : Window
     public void ReloadLibrary()
     {
         _scanner.ScanAndSync();
+        InvalidateLibrary();
         RefreshLibrary();
     }
 

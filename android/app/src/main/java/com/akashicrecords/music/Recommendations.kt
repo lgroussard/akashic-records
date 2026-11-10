@@ -7,7 +7,9 @@ import java.net.URL
 import java.net.URLEncoder
 
 // One suggested track. Preview = iTunes 30 s clip (playable directly), Page = Apple Music page.
-data class SimilarTrack(val title: String, val artist: String, val page: String?, val preview: String?)
+// Album = iTunes album name when known (search results: it names the download folder).
+// Artwork = small iTunes cover URL (search results only).
+data class SimilarTrack(val title: String, val artist: String, val page: String?, val preview: String?, val album: String? = null, val artwork: String? = null)
 
 // Port of the desktop MusicRecommendationService ("SIMILAIRES"), same chain, no key or account:
 //   * iTunes Search -> the seed + its album neighbours (30 s preview + page URL);
@@ -19,12 +21,27 @@ object Recommendations {
     private const val MAX_RESULTS = 10
     private const val MAX_DURATION_MS = 15 * 60 * 1000 // longer = compilation/set, not a single
 
-    private data class Hit(val title: String, val artist: String, val page: String?, val preview: String?, val collectionId: Long?, val genre: String?, val durationMs: Long?)
+    private data class Hit(val title: String, val artist: String, val page: String?, val preview: String?, val collectionId: Long?, val genre: String?, val durationMs: Long?, val album: String? = null)
+
+    // Lists already built, per seed: a title heard again (or the Similaires tab reopened) costs no request.
+    private val similarCache = object : LinkedHashMap<String, List<SimilarTrack>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<SimilarTrack>>?) = size > 60
+    }
 
     fun similar(title: String, artist: String?, limit: Int = MAX_RESULTS): List<SimilarTrack> {
         if (title.isBlank()) return emptyList()
         val clean = cleanTitle(title)
         val query = if (artist.isNullOrBlank()) clean else "$clean ${artist.trim()}"
+        val cacheKey = "${query.lowercase()}|$limit"
+        synchronized(similarCache) { similarCache[cacheKey] }?.let { return it }
+        // A list cut short by the iTunes limit is not kept, so the next try can complete it.
+        val refusalsBefore = ItunesGate.refusalCount()
+        return similarUncached(clean, query, artist, limit).also {
+            if (it.isNotEmpty() && ItunesGate.refusalCount() == refusalsBefore) synchronized(similarCache) { similarCache[cacheKey] = it }
+        }
+    }
+
+    private fun similarUncached(clean: String, query: String, artist: String?, limit: Int): List<SimilarTrack> {
         val result = ArrayList<SimilarTrack>()
         val seen = HashSet<String>()
         try {
@@ -74,8 +91,8 @@ object Recommendations {
         add(list, seen, title, artist, hit?.page, hit?.preview, hit?.durationMs)
     }
 
-    private fun itunesSearch(query: String, cap: Int): List<Hit> {
-        val json = get("https://itunes.apple.com/search?term=${enc(query)}&entity=song&limit=$cap") ?: return emptyList()
+    private fun itunesSearch(query: String, cap: Int, country: String? = null): List<Hit> {
+        val json = get("https://itunes.apple.com/search?term=${enc(query)}&entity=song&limit=$cap" + (country?.let { "&country=$it" } ?: "")) ?: return emptyList()
         return parseItunes(JSONObject(json).optJSONArray("results"), cap)
     }
 
@@ -93,7 +110,7 @@ object Recommendations {
             out += Hit(
                 name, r.str("artistName") ?: "", r.str("trackViewUrl"), r.str("previewUrl"),
                 r.optLong("collectionId").takeIf { it > 0 }, r.str("primaryGenreName"),
-                r.optLong("trackTimeMillis").takeIf { it > 0 },
+                r.optLong("trackTimeMillis").takeIf { it > 0 }, r.str("collectionName"),
             )
             if (out.size >= cap) break
         }
@@ -136,22 +153,29 @@ object Recommendations {
     }
 
     // MusicBrainz answers 403 without an explicit User-Agent.
-    private fun get(url: String): String? = try {
-        val c = URL(url).openConnection() as HttpURLConnection
-        c.connectTimeout = 10_000
-        c.readTimeout = 15_000
-        c.setRequestProperty("User-Agent", "AkashicRecords/1.0 (similar-tracks lookup)")
-        c.setRequestProperty("Accept", "application/json")
-        try {
-            if (c.responseCode in 200..299) c.inputStream.bufferedReader().use { it.readText() } else null
-        } finally {
-            c.disconnect()
+    // iTunes requests go through ItunesGate (gated = false when the caller already took its slot, see OnlineSearch).
+    internal fun get(url: String, gated: Boolean = true): String? {
+        val itunes = ItunesGate.isItunes(url)
+        if (itunes && gated && !ItunesGate.tryAcquire(search = false)) return null
+        return try {
+            val c = URL(url).openConnection() as HttpURLConnection
+            c.connectTimeout = 10_000
+            c.readTimeout = 15_000
+            c.setRequestProperty("User-Agent", "AkashicRecords/1.0 (similar-tracks lookup)")
+            c.setRequestProperty("Accept", "application/json")
+            try {
+                val code = c.responseCode
+                if (itunes && (code == 403 || code == 429)) ItunesGate.refused()
+                if (code in 200..299) c.inputStream.bufferedReader().use { it.readText() } else null
+            } finally {
+                c.disconnect()
+            }
+        } catch (_: Exception) {
+            null
         }
-    } catch (_: Exception) {
-        null
     }
 
-    private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
+    internal fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
     private fun JSONObject.str(key: String): String? = optString(key, "").takeIf { it.isNotBlank() }
 

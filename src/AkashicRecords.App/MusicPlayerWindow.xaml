@@ -200,6 +200,18 @@
                     BorderBrush="#553B82F6" BorderThickness="0,1,0,0" Padding="0,10,0,0">
                 <ScrollViewer x:Name="ExpandedScroll" VerticalScrollBarVisibility="Auto">
                     <StackPanel>
+                        <!-- Online search (iTunes catalogue), first in the panel: same rows as SIMILAIRES, ▶ full track, ⤓ download -->
+                        <TextBlock Text="RECHERCHER EN LIGNE" Foreground="#8888AA" FontSize="10"
+                                   FontWeight="Bold" Margin="0,0,0,4"/>
+                        <TextBox x:Name="OnlineSearchInput" Background="#22223A" Foreground="White" Margin="0,0,0,6"
+                                 BorderBrush="#553B82F6" Padding="6,3" VerticalContentAlignment="Center"
+                                 ToolTip="Titre, artiste ou album — les résultats arrivent pendant que vous tapez"
+                                 TextChanged="OnlineSearchInput_OnTextChanged"/>
+                        <TextBlock x:Name="OnlineSearchStatus" Foreground="#8888AA" FontSize="11" TextWrapping="Wrap"
+                                   Margin="0,0,0,4" Visibility="Collapsed"/>
+                        <StackPanel x:Name="OnlineResultsPanel" Margin="0,0,0,10"/>
+
+
                         <!-- Ambiances -->
                         <Grid Margin="0,0,0,4">
                             <Grid.ColumnDefinitions>

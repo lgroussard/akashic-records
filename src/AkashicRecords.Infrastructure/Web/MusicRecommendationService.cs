@@ -6,8 +6,11 @@ namespace AkashicRecords.Infrastructure.Web;
 // One recommended track for the "similar tracks" list.
 // PageUrl   = the Apple Music page (what yt-dlp resolves to a full file).
 // PreviewUrl= iTunes 30 s clip, for a quick listen of a non-local title.
+// Album     = the iTunes album name, when known (search hits: it names the download folder).
+// Artwork   = small iTunes cover URL (search results only).
 public sealed record SimilarTrack(
-    string Title, string Artist, string? PageUrl = null, string? PreviewUrl = null);
+    string Title, string Artist, string? PageUrl = null, string? PreviewUrl = null, string? Album = null,
+    string? Artwork = null);
 
 // "Similar tracks" lookup, no API key and no account needed (works on a virgin machine).
 // Category-first, like the real Spotify algo:
@@ -61,10 +64,32 @@ public sealed class MusicRecommendationService
     }
 
     // Combined list of neighbours for a title (artist helps disambiguate). Best-effort.
+    // Lists already built, per seed: a title heard again (or the panel refreshed) costs no request. Shared by every
+    // instance (the player creates its own service).
+    private static readonly Dictionary<string, IReadOnlyList<SimilarTrack>> SimilarCache = new();
+
     public async Task<IReadOnlyList<SimilarTrack>> GetSimilarAsync(
         string title, string? artist, int limit = MaxResults, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(title)) return Array.Empty<SimilarTrack>();
+        var key = $"{CleanTitle(title).ToLowerInvariant()}|{artist?.Trim().ToLowerInvariant()}|{limit}";
+        lock (SimilarCache)
+            if (SimilarCache.TryGetValue(key, out var cached)) return cached;
+        // A list cut short by the iTunes limit is not kept, so the next try can complete it.
+        var refusalsBefore = ItunesGate.RefusalCount;
+        var list = await GetSimilarUncachedAsync(title, artist, limit, ct);
+        if (list.Count > 0 && ItunesGate.RefusalCount == refusalsBefore)
+            lock (SimilarCache)
+            {
+                if (SimilarCache.Count >= 60) SimilarCache.Remove(SimilarCache.Keys.First());
+                SimilarCache[key] = list;
+            }
+        return list;
+    }
+
+    private async Task<IReadOnlyList<SimilarTrack>> GetSimilarUncachedAsync(
+        string title, string? artist, int limit, CancellationToken ct)
+    {
         if (!System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable())
             return Array.Empty<SimilarTrack>();
 
@@ -342,11 +367,15 @@ public sealed class MusicRecommendationService
         }
     }
 
-    private static async Task<string?> GetStringAsync(string url, CancellationToken ct)
+    // iTunes requests go through ItunesGate (gated = false when the caller already took its slot, see OnlineMusicSearch).
+    internal static async Task<string?> GetStringAsync(string url, CancellationToken ct, bool gated = true)
     {
+        var itunes = ItunesGate.IsItunes(url);
+        if (itunes && gated && !ItunesGate.TryAcquire(search: false)) return null;
         try
         {
             using var response = await Http.GetAsync(url, ct);
+            if (itunes && (int)response.StatusCode is 403 or 429) ItunesGate.Refused();
             if (!response.IsSuccessStatusCode)
             {
                 Log($"HTTP {(int)response.StatusCode} for {url}");
