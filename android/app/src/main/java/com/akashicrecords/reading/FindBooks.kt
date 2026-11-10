@@ -58,11 +58,18 @@ fun FindBooks(db: AkashicDatabase, config: ConfigStore, onOpen: (Int) -> Unit) {
 
     val sources = Catalog.BUILT_IN + catalogs.map { it.name }
 
-    LaunchedEffect(query, off, catalogs) {
-        val q = query.trim()
-        if (q.length < 3) { results = emptyList(); return@LaunchedEffect }
+    // What the words name (anything / a title / an author) and the language wanted; kept while the app runs.
+    var mode by remember { mutableStateOf(FindState.mode) }
+    var language by remember { mutableStateOf(FindState.language) }
+    LaunchedEffect(mode, language) { FindState.mode = mode; FindState.language = language }
+
+    LaunchedEffect(query, off, catalogs, mode, language) {
+        val text = query.trim()
+        if (text.length < 3) { results = emptyList(); return@LaunchedEffect }
         delay(600)
-        val active = sources.filter { it !in off }
+        val q = BookQuery(text, mode, language)
+        // Wikisource is French only: hidden when another language is asked.
+        val active = sources.filter { it !in off && !(it == Catalog.WIKISOURCE && language != null && language != "fr") }
         results = active.map { it to null }
         // Each source fills its section as soon as it answers (they are not equally fast).
         active.map { s ->
@@ -72,8 +79,8 @@ fun FindBooks(db: AkashicDatabase, config: ConfigStore, onOpen: (Int) -> Unit) {
                         Catalog.GUTENBERG -> Catalog.gutenberg(q)
                         Catalog.WIKISOURCE -> Catalog.wikisource(q)
                         Catalog.ARCHIVE -> Catalog.archive(q)
-                        else -> catalogs.firstOrNull { it.name == s }?.let { Catalog.searchUserCatalog(it, q) }.orEmpty()
-                    }
+                        else -> catalogs.firstOrNull { it.name == s }?.let { Catalog.searchUserCatalog(it, text) }.orEmpty()
+                    }.let { Catalog.rank(q, it) }
                 }.getOrDefault(emptyList())
                 withContext(Dispatchers.Main) { results = results.map { if (it.first == s) s to found else it } }
             }
@@ -109,7 +116,10 @@ fun FindBooks(db: AkashicDatabase, config: ConfigStore, onOpen: (Int) -> Unit) {
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(b.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(listOf(b.author, b.source).filter { it.isNotBlank() }.joinToString(" · "), fontSize = 11.sp, color = Palette.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    listOfNotNull(b.author.takeIf { it.isNotBlank() }, b.language?.uppercase(), b.source).joinToString(" · "),
+                    fontSize = 11.sp, color = Palette.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
             }
             when {
                 added[key] != null -> TextButton(onClick = { onOpen(added.getValue(key)) }) { Text("Lire") }
@@ -161,13 +171,23 @@ fun FindBooks(db: AkashicDatabase, config: ConfigStore, onOpen: (Int) -> Unit) {
         Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 query, { query = it },
-                placeholder = { Text("Titre, auteur…") },
+                placeholder = { Text(when (mode) { SearchMode.AUTHOR -> "Nom de l'auteur"; SearchMode.TITLE -> "Titre du livre"; SearchMode.ALL -> "Titre, auteur…" }) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
                 modifier = Modifier.weight(1f),
             )
             TextButton(onClick = { showSources = true }) { Text("Sources") }
+        }
+        // What to search for, and in which language.
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            listOf(SearchMode.ALL to "Tout", SearchMode.TITLE to "Titre", SearchMode.AUTHOR to "Auteur").forEach { (m, label) ->
+                FilterChip(selected = mode == m, onClick = { mode = m }, label = { Text(label) }, modifier = Modifier.padding(end = 6.dp))
+            }
+            Text("·", color = Palette.TextFaint, modifier = Modifier.padding(horizontal = 4.dp))
+            listOf(null to "Toutes langues", "fr" to "Français", "en" to "English").forEach { (l, label) ->
+                FilterChip(selected = language == l, onClick = { language = l }, label = { Text(label) }, modifier = Modifier.padding(end = 6.dp))
+            }
         }
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
             sources.forEach { s ->
@@ -203,6 +223,15 @@ fun FindBooks(db: AkashicDatabase, config: ConfigStore, onOpen: (Int) -> Unit) {
                 if (list.size > shown.size) item(key = "more|$source") {
                     TextButton(onClick = { expanded = expanded + source }, modifier = Modifier.padding(start = 4.dp)) { Text("Tout voir (${list.size})") }
                 }
+            }
+            // Every source answered and none has the book: say why instead of leaving an empty page.
+            if (results.isNotEmpty() && results.all { it.second?.isEmpty() == true }) item(key = "why") {
+                Text(
+                    "Rien trouvé dans ces sources. Gutenberg et Wikisource n'ont que le domaine public (en France, les " +
+                        "auteurs morts depuis plus de 70 ans) ; Internet Archive a aussi des dépôts plus récents, mais pas " +
+                        "tout. Un livre acheté en epub (souvent sans DRM) s'importe avec « + » dans Ma bibliothèque.",
+                    color = Palette.TextMuted, fontSize = 13.sp, modifier = Modifier.padding(12.dp),
+                )
             }
             item { Spacer(Modifier.height(24.dp)) }
         }
@@ -284,4 +313,6 @@ private fun SourcesDialog(
 // The last search of "Trouver des livres", kept while the app runs (the screen is rebuilt when a book is opened).
 internal object FindState {
     var query = ""
+    var mode = SearchMode.ALL
+    var language: String? = "fr"
 }

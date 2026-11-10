@@ -24,7 +24,14 @@ data class CatalogBook(
     val coverUrl: String?,
     val downloadUrl: String?,  // direct EPUB link when known
     val archiveId: String? = null, // Internet Archive item: the EPUB file is looked up at download time
+    val language: String? = null, // "fr", "en"… when the source says so
 )
+
+// What the query names: anything, a title, or an author.
+enum class SearchMode { ALL, TITLE, AUTHOR }
+
+// One search: words, what they name, and the language wanted (null = any).
+data class BookQuery(val text: String, val mode: SearchMode = SearchMode.ALL, val language: String? = null)
 
 // A browsable OPDS page: sections to open, books to download, next page.
 data class OpdsPage(val title: String, val sections: List<Pair<String, String>>, val books: List<CatalogBook>, val next: String?)
@@ -42,45 +49,130 @@ object Catalog {
 
     // ---------------------------------------------------------------- built-in sources
 
-    fun gutenberg(query: String): List<CatalogBook> {
-        val xml = get("https://www.gutenberg.org/ebooks/search.opds/?query=${enc(query)}") ?: return emptyList()
+    // Gutenberg's own search syntax: "a." author, "t." title, "l.fr" language. Titles come as "Germinal (French)":
+    // the language goes to its own field. Gutenberg's order (most downloaded first) is kept for authors.
+    fun gutenberg(q: BookQuery): List<CatalogBook> {
+        val words = q.text.trim()
+        val term = when (q.mode) { SearchMode.AUTHOR -> "a.$words"; SearchMode.TITLE -> "t.$words"; SearchMode.ALL -> words } +
+            (q.language?.let { " l.$it" } ?: "")
+        val xml = get("https://www.gutenberg.org/ebooks/search.opds/?query=${enc(term)}") ?: return emptyList()
         return parseOpds(xml, "https://www.gutenberg.org/", GUTENBERG).books.mapNotNull { b ->
             // Search entries only point at the book's own feed (".../ebooks/<n>.opds"): the EPUB and cover follow a fixed pattern.
             val id = Regex("/ebooks/(\\d+)").find(b.downloadUrl ?: b.coverUrl ?: "")?.groupValues?.get(1) ?: return@mapNotNull null
+            val tag = Regex("""\s*\((French|English|German|Spanish|Italian|Portuguese|Latin|Dutch)\)$""").find(b.title)
             b.copy(
+                title = tag?.let { b.title.removeRange(it.range).trim() } ?: b.title,
+                language = tag?.groupValues?.get(1)?.let(::languageCode) ?: q.language ?: "en",
                 downloadUrl = "https://www.gutenberg.org/ebooks/$id.epub3.images",
                 coverUrl = "https://www.gutenberg.org/cache/epub/$id/pg$id.cover.medium.jpg",
             )
         }
     }
 
-    // Whole works: a hit on a sub-page ("Livre/Tome 1/Chapitre 3") stands for its work ("Livre"), once.
-    fun wikisource(query: String): List<CatalogBook> {
-        val json = get("https://fr.wikisource.org/w/api.php?action=query&list=search&srsearch=${enc(query)}&srnamespace=0&srlimit=40&format=json")
+    // French only. Author: the author's page ("Auteur:Émile Zola") lists their works. Otherwise a full-text search,
+    // where a hit on a sub-page ("Livre/Tome 1/Chapitre 3") stands for its work ("Livre"), once.
+    fun wikisource(q: BookQuery): List<CatalogBook> {
+        if (q.language != null && q.language != "fr") return emptyList()
+        fun book(title: String, author: String) =
+            CatalogBook(WIKISOURCE, title, author, null, "https://ws-export.wmcloud.org/?format=epub-3&lang=fr&page=${enc(title.replace(' ', '_'))}", language = "fr")
+
+        if (q.mode == SearchMode.AUTHOR) {
+            // The author page must carry every typed word in its name: the search otherwise returns the closest
+            // page, often another person (e.g. "damasio" landed on an unrelated author's works).
+            val typed = words(q.text)
+            val found = get("https://fr.wikisource.org/w/api.php?action=query&list=search&srsearch=${enc(q.text)}&srnamespace=102&srlimit=5&format=json")
+                ?.let { json ->
+                    runCatching {
+                        val hits = JSONObject(json).getJSONObject("query").getJSONArray("search")
+                        (0 until hits.length()).map { hits.getJSONObject(it).getString("title") }
+                            .firstOrNull { words(it.substringAfter(':')).containsAll(typed) }
+                    }.getOrNull()
+                }
+                ?: return emptyList()
+            val links = get("https://fr.wikisource.org/w/api.php?action=parse&page=${enc(found)}&prop=links&format=json")
+                ?.let { runCatching { JSONObject(it).getJSONObject("parse").getJSONArray("links") }.getOrNull() } ?: return emptyList()
+            val name = found.substringAfter(':')
+            return (0 until links.length()).map { links.getJSONObject(it) }
+                .filter { it.optInt("ns") == 0 && it.has("exists") }
+                .map { it.getString("*") }
+                .filter { '/' !in it && ',' !in it } // whole works; "Lettre…, dans Le Figaro" are articles
+                .distinct()
+                .map { book(it, name) }
+        }
+        val search = if (q.mode == SearchMode.TITLE) "intitle:${q.text}" else q.text
+        val json = get("https://fr.wikisource.org/w/api.php?action=query&list=search&srsearch=${enc(search)}&srnamespace=0&srlimit=40&format=json")
             ?: return emptyList()
         val hits = runCatching { JSONObject(json).getJSONObject("query").getJSONArray("search") }.getOrNull() ?: return emptyList()
         return (0 until hits.length()).map { hits.getJSONObject(it).getString("title") }
             .map { it.substringBefore('/') }
             .distinct()
-            .take(12)
-            .map { title ->
-                CatalogBook(WIKISOURCE, title, "", null, "https://ws-export.wmcloud.org/?format=epub-3&lang=fr&page=${enc(title.replace(' ', '_'))}")
-            }
+            .take(15)
+            .map { book(it, "") }
     }
 
     // Texts that have an EPUB and are not restricted (loans under DRM are left out).
-    fun archive(query: String): List<CatalogBook> {
-        val q = "($query) AND mediatype:texts AND format:EPUB AND NOT access-restricted-item:true"
-        val json = get("https://archive.org/advancedsearch.php?q=${enc(q)}&fl[]=identifier&fl[]=title&fl[]=creator&rows=20&output=json")
+    //   * Author: the creator field OR the title — many uploads have no creator, only "Titre - Auteur" as title.
+    //   * Language: not filtered — Internet Archive labels are unreliable (a French upload can say "eng"); rank() only
+    //     moves matching items up. Sent in the query, it also made their search fail ("BACKEND_ERROR").
+    fun archive(q: BookQuery): List<CatalogBook> {
+        val words = q.text.trim()
+        val field = when (q.mode) {
+            SearchMode.AUTHOR -> "(creator:($words) OR title:($words))"
+            SearchMode.TITLE -> "title:($words)"
+            SearchMode.ALL -> "($words)"
+        }
+        val search = "$field AND mediatype:texts AND format:EPUB AND NOT access-restricted-item:true"
+        val json = get("https://archive.org/advancedsearch.php?q=${enc(search)}&fl[]=identifier&fl[]=title&fl[]=creator&fl[]=language&sort[]=downloads+desc&rows=60&output=json")
             ?: return emptyList()
         val docs = runCatching { JSONObject(json).getJSONObject("response").getJSONArray("docs") }.getOrNull() ?: return emptyList()
+        fun first(o: Any?) = if (o is JSONArray) o.optString(0) else o?.toString().orEmpty()
         return (0 until docs.length()).mapNotNull { i ->
             val d = docs.getJSONObject(i)
             val id = d.optString("identifier").takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            val creator = d.opt("creator").let { if (it is JSONArray) it.optString(0) else it?.toString().orEmpty() }
-            CatalogBook(ARCHIVE, d.optString("title", id), creator, "https://archive.org/services/img/$id", null, archiveId = id)
+            CatalogBook(
+                ARCHIVE, d.optString("title", id), first(d.opt("creator")), "https://archive.org/services/img/$id", null,
+                archiveId = id, language = first(d.opt("language")).takeIf { it.isNotBlank() }?.let(::languageCode),
+            )
         }
     }
+
+    private fun languageCode(name: String) = when (name.lowercase()) {
+        "french", "fre", "fra", "fr" -> "fr"
+        "english", "eng", "en" -> "en"
+        "german", "ger", "deu" -> "de"
+        "spanish", "spa" -> "es"
+        "italian", "ita" -> "it"
+        else -> name.lowercase().take(3)
+    }
+
+    // ---------------------------------------------------------------- relevance
+
+    // Re-sort of one source's hits (cheap, local), like the music search: share of the typed words found in the title
+    // (and in the author unless searching by title), whole title typed, author named; the source's own order breaks
+    // ties. Same title + author shown once. In author mode the source already matched the author: only duplicates go.
+    fun rank(q: BookQuery, books: List<CatalogBook>): List<CatalogBook> {
+        val seen = HashSet<String>()
+        val unique = books.filter { seen.add(norm(it.title) + "|" + norm(it.author)) }
+        // Author mode: the source already matched the author; only the asked language moves books up (stable sort).
+        if (q.mode == SearchMode.AUTHOR) return unique.sortedByDescending { q.language != null && it.language == q.language }
+        val words = words(q.text)
+        if (words.isEmpty()) return unique
+        return unique.withIndex().sortedByDescending { (i, b) ->
+            val title = words(b.title)
+            val author = words(b.author)
+            val pool = if (q.mode == SearchMode.TITLE) title else title + author
+            var s = 50.0 * words.count { it in pool } / words.size
+            if (title.isNotEmpty() && words.containsAll(title)) s += 20
+            if (author.isNotEmpty() && author.any { it in words }) s += 8
+            if (q.language != null && b.language == q.language) s += 5
+            s - i * 0.3
+        }.map { it.value }
+    }
+
+    private fun norm(s: String) = java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD)
+        .replace(Regex("\\p{Mn}+"), "").replace(Regex("[^a-z0-9]+"), " ").trim()
+
+    private fun words(s: String) = norm(s).split(' ').filter { it.length > 1 }.toSet()
 
     // The item's public EPUB file, if it has one.
     private fun archiveEpub(id: String): String? {
