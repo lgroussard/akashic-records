@@ -23,6 +23,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.akashicrecords.data.AkashicDatabase
 import com.akashicrecords.data.ConfigStore
+import com.akashicrecords.journaux.JournauxSection
+import com.akashicrecords.music.MiniPlayer
+import com.akashicrecords.music.MusicSection
+import com.akashicrecords.music.rememberPlayerConnection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -37,13 +41,18 @@ class MainActivity : ComponentActivity() {
         val config = ConfigStore(applicationContext)
         setContent {
             MaterialTheme(colorScheme = AkashicColorScheme, typography = AkashicTypography) {
-                AkashicApp(db, config)
+                // Default text colour for every Text that sets none (M3 falls back to black otherwise).
+                CompositionLocalProvider(LocalContentColor provides Palette.Text) {
+                    AkashicApp(db, config)
+                }
             }
         }
     }
 }
 
-private val SECTIONS = listOf("Organisation", "Journaux", "Collections", "Archives")
+// "Musique" is a header button (♪ floating player) on the desktop; on the phone it is a
+// section of its own, with a persistent mini-player at the bottom of every section.
+private val SECTIONS = listOf("Journaux", "Musique", "Organisation", "Collections", "Archives")
 
 @Composable
 fun AkashicApp(db: AkashicDatabase, config: ConfigStore) {
@@ -51,37 +60,55 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore) {
     var section by remember {
         mutableStateOf(restored?.takeIf { SECTIONS.contains(it) } ?: "Journaux")
     }
+    val player = rememberPlayerConnection()
+    var showSettings by remember { mutableStateOf(false) }
+    // Bumped after a PC import so every section re-reads the database.
+    var dataVersion by remember { mutableStateOf(0) }
 
-    Box(Modifier.fillMaxSize().background(Palette.AppBg)) {
+    Box(Modifier.fillMaxSize().background(Palette.AppBg).systemBarsPadding().imePadding()) {
         Column(Modifier.fillMaxSize()) {
             Row(
-                Modifier.fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                SECTIONS.forEach { s ->
-                    Spacer(Modifier.width(6.dp))
-                    FilterChip(
-                        selected = s == section,
-                        onClick = { section = s; config.saveSection(s) },
-                        label = { Text(s, maxLines = 1) },
-                    )
+                Row(Modifier.weight(1f).horizontalScroll(rememberScrollState())) {
+                    SECTIONS.forEach { s ->
+                        Spacer(Modifier.width(6.dp))
+                        FilterChip(
+                            selected = s == section,
+                            onClick = { section = s; config.saveSection(s) },
+                            label = { Text(s, maxLines = 1) },
+                        )
+                    }
+                }
+                TextButton(onClick = { showSettings = true }) { Text("⚙", fontSize = 18.sp) }
+            }
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                key(dataVersion) {
+                    Column(Modifier.fillMaxSize()) {
+                        when (section) {
+                            "Organisation" -> OrganisationSection(db, config)
+                            "Journaux" -> JournauxSection(db, config)
+                            "Musique" -> MusicSection(db, config, player)
+                            "Collections" -> CollectionsSection(db, config)
+                            "Archives" -> ArchivesSection(db, config)
+                        }
+                    }
                 }
             }
-            when (section) {
-                "Organisation" -> OrganisationSection(db, config)
-                "Journaux" -> JournauxSection(db, config)
-                "Collections" -> CollectionsSection(db, config)
-                "Archives" -> ArchivesSection(db, config)
-            }
+            MiniPlayer(player, db) { section = "Musique"; config.saveSection("Musique") }
         }
+    }
+
+    if (showSettings) {
+        SettingsDialog(db, onDismiss = { showSettings = false }, onImported = { dataVersion++ })
     }
 }
 
 // ---- Shared building blocks ----
 
 @Composable
-private fun SectionTitle(title: String, subtitle: String? = null) {
+internal fun SectionTitle(title: String, subtitle: String? = null) {
     Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         if (subtitle != null) {
@@ -91,7 +118,7 @@ private fun SectionTitle(title: String, subtitle: String? = null) {
 }
 
 @Composable
-private fun SubTabs(options: List<Pair<String, String>>, active: String, onSelect: (String) -> Unit) {
+internal fun SubTabs(options: List<Pair<String, String>>, active: String, onSelect: (String) -> Unit) {
     Row(
         Modifier.fillMaxWidth()
             .horizontalScroll(rememberScrollState())
@@ -109,7 +136,7 @@ private fun SubTabs(options: List<Pair<String, String>>, active: String, onSelec
 }
 
 @Composable
-private fun CardBlock(content: @Composable ColumnScope.() -> Unit) {
+internal fun CardBlock(content: @Composable ColumnScope.() -> Unit) {
     Column(
         Modifier.fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 4.dp)
@@ -217,157 +244,6 @@ private fun OrganisationTransitionDetail(db: AkashicDatabase, id: Int) {
         steps.value.forEach { s -> Text("${if (s.IsDone) "☑" else "☐"}  ${s.Text}") }
     }
 }
-
-// ---- Journaux ----
-
-@Composable
-private fun JournauxSection(db: AkashicDatabase, config: ConfigStore) {
-    val restored = remember { config.load().journauxActiveTab }
-    var tab by remember { mutableStateOf(restored ?: "Personal") }
-    SectionTitle("Journaux", "Journal personnel, recettes, poésie et archive artistique.")
-    SubTabs(
-        listOf(
-            "Journal personnel" to "Personal",
-            "Recettes" to "Recipes",
-            "Poésie" to "Poetry",
-            "Archive artistique" to "Artistic",
-        ),
-        tab,
-    ) { tab = it; config.saveJournauxTab(it) }
-
-    when (tab) {
-        "Personal" -> PersonalJournal(db)
-        "Recipes" -> RecipesJournal(db)
-        "Poetry" -> PoetryJournal(db)
-        "Artistic" -> ArtisticJournal(db)
-    }
-}
-
-@Composable
-private fun PersonalJournal(db: AkashicDatabase) {
-    val entries = remember { mutableStateOf<List<com.akashicrecords.data.JournalEntry>>(emptyList()) }
-    LaunchedEffect(db) { withContext(Dispatchers.IO) { entries.value = db.journalEntryDao().getAll() } }
-    var selected by remember { mutableStateOf<Int?>(null) }
-    LazyColumn(Modifier.fillMaxWidth()) {
-        items(entries.value) { e ->
-            CardBlock {
-                Text(
-                    "${e.EntryDate} — ${e.Title}",
-                    fontWeight = if (e.Id == selected) FontWeight.Bold else FontWeight.Normal,
-                    modifier = Modifier.clickable { selected = e.Id },
-                )
-                if (e.Id == selected) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(e.Text, color = Palette.TextMuted)
-                    if (e.Tags.isNotBlank()) {
-                        Spacer(Modifier.height(4.dp))
-                        Text(e.Tags, fontSize = 11.sp, color = Palette.TextFaint)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RecipesJournal(db: AkashicDatabase) {
-    val recipes = remember { mutableStateOf<List<com.akashicrecords.data.Recipe>>(emptyList()) }
-    LaunchedEffect(db) { withContext(Dispatchers.IO) { recipes.value = db.recipeDao().getAll() } }
-    var selected by remember { mutableStateOf<Int?>(null) }
-    LazyColumn(Modifier.fillMaxWidth()) {
-        items(recipes.value) { r ->
-            CardBlock {
-                Text(
-                    r.Title,
-                    fontWeight = if (r.Id == selected) FontWeight.Bold else FontWeight.Normal,
-                    modifier = Modifier.clickable { selected = r.Id },
-                )
-                if (r.Id == selected) {
-                    Spacer(Modifier.height(4.dp))
-                    if (r.Ingredients.isNotBlank()) Text("Ingrédients : ${r.Ingredients}", color = Palette.TextMuted)
-                    if (r.Instructions.isNotBlank()) Text("Préparation : ${r.Instructions}", color = Palette.TextMuted)
-                    if (r.Notes.isNotBlank()) Text(r.Notes, fontSize = 11.sp, color = Palette.TextFaint)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun PoetryJournal(db: AkashicDatabase) {
-    val recueils = remember { mutableStateOf<List<com.akashicrecords.data.Recueil>>(emptyList()) }
-    val poems = remember { mutableStateOf<List<com.akashicrecords.data.Poem>>(emptyList()) }
-    var recueilId by remember { mutableStateOf<Int?>(null) }
-    LaunchedEffect(db) { withContext(Dispatchers.IO) { recueils.value = db.recueilDao().getAll() } }
-    LaunchedEffect(db, recueilId) {
-        recueilId?.let { id -> withContext(Dispatchers.IO) { poems.value = db.poemDao().forRecueil(id) } }
-    }
-    var selectedPoem by remember { mutableStateOf<Int?>(null) }
-    LazyColumn(Modifier.fillMaxWidth()) {
-        items(recueils.value) { rec ->
-            CardBlock {
-                Text(
-                    rec.Title,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.clickable { recueilId = rec.Id },
-                )
-                if (rec.Summary.isNotBlank()) Text(rec.Summary, fontSize = 11.sp, color = Palette.TextMuted)
-            }
-        }
-        items(poems.value) { p ->
-            CardBlock {
-                Text(
-                    p.Title,
-                    fontWeight = if (p.Id == selectedPoem) FontWeight.Bold else FontWeight.Normal,
-                    modifier = Modifier.clickable { selectedPoem = p.Id },
-                )
-                if (p.Id == selectedPoem) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        p.Text,
-                        color = Palette.TextMuted,
-                        textAlign = when (p.TextAlignment.lowercase()) {
-                            "center" -> TextAlign.Center
-                            "right" -> TextAlign.Right
-                            else -> TextAlign.Start
-                        },
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ArtisticJournal(db: AkashicDatabase) {
-    val projects = remember { mutableStateOf<List<com.akashicrecords.data.ArtisticProject>>(emptyList()) }
-    LaunchedEffect(db) { withContext(Dispatchers.IO) { projects.value = db.artisticProjectDao().getAll() } }
-    var selected by remember { mutableStateOf<Int?>(null) }
-    val elements = remember { mutableStateOf<List<com.akashicrecords.data.CanvasElement>>(emptyList()) }
-    LaunchedEffect(db, selected) {
-        selected?.let { id -> withContext(Dispatchers.IO) { elements.value = db.canvasElementDao().forProject(id) } }
-    }
-    LazyColumn(Modifier.fillMaxWidth()) {
-        items(projects.value) { p ->
-            CardBlock {
-                Text(
-                    p.Title,
-                    fontWeight = if (p.Id == selected) FontWeight.Bold else FontWeight.Normal,
-                    modifier = Modifier.clickable { selected = p.Id },
-                )
-                if (p.Id == selected) {
-                    Spacer(Modifier.height(4.dp))
-                    elements.value.forEach { el ->
-                        val body = el.TextContent ?: el.ImagePath ?: "Référence"
-                        Text("· ${canvasTypeLabel(el.Type)} : $body", fontSize = 12.sp, color = Palette.TextMuted)
-                    }
-                }
-            }
-        }
-    }
-}
-
-private fun canvasTypeLabel(type: Int) = listOf("Texte", "Image", "Référence").getOrElse(type) { "?" }
 
 // ---- Collections ----
 

@@ -44,6 +44,16 @@ class ConfigStore(context: Context) {
     fun saveArchivesTab(tab: String?) = putString(ConfigKeys.ARCHIVES_ACTIVE_TAB, tab)
     fun saveCollectionsCategory(c: String?) = putString(ConfigKeys.COLLECTIONS_ACTIVE_CATEGORY, c)
 
+    // Mobile-only: folder (relative to the shared storage root) scanned as the music library.
+    // Mirrors the desktop <exe>/music/ folder: top-level subfolders are albums.
+    fun musicFolder(): String = prefs.getString(MUSIC_FOLDER, null) ?: DEFAULT_MUSIC_FOLDER
+    fun saveMusicFolder(folder: String) = putString(MUSIC_FOLDER, folder.trim().trim('/'))
+
+    companion object {
+        const val MUSIC_FOLDER = "MobileMusicFolder"
+        const val DEFAULT_MUSIC_FOLDER = "Music/Akashic"
+    }
+
     private fun putString(key: String, value: String?) {
         prefs.edit().apply {
             if (value == null) remove(key) else putString(key, value)

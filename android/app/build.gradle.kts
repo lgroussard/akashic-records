@@ -12,6 +12,9 @@ android {
         applicationId = "com.akashicrecords"
         minSdk = 24
         targetSdk = 34
+
+        // yt-dlp ships native Python per ABI: phones (arm64) + emulator (x86_64) only, to keep the APK small.
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
         versionCode = 1
         versionName = "1.0"
     }
@@ -29,6 +32,10 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+    }
+    // youtubedl-android runs its bundled Python from extracted .so files.
+    packaging {
+        jniLibs { useLegacyPackaging = true }
     }
     buildFeatures {
         compose = true
@@ -50,6 +57,11 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.media3:media3-exoplayer:1.4.1")
+    implementation("androidx.media3:media3-session:1.4.1")
+    // yt-dlp + Python + ffmpeg bundled for on-phone downloads (same tool as the desktop downloader).
+    implementation("io.github.junkfood02.youtubedl-android:library:0.17.2")
+    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.17.2")
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")

@@ -321,6 +321,15 @@ interface MusicTrackDao {
 
     @Query("SELECT * FROM MusicTrack ORDER BY Album, Title")
     suspend fun getAll(): List<MusicTrack>
+
+    @Query("UPDATE MusicTrack SET Title = :title, Artist = :artist WHERE Id = :id")
+    suspend fun updateMetadata(id: Int, title: String, artist: String)
+
+    @Query("UPDATE MusicTrack SET Album = :album WHERE Id = :id")
+    suspend fun updateAlbum(id: Int, album: String)
+
+    @Query("UPDATE MusicTrack SET DurationSeconds = :seconds WHERE Id = :id")
+    suspend fun updateDuration(id: Int, seconds: Double)
 }
 
 @Dao
@@ -330,6 +339,10 @@ interface MoodDao {
 
     @Query("DELETE FROM Mood WHERE Id = :id")
     suspend fun deleteById(id: Int)
+
+    // Desktop MoodRepository.Delete removes the TrackMood links first (no FK cascade).
+    @Query("DELETE FROM TrackMood WHERE MoodId = :id")
+    suspend fun deleteLinksForMood(id: Int)
 
     @Query("SELECT * FROM Mood ORDER BY Name")
     suspend fun getAll(): List<Mood>
@@ -345,6 +358,16 @@ interface TrackMoodDao {
 
     @Query("SELECT * FROM TrackMood WHERE TrackId = :trackId")
     suspend fun forTrack(trackId: Int): List<TrackMood>
+
+    @Query("SELECT TrackId FROM TrackMood WHERE MoodId = :moodId")
+    suspend fun trackIdsForMood(moodId: Int): List<Int>
+
+    @Query("DELETE FROM TrackMood WHERE TrackId = :trackId AND MoodId = :moodId")
+    suspend fun unlink(trackId: Int, moodId: Int)
+
+    // Same idempotent insert as desktop TrackMoodRepository.Add.
+    @Query("INSERT INTO TrackMood (TrackId, MoodId) SELECT :trackId, :moodId WHERE NOT EXISTS (SELECT 1 FROM TrackMood WHERE TrackId = :trackId AND MoodId = :moodId)")
+    suspend fun link(trackId: Int, moodId: Int)
 }
 
 @Dao
@@ -384,6 +407,9 @@ interface DownloadItemDao {
 
     @Query("SELECT * FROM DownloadItem ORDER BY AddedAt")
     suspend fun getAll(): List<DownloadItem>
+
+    @Query("SELECT COUNT(*) FROM DownloadItem WHERE Url = :url")
+    suspend fun countByUrl(url: String): Int
 }
 
 @Dao
