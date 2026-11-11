@@ -109,6 +109,7 @@ data class Launch(val section: String, val tab: String?, val date: LocalDate?, v
     companion object {
         const val EXTRA_TAB = "akashic.tab"
         const val EXTRA_ITEM = "akashic.item" // a poem or recipe id, opened directly
+        const val PLAYER = "Player" // section value opening the full player (music notification)
 
         fun from(intent: Intent?): Launch? {
             val section = intent?.getStringExtra(Reminders.EXTRA_SECTION) ?: return null
@@ -177,6 +178,11 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
     }
 
     fun handle(l: Launch) {
+        // The music notification: the full player on « À suivre », over whatever screen was open.
+        if (l.section == Launch.PLAYER) {
+            if (Modules.isEnabled(disabled, "Musique")) fullPlayer = false
+            return
+        }
         if (l.section in SECTIONS && Modules.isEnabled(disabled, l.section)) {
             go(l.section)
             when (l.section) {

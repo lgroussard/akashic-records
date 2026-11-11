@@ -1,5 +1,7 @@
 package com.akashicrecords.music
 
+import android.app.PendingIntent
+import android.content.Intent
 import android.os.Bundle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -11,7 +13,10 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
+import com.akashicrecords.Launch
+import com.akashicrecords.MainActivity
 import com.akashicrecords.R
+import com.akashicrecords.calendar.Reminders
 import com.akashicrecords.data.AkashicDatabase
 import com.akashicrecords.data.ConfigStore
 import com.google.common.util.concurrent.Futures
@@ -102,6 +107,7 @@ class PlaybackService : MediaSessionService() {
         session = MediaSession.Builder(this, sessionPlayer)
             .setCallback(callback)
             .setSessionExtras(slotReservation)
+            .setSessionActivity(openPlayer())
             .build()
         player.addListener(object : Player.Listener {
             override fun onEvents(p: Player, events: Player.Events) {
@@ -187,6 +193,15 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
+
+    // A tap on the notification (or lock-screen player) opens the app on the full player's « À suivre ».
+    private fun openPlayer(): PendingIntent {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra(Reminders.EXTRA_SECTION, Launch.PLAYER)
+        }
+        return PendingIntent.getActivity(this, 7301, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    }
 
     // Swiping the app away while paused stops the service; while playing, music continues.
     override fun onTaskRemoved(rootIntent: android.content.Intent?) {
