@@ -2,7 +2,7 @@ using AkashicRecords.Domain;
 
 namespace AkashicRecords.Infrastructure.Persistence;
 
-// Scans the portable <exe>/music/ folder for .mp3 files and syncs them into the db.
+// Scans the portable <exe>/music/ folder for audio files (.mp3, .m4a) and syncs them into the db.
 // The user fills the folder themselves; no ID3 metadata is read (no external lib), so
 // Title defaults to the file name and Artist stays empty until the user edits it.
 public sealed class MusicLibraryScanner
@@ -27,7 +27,7 @@ public sealed class MusicLibraryScanner
             var known = new Dictionary<string, MusicTrack>(StringComparer.OrdinalIgnoreCase);
             foreach (var track in _trackRepository.GetAll()) known.TryAdd(track.FilePath.Replace('\\', '/'), track);
 
-            foreach (var fullPath in Directory.EnumerateFiles(MusicFolder, "*.mp3", SearchOption.AllDirectories))
+            foreach (var fullPath in AudioFiles())
             {
                 try
                 {
@@ -74,7 +74,7 @@ public sealed class MusicLibraryScanner
     private void PruneMissingTracks()
     {
         var present = new HashSet<string>(
-            Directory.EnumerateFiles(MusicFolder, "*.mp3", SearchOption.AllDirectories)
+            AudioFiles()
                 .Select(f => Path.Combine("music", UnderMusic(f)))
                 .Select(p => p.Replace('\\', '/')),
             StringComparer.OrdinalIgnoreCase);
@@ -88,6 +88,14 @@ public sealed class MusicLibraryScanner
             }
         }
     }
+
+    // The audio formats the library takes: the downloader's mp3, and m4a (AAC, e.g. an iTunes collection copied in),
+    // which the WPF player and Android both play.
+    private static readonly HashSet<string> AudioExtensions = new(StringComparer.OrdinalIgnoreCase) { ".mp3", ".m4a" };
+
+    private static IEnumerable<string> AudioFiles() =>
+        Directory.EnumerateFiles(MusicFolder, "*", SearchOption.AllDirectories)
+            .Where(f => AudioExtensions.Contains(Path.GetExtension(f)));
 
     // Path of a file/folder found under MusicFolder, relative to it. Directory.EnumerateFiles returns paths that start
     // with the folder string it was given, so the prefix is simply cut off: Path.GetRelativePath resolved both paths on

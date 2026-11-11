@@ -1531,7 +1531,7 @@ public partial class MusicPlayerWindow : Window
 
     private void ShowNoTracks()
     {
-        StatusText.Text = "Aucune piste. Ajoutez des .mp3 dans le dossier music puis Rescanner.";
+        StatusText.Text = "Aucune piste. Ajoutez des .mp3 ou .m4a dans le dossier music puis Rescanner.";
         StatusText.Visibility = Visibility.Visible;
     }
 
