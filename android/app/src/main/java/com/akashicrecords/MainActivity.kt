@@ -131,7 +131,7 @@ private val NAV = listOf(
     NavItem("Lecture", "Lecture", iconRes = R.drawable.g_book),
 )
 // Collections moved here when Lecture took its place in the bar (phone only).
-private val MORE = listOf("Organisation", "Collections", "Archives")
+private val MORE = listOf("Organisation", "Collections", "Archives", "Mots croisés")
 private val SECTIONS = NAV.map { it.section } + MORE
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -262,6 +262,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
                         "Collections" -> CollectionsSection(db, config)
                         "Lecture" -> com.akashicrecords.reading.LectureSection(db, config)
                         "Archives" -> ArchivesSection(db, config)
+                        "Mots croisés" -> com.akashicrecords.crossword.CrosswordSection(db)
                     }
                 }
             }

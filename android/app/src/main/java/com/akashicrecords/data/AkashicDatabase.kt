@@ -49,8 +49,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BookHighlight::class,
         RefBoard::class,
         RefImage::class,
+        CrosswordGame::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -94,6 +95,7 @@ abstract class AkashicDatabase : RoomDatabase() {
     abstract fun bookHighlightDao(): BookHighlightDao
     abstract fun refBoardDao(): RefBoardDao
     abstract fun refImageDao(): RefImageDao
+    abstract fun crosswordGameDao(): CrosswordGameDao
 
     companion object {
         @Volatile
@@ -104,7 +106,7 @@ abstract class AkashicDatabase : RoomDatabase() {
                 context.applicationContext,
                 AkashicDatabase::class.java,
                 "akashic.db",
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build().also { instance = it }
 
         // v2: phone-only poem formatting next to the PC columns (the desktop schema has the same
         // columns, so imports and the future sync carry both layouts).
@@ -147,6 +149,17 @@ abstract class AkashicDatabase : RoomDatabase() {
                         "`BoardId` INTEGER, `ImagePath` TEXT NOT NULL, `Title` TEXT NOT NULL, `Author` TEXT NOT NULL, " +
                         "`Source` TEXT NOT NULL, `SourceUrl` TEXT, `PageUrl` TEXT, `Width` INTEGER NOT NULL, " +
                         "`Height` INTEGER NOT NULL, `Note` TEXT NOT NULL, `CreatedAt` TEXT NOT NULL)",
+                )
+            }
+        }
+
+        // v5: Mots croisés (phone only). Same table in the desktop SchemaInitializer.
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `CrosswordGame` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`Title` TEXT NOT NULL, `Source` TEXT NOT NULL, `PuzzleJson` TEXT NOT NULL, `Progress` TEXT NOT NULL, " +
+                        "`CreatedAt` TEXT NOT NULL, `UpdatedAt` TEXT NOT NULL, `CompletedAt` TEXT)",
                 )
             }
         }

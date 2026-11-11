@@ -365,6 +365,18 @@ public sealed class SchemaInitializer
                     Note TEXT NOT NULL,
                     CreatedAt TEXT NOT NULL
                 );
+
+                -- Mots croisés (phone only, Room v5): same table, no screen on the PC.
+                CREATE TABLE IF NOT EXISTS CrosswordGame (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Title TEXT NOT NULL,
+                    Source TEXT NOT NULL,
+                    PuzzleJson TEXT NOT NULL,
+                    Progress TEXT NOT NULL,
+                    CreatedAt TEXT NOT NULL,
+                    UpdatedAt TEXT NOT NULL,
+                    CompletedAt TEXT
+                );
                 """;
             command.ExecuteNonQuery();
         }
