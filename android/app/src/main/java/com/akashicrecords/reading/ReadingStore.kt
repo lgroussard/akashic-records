@@ -138,10 +138,12 @@ object ReadingStore {
         null
     }.getOrNull()
 
-    // Where reading stopped; overall progress = chapters done + share of the current one.
-    suspend fun savePosition(db: AkashicDatabase, bookId: Int, chapter: Int, progression: Double, chapterCount: Int) {
+    // Where reading stopped. Overall progress: given by the epub (chapters weighted by their length), else
+    // chapters (or pages) done + share of the current one.
+    suspend fun savePosition(db: AkashicDatabase, bookId: Int, chapter: Int, progression: Double, chapterCount: Int, overallRead: Double? = null) {
         val book = db.bookDao().getById(bookId) ?: return
-        val overall = if (chapterCount <= 0) 0.0 else ((chapter + progression.coerceIn(0.0, 1.0)) / chapterCount).coerceIn(0.0, 1.0)
+        val overall = overallRead?.coerceIn(0.0, 1.0)
+            ?: if (chapterCount <= 0) 0.0 else ((chapter + progression.coerceIn(0.0, 1.0)) / chapterCount).coerceIn(0.0, 1.0)
         db.bookDao().update(book.copy(Locator = "$chapter:$progression", Progress = overall, LastReadAt = nowIso()))
     }
 

@@ -19,8 +19,20 @@ class Epub private constructor(
     // Zip paths of the reading order (spine), e.g. "OEBPS/Text/chap01.xhtml".
     val chapters: List<String>,
     val toc: List<TocEntry>,
+    // Size of each chapter (bytes of its file): its share of the whole book in the progress bar, so a
+    // two-line title page does not count as much as a 40-page chapter.
+    private val weights: List<Long>,
 ) {
     fun read(path: String): ByteArray? = ZipFile(file).use { zip -> zip.getEntry(path)?.let { e -> zip.getInputStream(e).use { it.readBytes() } } }
+
+    private val total = weights.sum().coerceAtLeast(1L).toDouble()
+
+    // Share of the whole book read (0..1) at [progression] (0..1) through [chapter].
+    fun overall(chapter: Int, progression: Double): Double {
+        if (chapter !in weights.indices) return if (chapter >= weights.size) 1.0 else 0.0
+        val before = weights.subList(0, chapter).sum()
+        return ((before + weights[chapter] * progression.coerceIn(0.0, 1.0)) / total).coerceIn(0.0, 1.0)
+    }
 
     companion object {
         // Throws on anything that is not a readable EPUB (no container, no package, empty spine).
@@ -79,6 +91,7 @@ class Epub private constructor(
                 cover?.takeIf { zip.getEntry(it) != null },
                 chapters,
                 toc.ifEmpty { chapters.indices.map { TocEntry("Chapitre ${it + 1}", it, 0) } },
+                chapters.map { path -> zip.getEntry(path).let { e -> if (e.size > 0) e.size else e.compressedSize.coerceAtLeast(1L) } },
             )
         }
 

@@ -302,7 +302,7 @@ internal fun ReaderScreen(db: AkashicDatabase, config: ConfigStore, bookId: Int,
         val e = epub ?: return@LaunchedEffect
         delay(500)
         val progression = if (pages > 1) page.toDouble() / (pages - 1) else 0.0
-        withContext(Dispatchers.IO) { ReadingStore.savePosition(db, bookId, chapter, progression, e.chapters.size) }
+        withContext(Dispatchers.IO) { ReadingStore.savePosition(db, bookId, chapter, progression, e.chapters.size, e.overall(chapter, progression)) }
     }
     // Highlights redrawn whenever the list changes (saved, edited, deleted).
     LaunchedEffect(highlights, web) { web?.setHighlights(marksOf(chapter)) }
@@ -376,12 +376,13 @@ internal fun ReaderScreen(db: AkashicDatabase, config: ConfigStore, bookId: Int,
                 }
             }
             Column(Modifier.fillMaxWidth().align(Alignment.BottomCenter).background(Palette.Surface1.copy(alpha = 0.96f)).padding(horizontal = 16.dp, vertical = 8.dp)) {
-                val overall = ((chapter + if (pages > 1) page.toFloat() / (pages - 1) else 0f) / e.chapters.size).coerceIn(0f, 1f)
-                LinearProgressIndicator(progress = { overall }, Modifier.fillMaxWidth().height(3.dp), color = Palette.Accent)
-                Text(
-                    "Chapitre ${chapter + 1}/${e.chapters.size} · page ${page + 1}/$pages · ${(overall * 100).toInt()} %",
-                    fontSize = 11.sp, color = Palette.TextMuted, modifier = Modifier.padding(top = 4.dp),
-                )
+                // The whole book, chapters weighted by their length (not one equal slice per chapter).
+                val overall = e.overall(chapter, if (pages > 1) page.toDouble() / (pages - 1) else 0.0).toFloat()
+                LinearProgressIndicator(progress = { overall }, Modifier.fillMaxWidth().height(4.dp), color = Palette.Accent)
+                Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                    Text("${(overall * 100).toInt()} % du livre", fontSize = 12.sp, color = Palette.Text, modifier = Modifier.weight(1f))
+                    Text("chapitre ${chapter + 1}/${e.chapters.size}", fontSize = 11.sp, color = Palette.TextMuted)
+                }
             }
         }
     }
