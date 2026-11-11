@@ -34,7 +34,17 @@ var skipStarts = new[]
 };
 var wordShape = new Regex("^[a-zàâäçéèêëîïôöùûüÿœæ]+$");
 // A clue that only makes sense next to another one, or carries codes: not usable alone in a grid.
-var refersElsewhere = new Regex(@"#|\d{3,}|\b(ces|cette|celui-ci|celle-ci|ceux-ci|cet|ce dernier|cette dernière|idem|voir)\b", RegexOptions.IgnoreCase);
+// Senses from these fields are too technical for a grid ("Groupement alkyle dérivé du propane"): skipped, and a word
+// with only such senses is left out. Everyday fields (zoology, botany, cooking, music, astronomy…) stay: they carry
+// the usual sense of CHIEN, ROSE or LUNE.
+var technical = new HashSet<string>
+{
+    "chemistry", "biochemistry", "medicine", "surgery", "pharmacology", "linguistic", "grammar", "computing",
+    "programming", "mineralogy", "geology", "metrology", "mathematics", "geometry", "technical", "heraldry",
+    "electricity", "mechanical", "telecommunications", "metallurgy", "typography", "astronautics", "biology",
+    "sexuality", "law", "finance",
+};
+var refersElsewhere = new Regex(@"#|\d{3,}|\b(ces|cette|celui-ci|celle-ci|ceux-ci|cet|de ce|à ce|ce dernier|cette dernière|idem|voir)\b", RegexOptions.IgnoreCase);
 
 // Best clue per normalized word: the one from the entry with the most translations (the most current sense).
 var best = new Dictionary<string, (string Clue, int Translations)>();
@@ -66,6 +76,7 @@ using (var reader = new StreamReader(input, Encoding.UTF8))
         foreach (var s in senses.EnumerateArray())
         {
             if (s.TryGetProperty("form_of", out _)) continue;
+            if (s.TryGetProperty("topics", out var topics) && topics.EnumerateArray().Any(t => technical.Contains(t.GetString() ?? ""))) continue;
             if (s.TryGetProperty("tags", out var tags) && tags.EnumerateArray().Any(t => skipTags.Contains(t.GetString() ?? ""))) continue;
             if (!s.TryGetProperty("glosses", out var glosses) || glosses.GetArrayLength() == 0) continue;
             // The first gloss: a sub-sense lists its parent's first, and its own often refers back to it ("ces…").
