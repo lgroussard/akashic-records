@@ -2,8 +2,9 @@ package com.akashicrecords.music
 
 // The iTunes Search API allows about 20 requests a minute per Internet connection (the PC and the phone share it at
 // home). Every iTunes request of the app goes through here:
-//   * a sliding one-minute window counts this app's requests; the free search gets SEARCH_BUDGET of them, so typing
-//     can never starve the Similaires list and the automatic chaining, which get the rest up to TOTAL_BUDGET;
+//   * a sliding one-minute window counts this app's requests. The background ones (Similaires list, automatic
+//     chaining, clip lookups) get at most BACKGROUND_BUDGET of their own; the search may use up to TOTAL_BUDGET, so
+//     playing songs can never use up the minute and lock the search out (it keeps at least 13);
 //   * when iTunes answers 403/429 anyway (e.g. the other device used the quota), nothing is sent for a minute —
 //     insisting would only extend the block.
 // Requests that are not let through simply return nothing; callers treat that like "no network". Same rules on the
@@ -11,9 +12,10 @@ package com.akashicrecords.music
 object ItunesGate {
     private const val WINDOW_MS = 60_000L
     private const val TOTAL_BUDGET = 19
-    private const val SEARCH_BUDGET = 12
+    private const val BACKGROUND_BUDGET = 6
 
     private val stamps = ArrayDeque<Long>()
+    private val backgroundStamps = ArrayDeque<Long>()
     private var blockedUntil = 0L
     private var refusals = 0L
 
@@ -23,9 +25,18 @@ object ItunesGate {
     fun tryAcquire(search: Boolean): Boolean {
         val now = System.currentTimeMillis()
         prune(now)
-        val allowed = now >= blockedUntil && stamps.size < (if (search) SEARCH_BUDGET else TOTAL_BUDGET)
-        if (allowed) stamps.addLast(now) else refusals++
+        val allowed = now >= blockedUntil && stamps.size < TOTAL_BUDGET && (search || backgroundStamps.size < BACKGROUND_BUDGET)
+        if (allowed) { stamps.addLast(now); if (!search) backgroundStamps.addLast(now) } else refusals++
         return allowed
+    }
+
+    // Whether a background request would be let through now (asks nothing, counts nothing): lets the suggestions skip
+    // an optional lookup instead of being refused.
+    @Synchronized
+    fun backgroundAvailable(): Boolean {
+        val now = System.currentTimeMillis()
+        prune(now)
+        return now >= blockedUntil && stamps.size < TOTAL_BUDGET && backgroundStamps.size < BACKGROUND_BUDGET
     }
 
     // iTunes said no: stop asking for a whole window.
@@ -45,12 +56,13 @@ object ItunesGate {
         val now = System.currentTimeMillis()
         prune(now)
         val untilUnblocked = (blockedUntil - now).coerceAtLeast(0)
-        val untilBudget = if (stamps.size >= SEARCH_BUDGET) stamps.elementAt(stamps.size - SEARCH_BUDGET) + WINDOW_MS - now else 0
+        val untilBudget = if (stamps.size >= TOTAL_BUDGET) stamps.elementAt(stamps.size - TOTAL_BUDGET) + WINDOW_MS - now else 0
         return maxOf(untilUnblocked, untilBudget, 0)
     }
 
     private fun prune(now: Long) {
         while (stamps.isNotEmpty() && now - stamps.first() >= WINDOW_MS) stamps.removeFirst()
+        while (backgroundStamps.isNotEmpty() && now - backgroundStamps.first() >= WINDOW_MS) backgroundStamps.removeFirst()
     }
 }
 

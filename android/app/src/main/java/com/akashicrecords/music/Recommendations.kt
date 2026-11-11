@@ -86,7 +86,11 @@ object Recommendations {
         list += SimilarTrack(title, artist, page, preview)
     }
 
+    // A MusicBrainz suggestion, completed with its iTunes clip while the background budget allows. Past it the title
+    // is kept without a clip (the full track still comes from yt-dlp): one iTunes request per suggestion is what used
+    // to eat the whole minute and lock the search out.
     private fun addEnriched(list: MutableList<SimilarTrack>, seen: MutableSet<String>, title: String, artist: String) {
+        if (!ItunesGate.backgroundAvailable()) { add(list, seen, title, artist, null, null, null); return }
         val hit = itunesSearch(if (artist.isBlank()) title else "$title $artist", 1).firstOrNull()
         add(list, seen, title, artist, hit?.page, hit?.preview, hit?.durationMs)
     }

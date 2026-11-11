@@ -2,8 +2,9 @@ namespace AkashicRecords.Infrastructure.Web;
 
 // The iTunes Search API allows about 20 requests a minute per Internet connection (the PC and the phone share it at
 // home). Every iTunes request of the app goes through here:
-//   * a sliding one-minute window counts this app's requests; the free search gets SearchBudget of them, so typing
-//     can never starve SIMILAIRES and the automatic chaining, which get the rest up to TotalBudget;
+//   * a sliding one-minute window counts this app's requests. The background ones (SIMILAIRES, automatic chaining,
+//     clip lookups) get at most BackgroundBudget of their own; the search may use up to TotalBudget, so playing
+//     songs can never use up the minute and lock the search out (it keeps at least 13);
 //   * when iTunes answers 403/429 anyway (e.g. the other device used the quota), nothing is sent for a minute —
 //     insisting would only extend the block.
 // Requests that are not let through simply return nothing; callers treat that like "no network". Port of the phone's
@@ -12,9 +13,10 @@ public static class ItunesGate
 {
     private static readonly TimeSpan Window = TimeSpan.FromMinutes(1);
     private const int TotalBudget = 19;
-    private const int SearchBudget = 12;
+    private const int BackgroundBudget = 6;
 
     private static readonly Queue<DateTime> Stamps = new();
+    private static readonly Queue<DateTime> BackgroundStamps = new();
     private static readonly object Sync = new();
     private static DateTime _blockedUntil = DateTime.MinValue;
     private static long _refusals;
@@ -27,9 +29,24 @@ public static class ItunesGate
         {
             var now = DateTime.UtcNow;
             Prune(now);
-            var allowed = now >= _blockedUntil && Stamps.Count < (search ? SearchBudget : TotalBudget);
-            if (allowed) Stamps.Enqueue(now); else _refusals++;
+            var allowed = now >= _blockedUntil && Stamps.Count < TotalBudget && (search || BackgroundStamps.Count < BackgroundBudget);
+            if (allowed) { Stamps.Enqueue(now); if (!search) BackgroundStamps.Enqueue(now); } else _refusals++;
             return allowed;
+        }
+    }
+
+    // Whether a background request would be let through now (asks nothing, counts nothing): lets the suggestions skip
+    // an optional lookup instead of being refused.
+    public static bool BackgroundAvailable
+    {
+        get
+        {
+            lock (Sync)
+            {
+                var now = DateTime.UtcNow;
+                Prune(now);
+                return now >= _blockedUntil && Stamps.Count < TotalBudget && BackgroundStamps.Count < BackgroundBudget;
+            }
         }
     }
 
@@ -56,8 +73,8 @@ public static class ItunesGate
                 var now = DateTime.UtcNow;
                 Prune(now);
                 var untilUnblocked = _blockedUntil > now ? _blockedUntil - now : TimeSpan.Zero;
-                var untilBudget = Stamps.Count >= SearchBudget
-                    ? Stamps.ElementAt(Stamps.Count - SearchBudget) + Window - now
+                var untilBudget = Stamps.Count >= TotalBudget
+                    ? Stamps.ElementAt(Stamps.Count - TotalBudget) + Window - now
                     : TimeSpan.Zero;
                 var wait = untilUnblocked > untilBudget ? untilUnblocked : untilBudget;
                 return wait > TimeSpan.Zero ? wait : TimeSpan.Zero;
@@ -68,6 +85,7 @@ public static class ItunesGate
     private static void Prune(DateTime now)
     {
         while (Stamps.Count > 0 && now - Stamps.Peek() >= Window) Stamps.Dequeue();
+        while (BackgroundStamps.Count > 0 && now - BackgroundStamps.Peek() >= Window) BackgroundStamps.Dequeue();
     }
 }
 

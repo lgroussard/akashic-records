@@ -86,12 +86,38 @@ object Downloader {
 
     // Stops the yt-dlp run fetching [title] (another song was tapped meanwhile).
     fun cancelStream(title: String) {
-        repeat(2) { attempt -> runCatching { YoutubeDL.getInstance().destroyProcessById(streamId(attempt, title)) } }
+        repeat(3) { attempt -> runCatching { YoutubeDL.getInstance().destroyProcessById(streamId(attempt, title)) } }
     }
 
     private fun streamId(attempt: Int, title: String) = "stream-$attempt-${title.hashCode()}"
 
     fun searchQuery(title: String, artist: String) = "ytsearch1:${"$title $artist".replace("\"", "").trim()}"
+
+    // The address of the full track's audio, to play it while it streams instead of waiting for a whole download
+    // (only the YouTube search remains before the sound). Only the first hit is examined (looking at 3, like
+    // fetchStream, costs seconds): when it lasts 15 min or more — a compilation — null, and fetchStream filters.
+    // Null when yt-dlp found nothing (the caller then downloads, or falls back to the clip).
+    suspend fun streamUrl(context: Context, title: String, artist: String): String? = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        try {
+            ensureInit(context)
+            autoUpdate(context)
+        } catch (_: Exception) {
+            return@withContext null
+        }
+        val request = YoutubeDLRequest("ytsearch1:${"$title $artist".replace("\"", "").trim()}").apply {
+            addOption("-f", "140/bestaudio[ext=m4a]/18")
+            addOption("--print", "%(duration)s|%(url)s")
+        }
+        val out = try {
+            YoutubeDL.getInstance().execute(request, streamId(2, title)).out
+        } catch (_: Exception) {
+            return@withContext null
+        }
+        if (!isActive) return@withContext null
+        val line = out.lineSequence().map { it.trim() }.firstOrNull { it.contains("|http") } ?: return@withContext null
+        val duration = line.substringBefore('|').toDoubleOrNull() ?: 0.0
+        if (duration >= 900) null else line.substringAfter('|')
+    }
 
     // Desktop FetchAudioAsync: the full track as a temp m4a, to play a suggestion entirely (the
     // iTunes clip is only 30 s). First of 3 YouTube hits under 15 min, so album compilations are

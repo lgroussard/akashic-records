@@ -322,6 +322,13 @@ public sealed class MusicRecommendationService
     {
         string? page = null, preview = null;
         int? durationMillis = null;
+        // Past the background budget the title is kept without a clip (the full track still comes from yt-dlp): one
+        // iTunes request per suggestion is what used to eat the whole minute and lock the search out.
+        if (!ItunesGate.BackgroundAvailable)
+        {
+            Add(list, seen, title, artist ?? string.Empty, null, null, null);
+            return;
+        }
         var hit = await ItunesSearchAsync(
             string.IsNullOrWhiteSpace(artist) ? title : $"{title} {artist}", 1, ct);
         if (hit.Count > 0)

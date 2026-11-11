@@ -3,6 +3,7 @@ package com.akashicrecords.music
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.CircleShape
@@ -337,23 +338,22 @@ internal class RemoteActions(
 
     private var fetchJob: kotlinx.coroutines.Job? = null
 
-    // Sound at once: the iTunes clip starts right away while yt-dlp fetches the full track, which then takes
-    // its place at the same second. A new tap drops the fetch still running for the previous song.
-    // [onStarted] runs once something actually plays (not when there is neither a clip nor a full track).
+    // The full track from its beginning, as soon as possible: played while it streams (only yt-dlp's YouTube search
+    // stands before the sound), else downloaded first, else — nothing found — the 30 s iTunes clip alone. (The clip is
+    // not played meanwhile: it comes from the middle of the song, so the full track could not take over from it.)
+    // A new tap drops the lookup still running for the previous song. [onStarted] runs once something plays.
     fun listen(t: SimilarTrack, album: String, onStarted: () -> Unit = {}) {
         fetching?.let { previous -> if (previous == t.title) return; Downloader.cancelStream(previous) }
         fetchJob?.cancel()
         fetching = t.title
         fetchJob = scope.launch {
-            val clip = t.preview
-            if (clip != null) {
-                player.playSuggestion(t, android.net.Uri.parse(clip), album, full = false)
-                onStarted()
-            }
-            val file = Downloader.fetchStream(context, t.title, t.artist)
-            if (file != null && isActive) {
-                if (clip != null) player.upgradeSuggestion(t, android.net.Uri.fromFile(file), album)
-                else { player.playSuggestion(t, android.net.Uri.fromFile(file), album, full = true); onStarted() }
+            val uri = Downloader.streamUrl(context, t.title, t.artist)?.let { android.net.Uri.parse(it) }
+                ?: if (isActive) Downloader.fetchStream(context, t.title, t.artist)?.let { android.net.Uri.fromFile(it) } else null
+            if (isActive) {
+                when {
+                    uri != null -> { player.playSuggestion(t, uri, album, full = true); onStarted() }
+                    t.preview != null -> { player.playSuggestion(t, android.net.Uri.parse(t.preview), album, full = false); onStarted() }
+                }
             }
             if (fetching == t.title) fetching = null
         }
@@ -393,9 +393,22 @@ internal fun RemoteTrackRow(
 ) {
     val local = remember(t, library) { library.firstOrNull { Recommendations.matches(it.Title, t.title) } }
     val url = Downloader.searchQuery(t.title, t.artist)
-    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+    // The song tapped is being looked up (yt-dlp, several seconds): the row says so plainly until the sound starts.
+    val loading = actions.fetching == t.title
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp).clip(RoundedCornerShape(8.dp))
+            .background(if (loading) Palette.Accent.copy(alpha = 0.12f) else Color.Transparent)
+            .padding(horizontal = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         if (coverSize != null && t.artwork != null) {
-            RemoteImage(t.artwork, Modifier.size(coverSize).clip(RoundedCornerShape(4.dp)))
+            Box(contentAlignment = Alignment.Center) {
+                RemoteImage(t.artwork, Modifier.size(coverSize).clip(RoundedCornerShape(4.dp)))
+                if (loading) {
+                    Box(Modifier.size(coverSize).clip(RoundedCornerShape(4.dp)).background(Color.Black.copy(alpha = 0.45f)))
+                    CircularProgressIndicator(Modifier.size(coverSize * 0.5f), color = Color.White, strokeWidth = 2.5.dp)
+                }
+            }
             Spacer(Modifier.width(10.dp))
         }
         Column(Modifier.weight(1f).clickable {
@@ -404,11 +417,15 @@ internal fun RemoteTrackRow(
             Text(t.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = if (coverSize != null && coverSize > 60.dp) FontWeight.Bold else null)
             val where = listOfNotNull(t.artist, t.album?.takeIf { showAlbum && it.isNotBlank() }).joinToString(" · ")
             Text(
-                where + when { local != null -> " · dans la bibliothèque"; actions.fetching == t.title -> if (t.preview != null) " · extrait, titre entier en route…" else " · chargement…"; else -> "" },
-                fontSize = 11.sp, color = Palette.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                if (loading) "Chargement du titre…" else where + if (local != null) " · dans la bibliothèque" else "",
+                fontSize = 11.sp, color = if (loading) Palette.Accent else Palette.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
+            if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp).height(2.dp), color = Palette.Accent)
         }
         when {
+            // No cover to put it on (Similaires list): the spinner takes the ⤓ slot.
+            loading && (coverSize == null || t.artwork == null) ->
+                CircularProgressIndicator(Modifier.padding(12.dp).size(20.dp), color = Palette.Accent, strokeWidth = 2.dp)
             local != null -> Text("✓", color = Palette.TextFaint, modifier = Modifier.padding(12.dp))
             url in actions.queued -> Text("En file", fontSize = 11.sp, color = Palette.TextFaint, modifier = Modifier.padding(12.dp))
             else -> TextButton(onClick = { actions.download(t, album) }) { Text("⤓", fontSize = 18.sp) }
