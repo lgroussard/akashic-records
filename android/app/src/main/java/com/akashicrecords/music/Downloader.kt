@@ -17,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -73,6 +74,23 @@ object Downloader {
         set { copy(toolVersion = YoutubeDL.getInstance().version(context.applicationContext)) }
     }
 
+    // Called when the search opens: Python + yt-dlp unpacked (first time) and the daily update done now,
+    // not in the tap → sound path.
+    suspend fun warmUp(context: Context) = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        try {
+            ensureInit(context)
+            autoUpdate(context)
+        } catch (_: Exception) {
+        }
+    }
+
+    // Stops the yt-dlp run fetching [title] (another song was tapped meanwhile).
+    fun cancelStream(title: String) {
+        repeat(2) { attempt -> runCatching { YoutubeDL.getInstance().destroyProcessById(streamId(attempt, title)) } }
+    }
+
+    private fun streamId(attempt: Int, title: String) = "stream-$attempt-${title.hashCode()}"
+
     fun searchQuery(title: String, artist: String) = "ytsearch1:${"$title $artist".replace("\"", "").trim()}"
 
     // Desktop FetchAudioAsync: the full track as a temp m4a, to play a suggestion entirely (the
@@ -88,6 +106,7 @@ object Downloader {
         val dir = streamDir(context).apply { mkdirs() }
         val query = "ytsearch3:${"$title $artist".replace("\"", "").trim()}"
         repeat(2) { attempt ->
+            if (!isActive) return@withContext null // cancelled: another song was tapped
             val started = System.currentTimeMillis() - 1000
             val request = YoutubeDLRequest(query).apply {
                 addOption("-f", "140/bestaudio[ext=m4a]/18")
@@ -98,7 +117,7 @@ object Downloader {
             }
             // Exit code 101 is the normal "--max-downloads reached" stop: judge by the file.
             try {
-                YoutubeDL.getInstance().execute(request, "stream-$attempt-${title.hashCode()}")
+                YoutubeDL.getInstance().execute(request, streamId(attempt, title))
             } catch (_: Exception) {
             }
             dir.listFiles()

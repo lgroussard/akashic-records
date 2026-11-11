@@ -115,6 +115,28 @@ class PlayerConnection(context: Context) {
         c.play()
     }
 
+    // The full track of [s] has arrived while its 30 s clip plays (or waits in the queue): swapped in place,
+    // at the same second when it is the one playing, so the music carries on without starting over.
+    // Nothing happens when the clip has left the queue (the user moved on).
+    fun upgradeSuggestion(s: SimilarTrack, uri: android.net.Uri, album: String) {
+        val c = controller ?: return
+        val id = PREVIEW_PREFIX + s.title + "|" + s.artist
+        val index = (0 until c.mediaItemCount).firstOrNull { c.getMediaItemAt(it).mediaId == id } ?: return
+        val item = PlayerItems.suggestion(s, uri, album, full = true, prefix = PREVIEW_PREFIX)
+        // Also when the clip ran out before the full track came (player stopped on it): it resumes from there.
+        val ended = c.playbackState == androidx.media3.common.Player.STATE_ENDED && index == c.currentMediaItemIndex
+        if (index == c.currentMediaItemIndex) {
+            val position = c.currentPosition
+            val playing = c.playWhenReady
+            c.replaceMediaItem(index, item)
+            c.seekTo(index, position)
+            c.playWhenReady = playing || ended
+            if (ended) c.prepare()
+        } else {
+            c.replaceMediaItem(index, item)
+        }
+    }
+
     fun togglePlay() {
         val c = controller ?: return
         if (c.isPlaying) c.pause() else {

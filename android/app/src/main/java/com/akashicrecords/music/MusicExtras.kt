@@ -36,6 +36,7 @@ import com.akashicrecords.data.DownloadItem
 import com.akashicrecords.data.MusicTrack
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -99,6 +100,9 @@ internal fun SearchPanel(
 ) {
     // The query survives tab swipes and visits for the life of the app; its results come back from the cache.
     var query by rememberSaveable { mutableStateOf("") }
+    // yt-dlp ready before the first tap (unpacking, daily update): the tap only has the song to fetch.
+    val warmContext = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(Unit) { Downloader.warmUp(warmContext) }
     var tracks by remember { mutableStateOf<List<SimilarTrack>?>(null) }
     var extras by remember { mutableStateOf<OnlineExtras?>(null) }
     var extrasFor by remember { mutableStateOf("") }
@@ -331,19 +335,27 @@ internal class RemoteActions(
         queued = withContext(Dispatchers.IO) { db.downloadItemDao().getAll().map { it.Url }.toSet() }
     }
 
-    // [onStarted] runs once the song actually plays (not when nothing could be fetched).
+    private var fetchJob: kotlinx.coroutines.Job? = null
+
+    // Sound at once: the iTunes clip starts right away while yt-dlp fetches the full track, which then takes
+    // its place at the same second. A new tap drops the fetch still running for the previous song.
+    // [onStarted] runs once something actually plays (not when there is neither a clip nor a full track).
     fun listen(t: SimilarTrack, album: String, onStarted: () -> Unit = {}) {
-        if (fetching != null) return
+        fetching?.let { previous -> if (previous == t.title) return; Downloader.cancelStream(previous) }
+        fetchJob?.cancel()
         fetching = t.title
-        scope.launch {
-            val file = Downloader.fetchStream(context, t.title, t.artist)
-            val started = when {
-                file != null -> { player.playSuggestion(t, android.net.Uri.fromFile(file), album, full = true); true }
-                t.preview != null -> { player.playSuggestion(t, android.net.Uri.parse(t.preview), album, full = false); true }
-                else -> false
+        fetchJob = scope.launch {
+            val clip = t.preview
+            if (clip != null) {
+                player.playSuggestion(t, android.net.Uri.parse(clip), album, full = false)
+                onStarted()
             }
-            fetching = null
-            if (started) onStarted()
+            val file = Downloader.fetchStream(context, t.title, t.artist)
+            if (file != null && isActive) {
+                if (clip != null) player.upgradeSuggestion(t, android.net.Uri.fromFile(file), album)
+                else { player.playSuggestion(t, android.net.Uri.fromFile(file), album, full = true); onStarted() }
+            }
+            if (fetching == t.title) fetching = null
         }
     }
 
@@ -392,7 +404,7 @@ internal fun RemoteTrackRow(
             Text(t.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = if (coverSize != null && coverSize > 60.dp) FontWeight.Bold else null)
             val where = listOfNotNull(t.artist, t.album?.takeIf { showAlbum && it.isNotBlank() }).joinToString(" · ")
             Text(
-                where + when { local != null -> " · dans la bibliothèque"; actions.fetching == t.title -> " · chargement…"; else -> "" },
+                where + when { local != null -> " · dans la bibliothèque"; actions.fetching == t.title -> if (t.preview != null) " · extrait, titre entier en route…" else " · chargement…"; else -> "" },
                 fontSize = 11.sp, color = Palette.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
