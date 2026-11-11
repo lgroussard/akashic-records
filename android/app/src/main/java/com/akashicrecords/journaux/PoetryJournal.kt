@@ -15,6 +15,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -30,14 +34,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-// Desktop "Recueil de poésie": search + recueil filter + poem list, then one poem page where
-// the text dominates (serif italic by default) with alignment controls.
-//
 // Rich text: the desktop keeps both Text (plain) and RichContent (a XAML FlowDocument with
-// per-word formatting) and prefers RichContent when it is set. The phone edits plain text
-// only, so when the text is changed here RichContent is cleared: the desktop then rebuilds the
-// poem from Text, keeping the words but losing per-word formatting from the PC. Poems only
-// read on the phone are left untouched.
+// per-word formatting). The phone reads that formatting and writes it back (see PoemRich.kt), so
+// bold or italic on a few letters is shared both ways.
 @Composable
 internal fun PoetryJournal(db: AkashicDatabase, initialOpen: Int? = null) {
     val scope = rememberCoroutineScope()
@@ -196,6 +195,13 @@ private fun PoemLoader(db: AkashicDatabase, id: Int, recueils: List<Recueil>, on
 @Composable
 private fun PoemPage(db: AkashicDatabase, original: Poem, recueils: List<Recueil>, onDeleted: () -> Unit) {
     var p by remember { mutableStateOf(original) }
+    // The text with its per-letter bold / italic (shared with the PC through RichContent).
+    var rich by remember { mutableStateOf(RichPoem.of(original.Text, original.RichContent)) }
+    var field by remember { mutableStateOf(TextFieldValue(rich.text)) }
+    fun setRich(r: RichPoem) {
+        rich = r
+        p = p.copy(Text = r.text, RichContent = r.toXaml())
+    }
     var recueilMenu by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf(false) }
 
@@ -219,56 +225,73 @@ private fun PoemPage(db: AkashicDatabase, original: Poem, recueils: List<Recueil
         textAlign = align,
     )
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
-        BasicTextField(
-            value = p.Title,
-            onValueChange = { p = p.copy(Title = it) },
-            textStyle = TextStyle(color = Palette.Text, fontFamily = FontFamily.Serif, fontSize = 22.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center),
-            cursorBrush = SolidColor(Palette.Accent),
-            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-        )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box {
-                TextButton(onClick = { recueilMenu = true }) {
-                    Text("Recueil : " + (recueils.firstOrNull { it.Id == p.RecueilId }?.Title ?: "aucun") + " ▾", fontSize = 12.sp)
-                }
-                DropdownMenu(expanded = recueilMenu, onDismissRequest = { recueilMenu = false }) {
-                    DropdownMenuItem(text = { Text("Aucun") }, onClick = { p = p.copy(RecueilId = null); recueilMenu = false })
-                    recueils.forEach { r ->
-                        DropdownMenuItem(text = { Text(r.Title) }, onClick = { p = p.copy(RecueilId = r.Id); recueilMenu = false })
-                    }
-                }
-            }
-        }
-        // Phone formatting bar (alignment, italic, bold, size): writes the phone columns only.
+    Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+        // Formatting bar, pinned above the poem so B / I stay reachable while letters are selected (keyboard open).
         Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
             listOf("Left" to "⇤", "Center" to "≡", "Right" to "⇥", "Justify" to "☰").forEach { (key, glyph) ->
                 FilterChip(selected = look.align == key, onClick = { p = p.withMobileAlign(key) }, label = { Text(glyph) })
                 Spacer(Modifier.width(4.dp))
             }
-            FilterChip(selected = look.italic, onClick = { p = p.withMobileItalic(!look.italic) }, label = { Text("I", fontStyle = FontStyle.Italic) })
+            // B / I: on the selected letters when there is a selection (shared with the PC), else on the whole poem.
+            val sel = field.selection
+            val italicOn = if (sel.collapsed) look.italic else rich.isOn(sel.start, sel.end, bold = false, baseline = look.italic)
+            val boldOn = if (sel.collapsed) look.bold else rich.isOn(sel.start, sel.end, bold = true, baseline = look.bold)
+            FilterChip(selected = italicOn, onClick = {
+                if (sel.collapsed) p = p.withMobileItalic(!look.italic)
+                else setRich(rich.toggled(sel.start, sel.end, bold = false, baseline = look.italic))
+            }, label = { Text("I", fontStyle = FontStyle.Italic) })
             Spacer(Modifier.width(4.dp))
-            FilterChip(selected = look.bold, onClick = { p = p.withMobileBold(!look.bold) }, label = { Text("B", fontWeight = FontWeight.Bold) })
+            FilterChip(selected = boldOn, onClick = {
+                if (sel.collapsed) p = p.withMobileBold(!look.bold)
+                else setRich(rich.toggled(sel.start, sel.end, bold = true, baseline = look.bold))
+            }, label = { Text("B", fontWeight = FontWeight.Bold) })
             Spacer(Modifier.width(4.dp))
             TextButton(onClick = { p = p.withMobileSize((look.fontSize - 1).coerceAtLeast(12.0)) }) { Text("A−") }
             TextButton(onClick = { p = p.withMobileSize((look.fontSize + 1).coerceAtMost(36.0)) }) { Text("A+") }
             // Only once the phone has its own layout: back to the PC one, to start over.
             if (look.ownLayout) TextButton(onClick = { p = p.withPcLayout() }) { Text("Reprendre celle du PC", fontSize = 12.sp) }
         }
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+            BasicTextField(
+                value = p.Title,
+                onValueChange = { p = p.copy(Title = it) },
+                textStyle = TextStyle(color = Palette.Text, fontFamily = FontFamily.Serif, fontSize = 22.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center),
+                cursorBrush = SolidColor(Palette.Accent),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box {
+                    TextButton(onClick = { recueilMenu = true }) {
+                        Text("Recueil : " + (recueils.firstOrNull { it.Id == p.RecueilId }?.Title ?: "aucun") + " ▾", fontSize = 12.sp)
+                    }
+                    DropdownMenu(expanded = recueilMenu, onDismissRequest = { recueilMenu = false }) {
+                        DropdownMenuItem(text = { Text("Aucun") }, onClick = { p = p.copy(RecueilId = null); recueilMenu = false })
+                        recueils.forEach { r ->
+                            DropdownMenuItem(text = { Text(r.Title) }, onClick = { p = p.copy(RecueilId = r.Id); recueilMenu = false })
+                        }
+                    }
+                }
+        }
         BasicTextField(
-            value = p.Text,
-            onValueChange = { p = p.copy(Text = it, RichContent = "") },
+            value = field,
+            onValueChange = { v ->
+                field = v
+                if (v.text != rich.text) setRich(rich.edited(v.text))
+            },
             textStyle = poemStyle,
             cursorBrush = SolidColor(Palette.Accent),
+            // Draws the per-letter bold / italic over the plain text (same letters, so offsets map 1:1).
+            visualTransformation = remember(rich) { val r = rich; VisualTransformation { t -> TransformedText(r.annotate(t.text), OffsetMapping.Identity) } },
             modifier = Modifier.fillMaxWidth().heightIn(min = 320.dp).padding(vertical = 12.dp),
             decorationBox = { inner ->
-                if (p.Text.isEmpty()) Text("Écrire…", style = poemStyle.copy(color = Palette.TextFaint))
+                if (field.text.isEmpty()) Text("Écrire…", style = poemStyle.copy(color = Palette.TextFaint))
                 inner()
             },
         )
         Field("Tags", p.Tags, { p = p.copy(Tags = it) })
         TextButton(onClick = { confirm = true }) { Text("Supprimer le poème", color = Palette.TextMuted) }
         Spacer(Modifier.height(24.dp))
+        }
     }
 
     if (confirm) {
