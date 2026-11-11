@@ -19,6 +19,7 @@ object WidgetCatalog {
         Entry("Collections", "Un film « À voir » pour ce soir", WatchlistWidgetReceiver::class.java),
         Entry("Organisation", "Projets actifs et rappels", OrganisationWidgetReceiver::class.java),
         Entry("Archives", "Une photo souvenir du jour", PhotoWidgetReceiver::class.java),
+        Entry("Mots croisés", "La grille en cours, à reprendre d'un geste", CrosswordWidgetReceiver::class.java),
     )
 
     fun isEnabled(context: Context, e: Entry): Boolean =

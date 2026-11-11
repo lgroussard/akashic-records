@@ -139,6 +139,7 @@ object Widgets {
         bump(context, WatchlistWidget::class.java, WatchlistWidget())
         bump(context, OrganisationWidget::class.java, OrganisationWidget())
         bump(context, PhotoWidget::class.java, PhotoWidget())
+        bump(context, CrosswordWidget::class.java, CrosswordWidget())
     }
 }
 

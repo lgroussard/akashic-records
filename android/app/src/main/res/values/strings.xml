@@ -13,6 +13,7 @@
     <string name="widget_journal_desc">La page du jour du journal personnel</string>
     <string name="widget_music_desc">Lecture en cours, avec suivant et téléchargement</string>
     <string name="widget_poem_desc">Un poème du jour, présenté comme une page</string>
+    <string name="widget_crossword_desc">La grille de mots croisés en cours</string>
     <string name="widget_recipe_desc">Une recette du jour</string>
     <string name="widget_watch_desc">Un film « À voir » pour ce soir</string>
     <string name="widget_organisation_desc">Projets actifs et rappels</string>

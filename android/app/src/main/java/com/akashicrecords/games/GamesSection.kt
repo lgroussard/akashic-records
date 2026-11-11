@@ -31,12 +31,12 @@ val GAMES = listOf(
 )
 
 // Plus → Jeux: every game in one place, each with a button to put its own icon on the home screen.
-// [openGame]: the game to open at once (from its home-screen icon).
+// [openGame]: the game to open at once (from its home-screen icon or widget); [openItem]: the grid to open in it.
 @Composable
-fun GamesSection(db: AkashicDatabase, disabled: Set<String>, openGame: String? = null) {
+fun GamesSection(db: AkashicDatabase, disabled: Set<String>, openGame: String? = null, openItem: Int? = null) {
     var open by remember(openGame) { mutableStateOf(openGame?.takeIf { key -> GAMES.any { it.key == key } }) }
     when (open) {
-        "Crosswords" -> com.akashicrecords.crossword.CrosswordSection(db, onExit = { open = null })
+        "Crosswords" -> com.akashicrecords.crossword.CrosswordSection(db, onExit = { open = null }, initialOpen = openItem.takeIf { openGame == "Crosswords" })
         else -> GameList(disabled, onOpen = { open = it })
     }
 }

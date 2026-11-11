@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -36,8 +37,8 @@ import kotlinx.coroutines.withContext
 // Plus → Jeux → Mots croisés (phone only): grids generated from the bundled word lists, or imported as .ipuz files.
 // [onExit]: back to the list of games.
 @Composable
-fun CrosswordSection(db: AkashicDatabase, onExit: () -> Unit = {}) {
-    var openId by remember { mutableStateOf<Int?>(null) }
+fun CrosswordSection(db: AkashicDatabase, onExit: () -> Unit = {}, initialOpen: Int? = null) {
+    var openId by remember(initialOpen) { mutableStateOf(initialOpen) }
     val id = openId
     if (id == null) GameList(db, onOpen = { openId = it }, onExit = onExit)
     else GameScreen(db, id, onBack = { openId = null })
@@ -55,22 +56,39 @@ private fun GameList(db: AkashicDatabase, onOpen: (Int) -> Unit, onExit: () -> U
     var generating by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<CrosswordGame?>(null) }
 
-    LaunchedEffect(version) { games = withContext(Dispatchers.IO) { db.crosswordGameDao().getAll() } }
+    LaunchedEffect(version) {
+        games = withContext(Dispatchers.IO) {
+            val dao = db.crosswordGameDao()
+            // Grids made before they were numbered were called "Grille 9×9": they get their number, in creation order.
+            val all = dao.getAll()
+            val old = Regex("^Grille \\d+×\\d+$")
+            if (all.any { old.matches(it.Title) }) {
+                all.sortedBy { it.CreatedAt }.forEachIndexed { i, g ->
+                    if (old.matches(g.Title)) dao.update(g.copy(Title = "Grille n°${i + 1}"))
+                }
+                dao.getAll()
+            } else all
+        }
+    }
 
-    suspend fun save(puzzle: Puzzle, source: String): Int = withContext(Dispatchers.IO) {
+    // A generated grid is named by its number ("Grille n°12"); an imported one keeps its own title.
+    suspend fun save(puzzle: Puzzle, source: String, title: String? = null): Int = withContext(Dispatchers.IO) {
         val now = nowIso()
+        val name = title ?: "Grille n°${db.crosswordGameDao().getAll().size + 1}"
         db.crosswordGameDao().add(
             CrosswordGame(
-                Title = puzzle.title, Source = source, PuzzleJson = puzzle.toJson(),
+                Title = name, Source = source, PuzzleJson = puzzle.toJson(),
                 Progress = puzzle.solution.joinToString("\n") { row -> row.map { if (it == '#') '#' else '.' }.joinToString("") },
                 CreatedAt = now, UpdatedAt = now, CompletedAt = null,
             ),
         ).toInt()
     }
 
-    fun newGrid(size: Int) {
+    // One button: the size (7 to 9) is picked at random.
+    fun newGrid() {
         if (generating) return
         generating = true
+        val size = (7..9).random()
         scope.launch {
             val puzzle = withContext(Dispatchers.Default) {
                 val words = WordList.load(context)
@@ -95,47 +113,34 @@ private fun GameList(db: AkashicDatabase, onOpen: (Int) -> Unit, onExit: () -> U
                     Ipuz.parse(text, name).also { require(it.clues.isNotEmpty()) { "aucune définition dans ce fichier" } } to name
                 }
             }
-            result.onSuccess { (puzzle, name) -> onOpen(save(puzzle, "$name.ipuz")) }
+            result.onSuccess { (puzzle, name) -> onOpen(save(puzzle, "Importée", title = puzzle.title.ifBlank { name })) }
                 .onFailure { Toast.makeText(context, "Fichier illisible (.ipuz attendu) : ${it.message}", Toast.LENGTH_LONG).show() }
         }
     }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         TextButton(onClick = onExit, modifier = Modifier.padding(top = 4.dp)) { Text("← Jeux") }
-        Text("Nouvelle grille", fontSize = 13.sp, color = Palette.TextMuted, modifier = Modifier.padding(bottom = 6.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            listOf(7, 8, 9).forEach { size ->
-                Button(onClick = { newGrid(size) }, enabled = !generating, modifier = Modifier.padding(end = 8.dp)) { Text("$size × $size") }
-            }
-            if (generating) CircularProgressIndicator(Modifier.size(22.dp), color = Palette.Accent, strokeWidth = 2.dp)
-        }
-        TextButton(onClick = { importer.launch(arrayOf("*/*")) }) { Text("Importer une grille (.ipuz)…") }
-
         val list = games
+        val current = list?.firstOrNull { it.CompletedAt == null }
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 4.dp)) {
+            Button(onClick = { newGrid() }, enabled = !generating) { Text(if (generating) "Création…" else "Nouvelle grille") }
+            Spacer(Modifier.width(8.dp))
+            // The grid in progress, one tap away.
+            if (current != null) OutlinedButton(onClick = { onOpen(current.Id) }) { Text("Continuer") }
+            if (generating) {
+                Spacer(Modifier.width(8.dp))
+                CircularProgressIndicator(Modifier.size(22.dp), color = Palette.Accent, strokeWidth = 2.dp)
+            }
+        }
+
         when {
             list == null -> {}
-            list.isEmpty() -> Text("Aucune grille pour l'instant.", color = Palette.TextMuted, modifier = Modifier.padding(top = 16.dp))
-            else -> LazyColumn(Modifier.weight(1f)) {
-                items(list, key = { it.Id }) { g ->
-                    val filled = g.Progress.count { it in 'A'..'Z' }
-                    val total = g.Progress.count { it != '#' && it != '\n' }
-                    Row(
-                        Modifier.fillMaxWidth().clickable { onOpen(g.Id) }.padding(vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(g.Title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(
-                                (if (g.CompletedAt != null) "Terminée" else "${if (total > 0) filled * 100 / total else 0} % rempli") + " · " + g.Source,
-                                fontSize = 12.sp, color = if (g.CompletedAt != null) Palette.Accent else Palette.TextMuted,
-                            )
-                        }
-                        TextButton(onClick = { deleting = g }) { Text("✕", color = Palette.TextFaint) }
-                    }
-                    HorizontalDivider(color = Palette.Surface2)
-                }
+            list.isEmpty() -> Text("Aucune grille pour l'instant : touche « Nouvelle grille ».", color = Palette.TextMuted, modifier = Modifier.padding(top = 16.dp))
+            else -> LazyColumn(Modifier.weight(1f).padding(top = 8.dp)) {
+                items(list, key = { it.Id }) { g -> GameRow(g, onOpen = { onOpen(g.Id) }, onDelete = { deleting = g }) }
             }
         }
+        TextButton(onClick = { importer.launch(arrayOf("*/*")) }) { Text("Importer une grille (.ipuz)…", fontSize = 13.sp) }
         Spacer(Modifier.weight(if (list.isNullOrEmpty()) 1f else 0.001f))
         Text(
             "Définitions : Akashic et Wiktionnaire (contributeurs du Wiktionnaire, licence CC BY-SA).",
@@ -148,6 +153,45 @@ private fun GameList(db: AkashicDatabase, onOpen: (Int) -> Unit, onExit: () -> U
             deleting = null
             scope.launch { withContext(Dispatchers.IO) { db.crosswordGameDao().deleteById(g.Id) }; version++ }
         }, onDismiss = { deleting = null })
+    }
+}
+
+private val SHORT_DATE = java.time.format.DateTimeFormatter.ofPattern("d MMM", java.util.Locale.FRENCH)
+
+// A grid of the list: its picture (filled squares in blue), name, size and date, and how far along it is.
+@Composable
+private fun GameRow(g: CrosswordGame, onOpen: () -> Unit, onDelete: () -> Unit) {
+    val puzzle = remember(g.Id) { runCatching { Puzzle.fromJson(g.PuzzleJson) }.getOrNull() }
+    val thumb by produceState<android.graphics.Bitmap?>(null, g.Id, g.Progress) {
+        value = puzzle?.let { p -> withContext(Dispatchers.Default) { Thumbnail.render(p, g.Progress, 180) } }
+    }
+    val done = g.CompletedAt != null
+    val share = Thumbnail.filled(g.Progress)
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(12.dp)).background(Palette.Surface1)
+            .clickable(onClick = onOpen).padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(60.dp).clip(RoundedCornerShape(6.dp)).background(Palette.Surface3), contentAlignment = Alignment.Center) {
+            thumb?.let { androidx.compose.foundation.Image(it.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxSize()) }
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(g.Title, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val date = com.akashicrecords.journaux.datePart(g.CreatedAt)?.format(SHORT_DATE).orEmpty()
+            Text(
+                listOfNotNull(puzzle?.let { "${it.cols} × ${it.rows}" }, date.ifBlank { null }, g.Source.takeIf { it != "Générée" }?.lowercase())
+                    .joinToString(" · "),
+                fontSize = 12.sp, color = Palette.TextMuted,
+            )
+            Spacer(Modifier.height(6.dp))
+            if (done) Text("✓ Terminée", fontSize = 12.sp, color = Palette.Accent)
+            else Row(verticalAlignment = Alignment.CenterVertically) {
+                LinearProgressIndicator(progress = { share }, Modifier.weight(1f).height(4.dp), color = Palette.Accent)
+                Text("  ${(share * 100).toInt()} %", fontSize = 11.sp, color = Palette.TextMuted)
+            }
+        }
+        TextButton(onClick = onDelete) { Text("✕", color = Palette.TextFaint) }
     }
 }
 
@@ -246,8 +290,10 @@ private fun Playing(db: AkashicDatabase, game: CrosswordGame, puzzle: Puzzle, on
         }
 
         // The grid
-        BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
-            val cell = minOf(maxWidth / cols, 48.dp)
+        // The grid takes what the clue, the helps and the keyboard leave: it shrinks on a short screen instead of
+        // pushing the keyboard (and its ⌫) off the bottom.
+        BoxWithConstraints(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+            val cell = minOf(maxWidth / cols, maxHeight / rows, 48.dp)
             Column(Modifier.border(1.dp, Palette.TextFaint)) {
                 for (r in 0 until rows) Row {
                     for (c in 0 until cols) {
@@ -316,7 +362,6 @@ private fun Playing(db: AkashicDatabase, game: CrosswordGame, puzzle: Puzzle, on
             TextButton(onClick = { revealAll = true }) { Text("Solution", color = Palette.TextMuted) }
         }
 
-        Spacer(Modifier.weight(1f))
         Keyboard(onLetter = ::type, onErase = ::erase)
     }
 
@@ -346,8 +391,7 @@ private fun Keyboard(onLetter: (Char) -> Unit, onErase: () -> Unit) {
             Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.Center) {
                 keys.forEach { k -> Key(k.toString(), Modifier.weight(1f)) { onLetter(k) } }
                 if (i == rows.lastIndex) {
-                    Key("⌫", Modifier.weight(2f)) { onErase() }
-                    Spacer(Modifier.weight(2f))
+                    Key("⌫  Effacer", Modifier.weight(4f), highlight = true) { onErase() }
                 }
             }
         }
@@ -355,9 +399,10 @@ private fun Keyboard(onLetter: (Char) -> Unit, onErase: () -> Unit) {
 }
 
 @Composable
-private fun Key(label: String, modifier: Modifier, onClick: () -> Unit) {
+private fun Key(label: String, modifier: Modifier, highlight: Boolean = false, onClick: () -> Unit) {
     Box(
-        modifier.padding(horizontal = 2.dp).height(46.dp).clip(RoundedCornerShape(6.dp)).background(Palette.Surface3).clickable(onClick = onClick),
+        modifier.padding(horizontal = 2.dp).height(46.dp).clip(RoundedCornerShape(6.dp))
+            .background(if (highlight) Palette.Accent.copy(alpha = 0.35f) else Palette.Surface3).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { Text(label, fontSize = 18.sp) }
 }

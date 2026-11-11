@@ -149,7 +149,8 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
     }
     var calendarDate by remember { mutableStateOf<LocalDate?>(null) }
     var musicTab by remember { mutableStateOf<String?>(null) }
-    var gameTab by remember { mutableStateOf<String?>(null) } // a game opened from its home-screen icon
+    var gameTab by remember { mutableStateOf<String?>(null) } // a game opened from its home-screen icon or widget
+    var gameItem by remember { mutableStateOf<Int?>(null) } // …and the grid to open in it (widget)
     var journalItem by remember { mutableStateOf<Int?>(null) }
     val player = rememberPlayerConnection()
     var showSettings by remember { mutableStateOf(false) }
@@ -165,6 +166,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
         calendarDate = null
         musicTab = null
         gameTab = null
+        gameItem = null
     }
 
     // The open section was just switched off in the settings: move to the first one still on.
@@ -182,7 +184,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
                     journalItem = l.item
                 }
                 "Musique" -> musicTab = l.tab
-                "Jeux" -> gameTab = l.tab
+                "Jeux" -> { gameTab = l.tab; gameItem = l.item }
             }
             dataVersion++
         }
@@ -265,7 +267,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
                         "Collections" -> CollectionsSection(db, config)
                         "Lecture" -> com.akashicrecords.reading.LectureSection(db, config)
                         "Archives" -> ArchivesSection(db, config)
-                        "Jeux" -> com.akashicrecords.games.GamesSection(db, disabled, openGame = gameTab)
+                        "Jeux" -> com.akashicrecords.games.GamesSection(db, disabled, openGame = gameTab, openItem = gameItem)
                     }
                 }
             }
