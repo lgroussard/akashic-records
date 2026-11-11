@@ -55,38 +55,3 @@ fun JournauxSection(db: AkashicDatabase, config: ConfigStore, openItem: Int? = n
     }
 }
 
-// Read-only list of canvas projects and their elements (the infinite canvas is desktop-only).
-@Composable
-private fun ArtisticJournal(db: AkashicDatabase) {
-    var projects by remember { mutableStateOf<List<ArtisticProject>>(emptyList()) }
-    LaunchedEffect(db) { projects = withContext(Dispatchers.IO) { db.artisticProjectDao().getAll() } }
-    var selected by remember { mutableStateOf<Int?>(null) }
-    var elements by remember { mutableStateOf<List<CanvasElement>>(emptyList()) }
-    LaunchedEffect(db, selected) {
-        selected?.let { id -> elements = withContext(Dispatchers.IO) { db.canvasElementDao().forProject(id) } }
-    }
-    if (projects.isEmpty()) {
-        Text("Aucun projet artistique (ils se créent sur le PC).", color = Palette.TextMuted, modifier = Modifier.padding(12.dp))
-        return
-    }
-    LazyColumn(Modifier.fillMaxWidth()) {
-        items(projects) { p ->
-            CardBlock {
-                Text(
-                    p.Title,
-                    fontWeight = if (p.Id == selected) FontWeight.Bold else FontWeight.Normal,
-                    modifier = Modifier.clickable { selected = if (selected == p.Id) null else p.Id },
-                )
-                if (p.Id == selected) {
-                    Spacer(Modifier.height(4.dp))
-                    elements.forEach { el ->
-                        val body = el.TextContent ?: el.ImagePath ?: "Référence"
-                        Text("· ${canvasTypeLabel(el.Type)} : $body", fontSize = 12.sp, color = Palette.TextMuted)
-                    }
-                }
-            }
-        }
-    }
-}
-
-private fun canvasTypeLabel(type: Int) = listOf("Texte", "Image", "Référence").getOrElse(type) { "?" }

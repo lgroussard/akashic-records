@@ -155,6 +155,8 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
     val player = rememberPlayerConnection()
     var showSettings by remember { mutableStateOf(false) }
     var showMore by remember { mutableStateOf(false) }
+    // The full player (from the mini-player, or a link to the old Queue / Similar tabs); null = closed.
+    var fullPlayer by remember { mutableStateOf<Boolean?>(null) }
     // Bumped after a PC import (and on deep links) so the section re-reads its state.
     var dataVersion by remember { mutableStateOf(0) }
 
@@ -231,7 +233,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
         bottomBar = {
             Column {
                 // Musique switched off: no mini-player either (its tap would open a hidden section).
-                if (Modules.isEnabled(disabled, "Musique")) MiniPlayer(player, db) { go("Musique") }
+                if (Modules.isEnabled(disabled, "Musique")) MiniPlayer(player, db) { fullPlayer = false }
                 NavigationBar(containerColor = Palette.Surface1, tonalElevation = 0.dp) {
                     navItems.forEach { item ->
                         NavigationBarItem(
@@ -262,7 +264,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
                     when (section) {
                         "Organisation" -> OrganisationSection(db, config)
                         "Journaux" -> JournauxSection(db, config, openItem = journalItem)
-                        "Musique" -> MusicSection(db, config, player, initialTab = musicTab)
+                        "Musique" -> MusicSection(db, config, player, initialTab = musicTab, onOpenPlayer = { similar -> fullPlayer = similar })
                         "Calendrier" -> CalendarSection(db, openDate = calendarDate, onOpenLink = { openCalendarLink(it) })
                         "Collections" -> CollectionsSection(db, config)
                         "Lecture" -> com.akashicrecords.reading.LectureSection(db, config)
@@ -272,6 +274,10 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
                 }
             }
         }
+    }
+
+    fullPlayer?.let { similar ->
+        com.akashicrecords.music.FullPlayer(db, player, startOnSimilar = similar) { fullPlayer = null }
     }
 
     if (showMore) {
@@ -376,72 +382,9 @@ private fun OrganisationSection(db: AkashicDatabase, config: ConfigStore) {
         tab,
     ) { tab = it; config.saveOrganisationTab(it) }
 
-    if (tab == "Projets") {
-        val projects = remember { mutableStateOf<List<com.akashicrecords.data.PersonalProject>>(emptyList()) }
-        LaunchedEffect(db) { withContext(Dispatchers.IO) { projects.value = db.personalProjectDao().getAll() } }
-        var selected by remember { mutableStateOf<Int?>(null) }
-        OrganisationList(projects.value.map { it.Id to "${it.Title}  ·  ${statusLabel(it.Status)}" }, selected) { selected = it }
-        selected?.let { id -> OrganisationProjectDetail(db, id) }
-    } else {
-        val transitions = remember { mutableStateOf<List<com.akashicrecords.data.Transition>>(emptyList()) }
-        LaunchedEffect(db) { withContext(Dispatchers.IO) { transitions.value = db.transitionDao().getAll() } }
-        var selected by remember { mutableStateOf<Int?>(null) }
-        OrganisationList(transitions.value.map { it.Id to it.Title }, selected) { selected = it }
-        selected?.let { id -> OrganisationTransitionDetail(db, id) }
-    }
-}
-
-private fun statusLabel(status: Int) = listOf("Actif", "Terminé", "Archivé").getOrElse(status) { "?" }
-
-@Composable
-private fun OrganisationList(rows: List<Pair<Int, String>>, selected: Int?, onSelect: (Int) -> Unit) {
-    LazyColumn(Modifier.fillMaxWidth()) {
-        items(rows) { (id, label) ->
-            CardBlock {
-                Text(
-                    label,
-                    fontWeight = if (id == selected) FontWeight.Bold else FontWeight.Normal,
-                    modifier = Modifier.clickable { onSelect(id) },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun OrganisationProjectDetail(db: AkashicDatabase, id: Int) {
-    val project = remember { mutableStateOf<com.akashicrecords.data.PersonalProject?>(null) }
-    val tasks = remember { mutableStateOf<List<com.akashicrecords.data.ProjectTask>>(emptyList()) }
-    LaunchedEffect(db, id) {
-        withContext(Dispatchers.IO) {
-            project.value = db.personalProjectDao().getById(id)
-            tasks.value = db.projectTaskDao().forProject(id)
-        }
-    }
-    CardBlock {
-        Text(project.value?.Description ?: "", color = Palette.TextMuted)
-        Spacer(Modifier.height(6.dp))
-        tasks.value.forEach { t -> Text("${if (t.IsDone) "☑" else "☐"}  ${t.Text}") }
-    }
-}
-
-@Composable
-private fun OrganisationTransitionDetail(db: AkashicDatabase, id: Int) {
-    val tr = remember { mutableStateOf<com.akashicrecords.data.Transition?>(null) }
-    val steps = remember { mutableStateOf<List<com.akashicrecords.data.TransitionStep>>(emptyList()) }
-    LaunchedEffect(db, id) {
-        withContext(Dispatchers.IO) {
-            tr.value = db.transitionDao().getById(id)
-            steps.value = db.transitionStepDao().forTransition(id)
-        }
-    }
-    CardBlock {
-        tr.value?.let {
-            Text("Actuel : ${it.CurrentState}", color = Palette.TextMuted)
-            Text("Cible : ${it.DesiredState}", color = Palette.TextMuted)
-        }
-        Spacer(Modifier.height(6.dp))
-        steps.value.forEach { s -> Text("${if (s.IsDone) "☑" else "☐"}  ${s.Text}") }
+    // Each its own list of cards, opening a page to tick, add and edit (organisation/OrganisationScreen.kt).
+    Box(Modifier.fillMaxSize()) {
+        if (tab == "Projets") com.akashicrecords.organisation.ProjectsTab(db) else com.akashicrecords.organisation.TransitionsTab(db)
     }
 }
 
@@ -479,63 +422,8 @@ private fun CollectionsSection(db: AkashicDatabase, config: ConfigStore) {
             )
         }
     }
-    val all = remember { mutableStateOf<List<com.akashicrecords.data.Artwork>>(emptyList()) }
-    LaunchedEffect(db) { withContext(Dispatchers.IO) { all.value = db.artworkDao().getAll() } }
-    var selected by remember { mutableStateOf<Int?>(null) }
-    val tierNames = listOf("S", "A", "B", "C", "D")
-    LazyColumn(Modifier.fillMaxWidth()) {
-        tierNames.forEachIndexed { tierIdx, tierName ->
-            val inTier = all.value.filter { it.Category == cat && it.Tier == tierIdx }
-            if (inTier.isNotEmpty()) {
-                item {
-                    Text(
-                        "Tier $tierName",
-                        fontWeight = FontWeight.Bold,
-                        color = Palette.Accent2,
-                        modifier = Modifier.padding(start = 12.dp, top = 8.dp),
-                    )
-                }
-                items(inTier) { w ->
-                    CardBlock {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            TierPill(w.Tier)
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                w.Title,
-                                fontWeight = if (w.Id == selected) FontWeight.Bold else FontWeight.Normal,
-                                modifier = Modifier.clickable { selected = w.Id },
-                            )
-                        }
-                        if (w.Id == selected) {
-                            Spacer(Modifier.height(4.dp))
-                            ArtworkDetailInner(db, w.Id)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ArtworkDetailInner(db: AkashicDatabase, artworkId: Int) {
-    val axes = remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
-    val evals = remember { mutableStateOf<List<com.akashicrecords.data.ArtworkEvaluation>>(emptyList()) }
-    val obs = remember { mutableStateOf<List<com.akashicrecords.data.Observation>>(emptyList()) }
-    LaunchedEffect(db, artworkId) {
-        withContext(Dispatchers.IO) {
-            axes.value = db.evaluationAxisDao().getAll().associate { it.Id to it.Name }
-            evals.value = db.artworkEvaluationDao().forArtwork(artworkId)
-            obs.value = db.observationDao().forArtwork(artworkId)
-        }
-    }
-    evals.value.forEach { e ->
-        Text("${axes.value[e.AxisId] ?: "Axe"} : ${e.Score}", fontSize = 12.sp, color = Palette.TextMuted)
-    }
-    obs.value.forEach { o ->
-        Spacer(Modifier.height(4.dp))
-        Text("${o.Subject} — ${o.Content}", fontSize = 12.sp, color = Palette.TextMuted)
-    }
+    // Covers grouped by tier, a fiche per work, + to add one (collections/CollectionsScreen.kt).
+    com.akashicrecords.collections.CollectionGrid(db, cat)
 }
 
 // ---- Archives ----
@@ -551,20 +439,8 @@ private fun ArchivesSection(db: AkashicDatabase, config: ConfigStore) {
     ) { tab = it; config.saveArchivesTab(it) }
 
     if (tab == "Photos") {
-        val photos = remember { mutableStateOf<List<com.akashicrecords.data.Photo>>(emptyList()) }
-        LaunchedEffect(db) { withContext(Dispatchers.IO) { photos.value = db.photoDao().getAll() } }
-        if (photos.value.isEmpty()) {
-            Text("Aucune photo. Elles arrivent avec l'import des données du PC (Plus → Réglages).", color = Palette.TextMuted, modifier = Modifier.padding(16.dp))
-        }
-        LazyColumn(Modifier.fillMaxWidth()) {
-            items(photos.value) { p ->
-                CardBlock {
-                    Text(p.Title.ifBlank { p.ImagePath })
-                    if (p.IsFavorite) Text("★ favori", fontSize = 11.sp, color = Palette.Accent2)
-                    if (p.Description.isNotBlank()) Text(p.Description, fontSize = 11.sp, color = Palette.TextMuted)
-                }
-            }
-        }
+        // Gallery, full-screen viewer, favourites, adding from the phone (archives/PhotosScreen.kt).
+        Box(Modifier.fillMaxSize()) { com.akashicrecords.archives.PhotosTab(db) }
     } else {
         // Same as the desktop: the family-blog archive (scraper) is not built yet. Calendar events
         // and birthdays live in the Calendrier section, not here.

@@ -42,8 +42,9 @@ private fun audioPermission() =
 // Mobile version of the desktop MusicPlayerWindow: ambiances, library (album accordions or
 // flat filtered list), per-track edit + ambiance toggles, queue. Playback lives in
 // PlaybackService; the persistent mini-player is drawn by MiniPlayer at the app level.
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnection, initialTab: String? = null) {
+fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnection, initialTab: String? = null, onOpenPlayer: (similar: Boolean) -> Unit = {}) {
     val context = LocalContext.current
     val library = remember { MusicLibrary.get(context) }
     val scope = rememberCoroutineScope()
@@ -60,7 +61,10 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
     var moodTrackIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
     var search by remember { mutableStateOf("") }
     var scanning by remember { mutableStateOf(false) }
-    var tab by remember { mutableStateOf(initialTab ?: "Library") }
+    // Two tabs; the old ones arrive from links: Queue / Similar open the full player, Downloads its sheet.
+    var tab by remember { mutableStateOf(if (initialTab == "Search") "Search" else "Library") }
+    var showDownloads by remember { mutableStateOf(initialTab == "Downloads") }
+    LaunchedEffect(initialTab) { if (initialTab == "Queue" || initialTab == "Similar") onOpenPlayer(initialTab == "Similar") }
     var editingFolder by remember { mutableStateOf(false) }
     var creatingMood by remember { mutableStateOf(false) }
     var confirmDeleteMood by remember { mutableStateOf<Mood?>(null) }
@@ -109,14 +113,15 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
             return@Column
         }
 
-        val tabs = listOf(
-            "Bibliothèque" to "Library",
-            "Rechercher" to "Search",
-            "File d'attente (${player.ui.queue.size})" to "Queue",
-            "Similaires" to "Similar",
-            "Téléchargements" to "Downloads",
-        )
-        SubTabs(tabs, tab) { tab = it }
+        val tabs = listOf("Bibliothèque" to "Library", "Rechercher" to "Search")
+        // Downloads: behind ⤓ (badge while a run is going) rather than a tab of their own.
+        val downloads by Downloader.state.collectAsState()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { SubTabs(tabs, tab) { tab = it } }
+            TextButton(onClick = { showDownloads = true }) {
+                Text(if (downloads.running) "⤓ …" else "⤓", fontSize = 18.sp, color = if (downloads.running) Palette.Accent else Palette.Text)
+            }
+        }
 
         // The tabs are pages: a swipe moves between them like a tap on the chips.
         SwipePages(
@@ -127,17 +132,8 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
         ) { page ->
         Column(Modifier.fillMaxSize()) {
         when (tabs[page].second) {
-            "Queue" -> { QueueList(player); return@Column }
             "Search" -> {
                 SearchPanel(db, player, playable) { t -> library.uriFor(t)?.let { player.playNext(t, it) } }
-                return@Column
-            }
-            "Similar" -> {
-                SimilarPanel(db, player, playable) { t -> library.uriFor(t)?.let { player.playNext(t, it) } }
-                return@Column
-            }
-            "Downloads" -> {
-                DownloadsPanel(db, folder) { rescan() }
                 return@Column
             }
         }
@@ -243,6 +239,17 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
         } // SwipePages
     }
 
+    if (showDownloads) {
+        ModalBottomSheet(
+            onDismissRequest = { showDownloads = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = Palette.Surface1,
+        ) {
+            Text("Téléchargements", fontSize = 18.sp, modifier = Modifier.padding(horizontal = 16.dp))
+            Column(Modifier.fillMaxWidth().fillMaxHeight(0.85f)) { DownloadsPanel(db, folder) { rescan() } }
+        }
+    }
+
     if (editingFolder) {
         var value by remember { mutableStateOf(folder) }
         AlertDialog(
@@ -320,7 +327,7 @@ private fun SmallAction(label: String, onClick: () -> Unit) {
     )
 }
 
-private fun formatTime(seconds: Double): String {
+internal fun formatTime(seconds: Double): String {
     val s = seconds.toLong()
     return "%d:%02d".format(s / 60, s % 60)
 }
@@ -388,7 +395,7 @@ private fun TrackRow(
 }
 
 @Composable
-private fun QueueList(player: PlayerConnection) {
+internal fun QueueList(player: PlayerConnection) {
     val ui = player.ui
     if (ui.queue.isEmpty()) {
         Text("File d'attente vide.", color = Palette.TextMuted, modifier = Modifier.padding(12.dp))
@@ -414,7 +421,8 @@ private fun QueueList(player: PlayerConnection) {
     }
 }
 
-// Persistent bar at the bottom of every section once something is queued.
+// Persistent bar at the bottom of every section once something is queued; a tap on the song opens the full player
+// (FullPlayer: shuffle, position, À suivre, Similaires).
 @Composable
 fun MiniPlayer(player: PlayerConnection, db: AkashicDatabase, onOpen: () -> Unit) {
     val ui = player.ui
@@ -453,29 +461,17 @@ fun MiniPlayer(player: PlayerConnection, db: AkashicDatabase, onOpen: () -> Unit
                     enabled = !saved,
                 ) { Text(if (saved) "✓" else "⤓", fontSize = 20.sp) }
             }
-            TextButton(onClick = { player.toggleShuffle() }) {
-                Text("⇄", fontSize = 20.sp, color = if (ui.shuffle) Palette.Accent else Palette.TextFaint)
-            }
             TextButton(onClick = { player.previous() }) { Text("⏮", fontSize = 18.sp) }
             TextButton(onClick = { player.togglePlay() }) { Text(if (ui.isPlaying) "❚❚" else "▶", fontSize = 18.sp) }
             TextButton(onClick = { player.next() }) { Text("⏭", fontSize = 18.sp) }
         }
+        // Where the song is, as a thin line (the full player has the slider).
         if (ui.durationMs > 0) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val pos = dragging ?: ui.positionMs.toFloat()
-                Text(formatTime(pos / 1000.0), fontSize = 10.sp, color = Palette.TextFaint)
-                Slider(
-                    value = pos.coerceIn(0f, ui.durationMs.toFloat()),
-                    onValueChange = { dragging = it },
-                    onValueChangeFinished = {
-                        dragging?.let { player.seekTo(it.toLong()) }
-                        dragging = null
-                    },
-                    valueRange = 0f..ui.durationMs.toFloat(),
-                    modifier = Modifier.weight(1f).height(24.dp).padding(horizontal = 6.dp),
-                )
-                Text(formatTime(ui.durationMs / 1000.0), fontSize = 10.sp, color = Palette.TextFaint)
-            }
+            LinearProgressIndicator(
+                progress = { (ui.positionMs.toFloat() / ui.durationMs).coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp).height(2.dp),
+                color = Palette.Accent,
+            )
         }
     }
 }
