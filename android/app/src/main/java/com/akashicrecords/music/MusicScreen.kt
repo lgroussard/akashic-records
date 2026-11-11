@@ -19,6 +19,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -421,10 +426,52 @@ internal fun QueueList(player: PlayerConnection) {
     }
 }
 
+// The mini-player shrunk: a small bubble above the page — ♪ (with how far the song is, as a ring) brings the bar
+// back, ❚❚/▶ pauses or resumes. Dragged with a finger wherever it covers nothing; the spot is kept. Nothing queued:
+// nothing shown.
+@Composable
+fun MiniBubble(player: PlayerConnection, config: ConfigStore, modifier: Modifier = Modifier, onExpand: () -> Unit) {
+    val ui = player.ui
+    var drag by remember { mutableStateOf(config.miniBubbleOffset()) }
+    if (ui.currentIndex < 0) return
+    // Kept on screen: from the start spot (bottom right, 140 dp up) to the left edge and up to below the top bar.
+    val screen = androidx.compose.ui.platform.LocalConfiguration.current
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val minX = -with(density) { (screen.screenWidthDp.dp - 130.dp).toPx() }
+    val minY = -with(density) { (screen.screenHeightDp.dp - 360.dp).toPx() }
+    val maxY = with(density) { 120.dp.toPx() }
+    fun clamp(o: androidx.compose.ui.geometry.Offset) = androidx.compose.ui.geometry.Offset(o.x.coerceIn(minX, 0f), o.y.coerceIn(minY, maxY))
+    drag = clamp(drag)
+    Row(
+        modifier
+            .offset { IntOffset(drag.x.roundToInt(), drag.y.roundToInt()) }
+            .pointerInput(Unit) {
+                detectDragGestures(onDragEnd = { config.saveMiniBubbleOffset(drag) }) { change, amount ->
+                    change.consume()
+                    drag = clamp(drag + amount)
+                }
+            }
+            .shadow(6.dp, RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(24.dp)).background(Palette.Surface2).padding(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(40.dp).clip(RoundedCornerShape(20.dp)).clickable(onClick = onExpand), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(
+                progress = { if (ui.durationMs > 0) (ui.positionMs.toFloat() / ui.durationMs).coerceIn(0f, 1f) else 0f },
+                modifier = Modifier.size(34.dp), strokeWidth = 2.dp, color = Palette.Accent, trackColor = Palette.Surface3,
+            )
+            Text("♪", fontSize = 16.sp)
+        }
+        Box(Modifier.size(40.dp).clip(RoundedCornerShape(20.dp)).clickable { player.togglePlay() }, contentAlignment = Alignment.Center) {
+            Text(if (ui.isPlaying) "❚❚" else "▶", fontSize = 15.sp, color = Palette.Accent)
+        }
+    }
+}
+
 // Persistent bar at the bottom of every section once something is queued; a tap on the song opens the full player
 // (FullPlayer: shuffle, position, À suivre, Similaires).
 @Composable
-fun MiniPlayer(player: PlayerConnection, db: AkashicDatabase, onOpen: () -> Unit) {
+fun MiniPlayer(player: PlayerConnection, db: AkashicDatabase, onCollapse: () -> Unit, onOpen: () -> Unit) {
     val ui = player.ui
     if (ui.currentIndex < 0) return
     val scope = rememberCoroutineScope()
@@ -442,6 +489,11 @@ fun MiniPlayer(player: PlayerConnection, db: AkashicDatabase, onOpen: () -> Unit
             .padding(horizontal = 12.dp, vertical = 4.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            // ⌄ shrinks the bar to a small bubble (MiniBubble), e.g. while reading.
+            Box(
+                Modifier.size(32.dp, 40.dp).clickable(onClick = onCollapse),
+                contentAlignment = Alignment.Center,
+            ) { Text("⌄", fontSize = 20.sp, color = Palette.TextFaint) }
             Column(Modifier.weight(1f).clickable(onClick = onOpen)) {
                 Text(ui.title.ifBlank { "Aucune piste" }, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold)
                 if (ui.artist.isNotBlank()) Text(ui.artist, fontSize = 11.sp, color = Palette.TextMuted, maxLines = 1)

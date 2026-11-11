@@ -38,6 +38,14 @@ class ConfigStore(context: Context) {
     )
 
     fun saveSection(section: String?) = putString(ConfigKeys.LAST_ACTIVE_SECTION, section)
+    // Phone only: the mini-player shrunk to its bubble (⌄), kept across launches.
+    fun miniPlayerCollapsed() = prefs.getBoolean("mini_player_collapsed", false)
+    fun saveMiniPlayerCollapsed(v: Boolean) = prefs.edit().putBoolean("mini_player_collapsed", v).apply()
+    // Where the bubble was dragged, in px from its starting spot.
+    fun miniBubbleOffset() = androidx.compose.ui.geometry.Offset(prefs.getFloat("mini_bubble_x", 0f), prefs.getFloat("mini_bubble_y", 0f))
+    fun saveMiniBubbleOffset(o: androidx.compose.ui.geometry.Offset) =
+        prefs.edit().putFloat("mini_bubble_x", o.x).putFloat("mini_bubble_y", o.y).apply()
+
     fun saveJournauxTab(tab: String?) = putString(ConfigKeys.JOURNAUX_ACTIVE_TAB, tab)
     fun saveJournauxItem(item: String?) = putString(ConfigKeys.JOURNAUX_ACTIVE_ITEM, item)
     fun saveOrganisationTab(tab: String?) = putString(ConfigKeys.ORG_ACTIVE_TAB, tab)

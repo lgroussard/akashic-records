@@ -158,6 +158,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
     var showMore by remember { mutableStateOf(false) }
     // The full player (from the mini-player, or a link to the old Queue / Similar tabs); null = closed.
     var fullPlayer by remember { mutableStateOf<Boolean?>(null) }
+    var miniCollapsed by remember { mutableStateOf(config.miniPlayerCollapsed()) }
     // Bumped after a PC import (and on deep links) so the section re-reads its state.
     var dataVersion by remember { mutableStateOf(0) }
 
@@ -239,7 +240,9 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
         bottomBar = {
             Column {
                 // Musique switched off: no mini-player either (its tap would open a hidden section).
-                if (Modules.isEnabled(disabled, "Musique")) MiniPlayer(player, db) { fullPlayer = false }
+                if (Modules.isEnabled(disabled, "Musique") && !miniCollapsed) {
+                    MiniPlayer(player, db, onCollapse = { miniCollapsed = true; config.saveMiniPlayerCollapsed(true) }) { fullPlayer = false }
+                }
                 NavigationBar(containerColor = Palette.Surface1, tonalElevation = 0.dp) {
                     navItems.forEach { item ->
                         NavigationBarItem(
@@ -277,6 +280,13 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
                         "Archives" -> ArchivesSection(db, config)
                         "Jeux" -> com.akashicrecords.games.GamesSection(db, disabled, openGame = gameTab, openItem = gameItem)
                     }
+                }
+            }
+            // The mini-player shrunk to a bubble (⌄): out of the way while reading, one tap brings it back. It starts
+            // on the right above the + buttons and the reader's footer, and can be dragged anywhere (kept).
+            if (Modules.isEnabled(disabled, "Musique") && miniCollapsed) {
+                com.akashicrecords.music.MiniBubble(player, config, Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 140.dp)) {
+                    miniCollapsed = false; config.saveMiniPlayerCollapsed(false)
                 }
             }
         }
