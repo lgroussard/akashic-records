@@ -64,21 +64,24 @@ public static class ItunesGate
     public static long RefusalCount { get { lock (Sync) return _refusals; } }
 
     // How long until a search request would be let through again (zero = now).
-    public static TimeSpan SearchWait
+    public static TimeSpan SearchWait => SearchWaitFor(1);
+
+    // How long until `need` search requests in a row would be let through. A search step sends one or two requests:
+    // waiting for a single free slot made it run, get held back on its next request, and show a new, random countdown
+    // (1 s, then 12, then 1...) — so the step waits until all its requests fit.
+    public static TimeSpan SearchWaitFor(int need)
     {
-        get
+        lock (Sync)
         {
-            lock (Sync)
-            {
-                var now = DateTime.UtcNow;
-                Prune(now);
-                var untilUnblocked = _blockedUntil > now ? _blockedUntil - now : TimeSpan.Zero;
-                var untilBudget = Stamps.Count >= TotalBudget
-                    ? Stamps.ElementAt(Stamps.Count - TotalBudget) + Window - now
-                    : TimeSpan.Zero;
-                var wait = untilUnblocked > untilBudget ? untilUnblocked : untilBudget;
-                return wait > TimeSpan.Zero ? wait : TimeSpan.Zero;
-            }
+            var now = DateTime.UtcNow;
+            Prune(now);
+            var untilUnblocked = _blockedUntil > now ? _blockedUntil - now : TimeSpan.Zero;
+            var over = Stamps.Count + need - TotalBudget; // requests that must leave the window first
+            var untilBudget = over > 0
+                ? Stamps.ElementAt(Math.Min(over, Stamps.Count) - 1) + Window - now
+                : TimeSpan.Zero;
+            var wait = untilUnblocked > untilBudget ? untilUnblocked : untilBudget;
+            return wait > TimeSpan.Zero ? wait : TimeSpan.Zero;
         }
     }
 

@@ -137,7 +137,7 @@ internal fun SearchPanel(
             loading = false
         }
         delay(1_000)
-        extras = retryWhenLimited({ limitedSeconds = it }) { OnlineSearch.extras(q) }
+        extras = retryWhenLimited({ limitedSeconds = it }, need = 2) { OnlineSearch.extras(q) }
         extrasFor = q
     }
     LaunchedEffect(openArtist, openAlbum) {
@@ -292,18 +292,27 @@ internal fun SearchPanel(
 
 // Runs a search step; when the iTunes limit holds it back, reports the wait (in seconds, counting down), sleeps it
 // and tries again — the screen keeps its previous results meanwhile. Cancelled with the calling effect (new keystroke).
-private suspend fun <T> retryWhenLimited(onWait: (Long) -> Unit, block: suspend () -> T): T {
+// `need` = the step's iTunes requests: it starts only once they all fit, so the countdown runs once, down to 0,
+// instead of restarting at a new value after each single request.
+private suspend fun <T> retryWhenLimited(onWait: (Long) -> Unit, need: Int = 1, block: suspend () -> T): T {
     while (true) {
+        val deadline = System.currentTimeMillis() + ItunesGate.searchWaitMs(need)
+        countdownTo(deadline, onWait)
         try {
             return block().also { onWait(0) }
         } catch (e: ItunesRateLimited) {
-            var left = (e.waitMs.coerceAtLeast(1_000) + 999) / 1_000
-            while (left > 0) {
-                onWait(left)
-                delay(1_000)
-                left--
-            }
+            countdownTo(System.currentTimeMillis() + maxOf(e.waitMs, ItunesGate.searchWaitMs(need), 1_000), onWait)
         }
+    }
+}
+
+// Shows the whole seconds left until `deadline`, ticking on the clock (no drift), then returns.
+private suspend fun countdownTo(deadline: Long, onWait: (Long) -> Unit) {
+    while (true) {
+        val left = deadline - System.currentTimeMillis()
+        if (left <= 0) return
+        onWait((left + 999) / 1_000)
+        delay(left % 1_000 + if (left % 1_000 == 0L) 1_000 else 0)
     }
 }
 

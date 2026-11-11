@@ -50,13 +50,16 @@ object ItunesGate {
     @Synchronized
     fun refusalCount() = refusals
 
-    // How long until a search request would be let through again (0 = now).
+    // How long until `need` search requests in a row would be let through (0 = now). A search step sends one or two
+    // requests: waiting for a single free slot made it run, get held back on its next request, and show a new, random
+    // countdown (1 s, then 12, then 1...) — so the step waits until all its requests fit.
     @Synchronized
-    fun searchWaitMs(): Long {
+    fun searchWaitMs(need: Int = 1): Long {
         val now = System.currentTimeMillis()
         prune(now)
         val untilUnblocked = (blockedUntil - now).coerceAtLeast(0)
-        val untilBudget = if (stamps.size >= TOTAL_BUDGET) stamps.elementAt(stamps.size - TOTAL_BUDGET) + WINDOW_MS - now else 0
+        val over = stamps.size + need - TOTAL_BUDGET // requests that must leave the window first
+        val untilBudget = if (over > 0) stamps.elementAt(minOf(over, stamps.size) - 1) + WINDOW_MS - now else 0
         return maxOf(untilUnblocked, untilBudget, 0)
     }
 

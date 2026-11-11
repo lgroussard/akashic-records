@@ -549,7 +549,7 @@ public partial class MusicPlayerWindow : Window
 
         await Task.Delay(1000);
         if (token != _onlineSearchToken) return;
-        var extras = await RetryWhenLimitedAsync(token, () => _onlineSearch.ExtrasAsync(query));
+        var extras = await RetryWhenLimitedAsync(token, () => _onlineSearch.ExtrasAsync(query), need: 2);
         if (token != _onlineSearchToken || extras is null) return;
         _onlineExtras = extras;
         _onlineExtrasFor = query;
@@ -559,25 +559,38 @@ public partial class MusicPlayerWindow : Window
 
     // Runs a search step; when the iTunes limit holds it back (see ItunesGate), says so with a countdown, waits and
     // tries again — the previous results stay on screen. Null when a newer keystroke took over meanwhile.
-    private async Task<T?> RetryWhenLimitedAsync<T>(int token, Func<Task<T>> step) where T : class
+    // `need` = the step's iTunes requests: it starts only once they all fit, so the countdown runs once, down to 0,
+    // instead of restarting at a new value after each single request.
+    private async Task<T?> RetryWhenLimitedAsync<T>(int token, Func<Task<T>> step, int need = 1) where T : class
     {
         while (true)
         {
+            if (!await CountdownAsync(token, DateTime.UtcNow + ItunesGate.SearchWaitFor(need))) return null;
             try
             {
                 return await step();
             }
             catch (ItunesRateLimitedException ex)
             {
-                for (var left = (int)Math.Ceiling(Math.Max(ex.Wait.TotalSeconds, 1)); left > 0; left--)
-                {
-                    if (token != _onlineSearchToken) return null;
-                    OnlineSearchStatus.Text = $"Trop de recherches d'affilée pour iTunes : reprise automatique dans {left} s. Les suggestions restent prioritaires.";
-                    OnlineSearchStatus.Visibility = Visibility.Visible;
-                    await Task.Delay(1000);
-                }
-                if (token != _onlineSearchToken) return null;
+                var wait = new[] { ex.Wait, ItunesGate.SearchWaitFor(need), TimeSpan.FromSeconds(1) }.Max();
+                if (!await CountdownAsync(token, DateTime.UtcNow + wait)) return null;
             }
+        }
+    }
+
+    // Shows the whole seconds left until `deadline`, ticking on the clock (no drift). False when a newer keystroke
+    // took over meanwhile.
+    private async Task<bool> CountdownAsync(int token, DateTime deadline)
+    {
+        while (true)
+        {
+            if (token != _onlineSearchToken) return false;
+            var left = deadline - DateTime.UtcNow;
+            if (left <= TimeSpan.Zero) return true;
+            OnlineSearchStatus.Text = $"Trop de recherches d'affilée pour iTunes : reprise automatique dans {(int)Math.Ceiling(left.TotalSeconds)} s. Les suggestions restent prioritaires.";
+            OnlineSearchStatus.Visibility = Visibility.Visible;
+            var tick = left.TotalMilliseconds % 1000;
+            await Task.Delay(TimeSpan.FromMilliseconds(tick < 1 ? 1000 : tick));
         }
     }
 
