@@ -566,4 +566,7 @@ interface CalendarEventLinkDao {
 
     @Query("SELECT * FROM CalendarEventLink WHERE OwnerType = :ownerType AND OwnerId = :ownerId")
     suspend fun forOwner(ownerType: String, ownerId: Int): List<CalendarEventLink>
+
+    @Query("SELECT * FROM CalendarEventLink")
+    suspend fun getAll(): List<CalendarEventLink>
 }

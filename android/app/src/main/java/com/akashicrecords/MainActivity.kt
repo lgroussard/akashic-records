@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.akashicrecords.data.AkashicDatabase
+import com.akashicrecords.data.CalendarEventLink
 import com.akashicrecords.data.ConfigStore
 import com.akashicrecords.data.Modules
 import com.akashicrecords.journaux.JournauxSection
@@ -154,8 +155,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
         if (section !in enabledSections) enabledSections.firstOrNull()?.let { go(it) }
     }
 
-    LaunchedEffect(launch) {
-        val l = launch ?: return@LaunchedEffect
+    fun handle(l: Launch) {
         if (l.section in SECTIONS && Modules.isEnabled(disabled, l.section)) {
             go(l.section)
             when (l.section) {
@@ -168,7 +168,31 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
             }
             dataVersion++
         }
+    }
+    LaunchedEffect(launch) {
+        val l = launch ?: return@LaunchedEffect
+        handle(l)
         onLaunchHandled()
+    }
+    // A link of a calendar event or birthday (made on the PC) → the item in its module. Poems and recipes open
+    // on the item itself; the other kinds open their module on the right tab.
+    fun openCalendarLink(link: CalendarEventLink) {
+        val target = when (link.Kind) {
+            "Poem" -> Launch("Journaux", "Poetry", null, link.PrimaryId)
+            "Recipe" -> Launch("Journaux", "Recipes", null, link.PrimaryId)
+            "JournalEntry" -> Launch("Journaux", "Personal", null, null)
+            "ArtisticProject" -> Launch("Journaux", "Artistic", null, null)
+            "Artwork", "Observation" -> {
+                link.Category?.let { config.saveCollectionsCategory(it.toString()) }
+                Launch("Collections", null, null, null)
+            }
+            "Photo" -> Launch("Archives", null, null, null)
+            "PersonalProject" -> { config.saveOrganisationTab("Projets"); Launch("Organisation", null, null, null) }
+            "Transition" -> { config.saveOrganisationTab("Transitions"); Launch("Organisation", null, null, null) }
+            "MusicTrack" -> Launch("Musique", null, null, null)
+            else -> null
+        }
+        target?.let { handle(it) }
     }
 
     // Reminders need the notification permission (Android 13+); asked once, at first launch.
@@ -219,7 +243,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
                         "Organisation" -> OrganisationSection(db, config)
                         "Journaux" -> JournauxSection(db, config, openItem = journalItem)
                         "Musique" -> MusicSection(db, config, player, initialTab = musicTab)
-                        "Calendrier" -> CalendarSection(db, openDate = calendarDate)
+                        "Calendrier" -> CalendarSection(db, openDate = calendarDate, onOpenLink = { openCalendarLink(it) })
                         "Collections" -> CollectionsSection(db, config)
                         "Lecture" -> com.akashicrecords.reading.LectureSection(db, config)
                         "Archives" -> ArchivesSection(db, config)

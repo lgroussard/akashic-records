@@ -33,6 +33,7 @@ import com.akashicrecords.SwipePages
 import com.akashicrecords.data.AkashicDatabase
 import com.akashicrecords.data.Birthday
 import com.akashicrecords.data.CalendarEvent
+import com.akashicrecords.data.CalendarEventLink
 import com.akashicrecords.journaux.dateIso
 import com.akashicrecords.journaux.nowIso
 import kotlinx.coroutines.Dispatchers
@@ -61,7 +62,7 @@ private sealed interface Editing {
 // items under it, then "Prochainement" (next 30 days). + adds an event or a birthday; tapping an
 // item edits it. Project deadlines are shown (edited in Organisation on the PC).
 @Composable
-fun CalendarSection(db: AkashicDatabase, openDate: LocalDate? = null) {
+fun CalendarSection(db: AkashicDatabase, openDate: LocalDate? = null, onOpenLink: (CalendarEventLink) -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var month by remember { mutableStateOf(YearMonth.from(openDate ?: LocalDate.now())) }
@@ -71,12 +72,20 @@ fun CalendarSection(db: AkashicDatabase, openDate: LocalDate? = null) {
     var version by remember { mutableStateOf(0) }
     var editing by remember { mutableStateOf<Editing?>(null) }
     var addMenu by remember { mutableStateOf(false) }
+    // Links made on the PC (an event or a birthday → a poem, a recipe, a fiche…), by owner "Event:12" / "Birthday:12".
+    var links by remember { mutableStateOf<Map<String, List<CalendarEventLink>>>(emptyMap()) }
 
     LaunchedEffect(month, version) {
         monthItems = withContext(Dispatchers.IO) { Agenda.month(db, month) }
         val today = LocalDate.now()
         upcoming = withContext(Dispatchers.IO) { Agenda.range(db, today, today.plusDays(30)) }
+        links = withContext(Dispatchers.IO) { db.calendarEventLinkDao().getAll().groupBy { "${it.OwnerType}:${it.OwnerId}" } }
     }
+    fun linksOf(item: AgendaItem) = when (item.source) {
+        AgendaSource.Event -> links["Event:${item.refId}"]
+        AgendaSource.Birthday -> links["Birthday:${item.refId}"]
+        AgendaSource.Deadline -> null
+    }.orEmpty()
 
     fun open(item: AgendaItem) {
         scope.launch {
@@ -123,7 +132,7 @@ fun CalendarSection(db: AkashicDatabase, openDate: LocalDate? = null) {
             if (ofDay.isEmpty()) {
                 item { Text("Rien ce jour-là.", color = Palette.TextFaint, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) }
             }
-            items(ofDay, key = { "d:" + it.notificationKey }) { AgendaRow(it, showDate = false) { open(it) } }
+            items(ofDay, key = { "d:" + it.notificationKey }) { AgendaRow(it, showDate = false, linksOf(it), onOpenLink) { open(it) } }
 
             item {
                 Text(
@@ -136,7 +145,7 @@ fun CalendarSection(db: AkashicDatabase, openDate: LocalDate? = null) {
             if (next.isEmpty()) {
                 item { Text("Rien dans les 30 prochains jours.", color = Palette.TextFaint, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp)) }
             }
-            items(next, key = { "u:" + it.notificationKey }) { AgendaRow(it, showDate = true) { open(it) } }
+            items(next, key = { "u:" + it.notificationKey }) { AgendaRow(it, showDate = true, linksOf(it), onOpenLink) { open(it) } }
         }
 
         Box(Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
@@ -222,7 +231,13 @@ private fun MonthGrid(month: YearMonth, selected: LocalDate, items: List<AgendaI
 }
 
 @Composable
-private fun AgendaRow(item: AgendaItem, showDate: Boolean, onClick: () -> Unit) {
+private fun AgendaRow(
+    item: AgendaItem,
+    showDate: Boolean,
+    links: List<CalendarEventLink> = emptyList(),
+    onOpenLink: (CalendarEventLink) -> Unit = {},
+    onClick: () -> Unit,
+) {
     Row(
         Modifier.fillMaxWidth().clickable(enabled = item.source != AgendaSource.Deadline, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 7.dp),
@@ -239,6 +254,16 @@ private fun AgendaRow(item: AgendaItem, showDate: Boolean, onClick: () -> Unit) 
             }
             val sub = listOf(label, item.subtitle).filter { it.isNotBlank() }.joinToString(" · ")
             Text(sub, fontSize = 11.sp, color = Palette.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // Items linked on the PC (a poem for a birthday…): a tap opens them in their module.
+            links.forEach { link ->
+                Text(
+                    "↗ " + link.Title.ifBlank { link.Kind },
+                    fontSize = 12.sp, color = Palette.Accent, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 3.dp).clip(RoundedCornerShape(6.dp))
+                        .clickable { onOpenLink(link) }
+                        .background(Palette.Accent.copy(alpha = 0.12f)).padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
         }
         Column(horizontalAlignment = Alignment.End) {
             if (showDate) Text(relativeDay(item.date), fontSize = 12.sp, color = Palette.TextMuted)
