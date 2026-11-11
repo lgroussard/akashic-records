@@ -517,8 +517,8 @@ public partial class MusicPlayerWindow : Window
     // Artist/album page currently open over the results (title line + its songs), null = the results.
     private (string Title, string Subtitle, string? Artwork, IReadOnlyList<SimilarTrack>? Tracks)? _onlinePage;
 
-    // Search as you type. Every keystroke bumps the token, which drops the searches still waiting: songs come 350 ms
-    // after the last key (1 request), artists + albums once the typing has paused ~0.9 s (2 requests) — iTunes allows
+    // Search as you type. Every keystroke bumps the token, which drops the searches still waiting: songs come 700 ms
+    // after the last key (1 request), artists + albums once the typing has paused ~1.7 s (2 requests) — iTunes allows
     // ~20 requests a minute. The previous results stay visible until the new ones arrive.
     private async void OnlineSearchInput_OnTextChanged(object sender, TextChangedEventArgs e)
     {
@@ -535,7 +535,7 @@ public partial class MusicPlayerWindow : Window
             return;
         }
 
-        await Task.Delay(350);
+        await Task.Delay(700);
         if (token != _onlineSearchToken) return;
         _onlinePage = null;
         OnlineSearchStatus.Text = "Recherche…";
@@ -547,7 +547,7 @@ public partial class MusicPlayerWindow : Window
         ShowOnlineStatus();
         RenderOnlineResults();
 
-        await Task.Delay(550);
+        await Task.Delay(1000);
         if (token != _onlineSearchToken) return;
         var extras = await RetryWhenLimitedAsync(token, () => _onlineSearch.ExtrasAsync(query));
         if (token != _onlineSearchToken || extras is null) return;

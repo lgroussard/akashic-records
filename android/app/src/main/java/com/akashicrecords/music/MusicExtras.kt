@@ -120,14 +120,14 @@ internal fun SearchPanel(
     val libraryArtists = remember(library) { library.mapTo(HashSet()) { SearchRanking.norm(it.Artist) } }
 
     // Search as you type. Each keystroke restarts this effect, which cancels the pending search: songs come
-    // 350 ms after the last key (1 request), artists + albums once the typing has paused ~0.9 s (2 requests) —
+    // 700 ms after the last key (1 request), artists + albums once the typing has paused ~1.7 s (2 requests) —
     // iTunes allows ~20 requests a minute. The previous results stay on screen until the new ones arrive.
     LaunchedEffect(query) {
         val q = query.trim()
         showAllTracks = false
         limitedSeconds = 0
         if (q.length < 2) { tracks = null; extras = null; loading = false; return@LaunchedEffect }
-        delay(350)
+        delay(700)
         openArtist = null; openAlbum = null
         loading = true
         try {
@@ -135,7 +135,7 @@ internal fun SearchPanel(
         } finally {
             loading = false
         }
-        delay(550)
+        delay(1_000)
         extras = retryWhenLimited({ limitedSeconds = it }) { OnlineSearch.extras(q) }
         extrasFor = q
     }
