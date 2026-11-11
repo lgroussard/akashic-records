@@ -129,6 +129,8 @@ class PlayerConnection(context: Context) {
     fun seekTo(ms: Long) = controller?.seekTo(ms)
     fun jumpTo(index: Int) = controller?.let { it.seekTo(index, 0); it.play() }
     fun removeAt(index: Int) = controller?.removeMediaItem(index)
+    // Stops listening: playback ends and the queue is emptied, so the mini-player and the notification go away.
+    fun stop() = controller?.let { it.stop(); it.clearMediaItems() }
     fun toggleShuffle() = controller?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled }
 
     fun release() {

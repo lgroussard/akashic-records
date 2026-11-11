@@ -464,6 +464,10 @@ fun MiniPlayer(player: PlayerConnection, db: AkashicDatabase, onOpen: () -> Unit
             TextButton(onClick = { player.previous() }) { Text("⏮", fontSize = 18.sp) }
             TextButton(onClick = { player.togglePlay() }) { Text(if (ui.isPlaying) "❚❚" else "▶", fontSize = 18.sp) }
             TextButton(onClick = { player.next() }) { Text("⏭", fontSize = 18.sp) }
+            // Stop listening: empties the queue, the bar disappears.
+            TextButton(onClick = { player.stop() }, contentPadding = PaddingValues(horizontal = 4.dp), modifier = Modifier.widthIn(min = 36.dp)) {
+                Text("✕", fontSize = 16.sp, color = Palette.TextFaint)
+            }
         }
         // Where the song is, as a thin line (the full player has the slider).
         if (ui.durationMs > 0) {

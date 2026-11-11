@@ -95,11 +95,13 @@ fun FullPlayer(db: AkashicDatabase, player: PlayerConnection, startOnSimilar: Bo
                 } else Spacer(Modifier.width(48.dp))
             }
 
-            // À suivre / Similaires
-            Row(Modifier.padding(top = 4.dp)) {
+            // À suivre / Similaires, and stopping altogether
+            Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 FilterChip(selected = section == "Queue", onClick = { section = "Queue" }, label = { Text("À suivre (${ui.queue.size})") })
                 Spacer(Modifier.width(8.dp))
                 FilterChip(selected = section == "Similar", onClick = { section = "Similar" }, label = { Text("Similaires") })
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { player.stop(); onClose() }) { Text("■ Arrêter", color = Palette.TextMuted) }
             }
             Box(Modifier.fillMaxWidth().weight(1f).padding(top = 4.dp)) {
                 if (section == "Queue") QueueList(player)

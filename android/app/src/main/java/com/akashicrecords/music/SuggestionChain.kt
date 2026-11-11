@@ -114,7 +114,14 @@ class SuggestionChain(private val context: Context, private val player: Player) 
     }
 
     private fun onQueueMoved() {
-        if (player.mediaItemCount == 0) return
+        if (player.mediaItemCount == 0) {
+            // Listening stopped (queue cleared): forget the run, so no suggestion is appended into the empty queue.
+            job?.cancel()
+            job = null
+            runKey = null
+            skipRequested = false
+            return
+        }
         val first = player.getMediaItemAt(0)
         if (first.mediaId != runKey) {
             runKey = first.mediaId
