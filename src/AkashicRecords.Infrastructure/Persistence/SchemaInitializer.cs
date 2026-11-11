@@ -343,6 +343,28 @@ public sealed class SchemaInitializer
                     CreatedAt TEXT NOT NULL,
                     ObservationId INTEGER
                 );
+
+                -- Références (image boards), same tables as the phone (Room v4).
+                CREATE TABLE IF NOT EXISTS RefBoard (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Title TEXT NOT NULL,
+                    CreatedAt TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS RefImage (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    BoardId INTEGER,
+                    ImagePath TEXT NOT NULL,
+                    Title TEXT NOT NULL,
+                    Author TEXT NOT NULL,
+                    Source TEXT NOT NULL,
+                    SourceUrl TEXT,
+                    PageUrl TEXT,
+                    Width INTEGER NOT NULL,
+                    Height INTEGER NOT NULL,
+                    Note TEXT NOT NULL,
+                    CreatedAt TEXT NOT NULL
+                );
                 """;
             command.ExecuteNonQuery();
         }

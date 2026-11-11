@@ -1,0 +1,90 @@
+<UserControl x:Class="AkashicRecords.App.Views.ReferencesView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             AllowDrop="True" Focusable="True" Background="Transparent"
+             DragOver="Root_OnDragOver" Drop="Root_OnDrop" PreviewKeyDown="Root_OnPreviewKeyDown">
+    <!-- Journaux → Références: image boards in place of Pinterest. Images come from the search (Wikimedia Commons,
+         Cleveland Museum of Art), or are dropped / pasted (Ctrl+V) here: a file, an image, or a link to a page. -->
+    <Grid>
+        <Grid Margin="16,8,16,0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- Search -->
+            <DockPanel Grid.Row="0" LastChildFill="True">
+                <Button x:Name="BackToBoardsButton" DockPanel.Dock="Right" Content="← Mes tableaux" Visibility="Collapsed"
+                        Style="{StaticResource SecondaryButtonStyle}" Margin="8,0,0,0" Click="BackToBoardsButton_OnClick"/>
+                <StackPanel x:Name="SourcesPanel" DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                <Grid>
+                    <TextBox x:Name="SearchInput" Style="{StaticResource DarkTextBoxStyle}" KeyDown="SearchInput_OnKeyDown"
+                             ToolTip="Entrée pour chercher (Wikimedia Commons, Cleveland Museum of Art)"/>
+                    <TextBlock Text="Chercher des images… (Entrée)" Margin="10,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"
+                               Foreground="{StaticResource TextFaintBrush}"
+                               >
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Text, ElementName=SearchInput}" Value="">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Grid>
+            </DockPanel>
+
+            <!-- Boards (hidden while searching) -->
+            <WrapPanel x:Name="BoardsBar" Grid.Row="1" Margin="0,8,0,0" Orientation="Horizontal"/>
+            <TextBlock x:Name="StatusText" Grid.Row="2" Margin="0,6,0,0" Foreground="{StaticResource TextMutedBrush}"
+                       TextWrapping="Wrap" Visibility="Collapsed"/>
+
+            <!-- Masonry grid: columns filled shortest-first (Pinterest-like) -->
+            <ScrollViewer x:Name="GridScroll" Grid.Row="3" Margin="0,8,0,0" VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled" SizeChanged="GridScroll_OnSizeChanged"
+                          ScrollChanged="GridScroll_OnScrollChanged">
+                <StackPanel>
+                    <Grid x:Name="Columns"/>
+                    <Button x:Name="MoreButton" Content="Plus de résultats" Visibility="Collapsed" HorizontalAlignment="Center"
+                            Style="{StaticResource SecondaryButtonStyle}" Margin="0,8,0,16" Click="MoreButton_OnClick"/>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <!-- Large view of an image (saved one or search hit) -->
+        <Grid x:Name="Viewer" Visibility="Collapsed" Background="{StaticResource OverlayBrush}" MouseLeftButtonDown="Viewer_OnBackgroundClick">
+            <Border Background="{StaticResource Surface1Brush}" CornerRadius="10" Margin="60,30" Padding="16"
+                    MouseLeftButtonDown="ViewerCard_OnMouseDown">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Image x:Name="ViewerImage" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+                    <StackPanel Grid.Row="1" Margin="0,12,0,0">
+                        <TextBlock x:Name="ViewerTitle" Foreground="{StaticResource TextBrush}" FontSize="16" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="ViewerMeta" Foreground="{StaticResource TextMutedBrush}" Margin="0,2,0,0"/>
+                        <DockPanel Margin="0,10,0,0" LastChildFill="False">
+                            <TextBlock Text="Tableau :" Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <ComboBox x:Name="ViewerBoard" Width="200" Style="{StaticResource DarkComboBoxStyle}"
+                                      SelectionChanged="ViewerBoard_OnSelectionChanged"/>
+                            <Button x:Name="ViewerSourceButton" Content="Source ↗" Style="{StaticResource SecondaryButtonStyle}"
+                                    Margin="8,0,0,0" Click="ViewerSource_OnClick"/>
+                            <Button x:Name="ViewerDeleteButton" Content="Supprimer" Style="{StaticResource SecondaryButtonStyle}"
+                                    Margin="8,0,0,0" Click="ViewerDelete_OnClick"/>
+                            <Button DockPanel.Dock="Right" Content="Fermer" Style="{StaticResource SecondaryButtonStyle}"
+                                    Margin="8,0,0,0" Click="ViewerClose_OnClick"/>
+                            <Button x:Name="ViewerSaveButton" DockPanel.Dock="Right" Content="Enregistrer" Style="{StaticResource PrimaryButtonStyle}"
+                                    Margin="8,0,0,0" Click="ViewerSave_OnClick"/>
+                        </DockPanel>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

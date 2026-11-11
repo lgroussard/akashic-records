@@ -28,6 +28,7 @@ public static class Modules
             new AppModule("Journaux.Recipes", "Journal de recettes"),
             new AppModule("Journaux.Poetry", "Recueil de poésie"),
             new AppModule("Journaux.Artistic", "Archive artistique"),
+            new AppModule("Journaux.References", "Références"),
         }),
         new AppModule("Collections", "Collections", new[]
         {

@@ -107,7 +107,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
         InitializeComponent();
         _config = config;
         config.JournauxActiveTab = ModuleTabs.Apply(config, "Journaux", config.JournauxActiveTab, "Personal",
-            PersonalJournalTab, RecipesJournalTab, PoetryJournalTab, ArtisticJournalTab);
+            PersonalJournalTab, RecipesJournalTab, PoetryJournalTab, ArtisticJournalTab, ReferencesJournalTab);
         _activeTab = config.JournauxActiveTab;
         PopulateFontFamilies();
         if (!string.IsNullOrEmpty(_activeTab))
@@ -118,6 +118,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
                 "Recipes" => RecipesJournalTab,
                 "Poetry" => PoetryJournalTab,
                 "Artistic" => ArtisticJournalTab,
+                "References" => ReferencesJournalTab,
                 _ => null
             };
             if (tab is not null) SwitchJournalTab(tab, _activeTab);
@@ -214,6 +215,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
             "Recipes" => RecipesJournalTab,
             "Poetry" => PoetryJournalTab,
             "Artistic" => ArtisticJournalTab,
+            "References" => ReferencesJournalTab,
             _ => PersonalJournalTab
         };
         SwitchJournalTab(target, tab);
@@ -282,7 +284,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
     // Mirrors JournalTypeTab_OnClick without needing the original event args, for deep-linking.
     private void SwitchJournalTab(ToggleButton tab, string type)
     {
-        foreach (var t in new[] { PersonalJournalTab, RecipesJournalTab, PoetryJournalTab, ArtisticJournalTab })
+        foreach (var t in new[] { PersonalJournalTab, RecipesJournalTab, PoetryJournalTab, ArtisticJournalTab, ReferencesJournalTab })
         {
             t.IsChecked = t == tab;
         }
@@ -291,6 +293,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
         RecipesRoot.Visibility = type == "Recipes" ? Visibility.Visible : Visibility.Collapsed;
         PoetryRoot.Visibility = type == "Poetry" ? Visibility.Visible : Visibility.Collapsed;
         ArtisticJournalRoot.Visibility = type == "Artistic" ? Visibility.Visible : Visibility.Collapsed;
+        ReferencesRoot.Visibility = type == "References" ? Visibility.Visible : Visibility.Collapsed;
 
         _activeTab = type;
         _config.JournauxActiveTab = type;
@@ -417,7 +420,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
     {
         if (sender is not ToggleButton clicked || clicked.Tag is not string type) return;
 
-        foreach (var tab in new[] { PersonalJournalTab, RecipesJournalTab, PoetryJournalTab, ArtisticJournalTab })
+        foreach (var tab in new[] { PersonalJournalTab, RecipesJournalTab, PoetryJournalTab, ArtisticJournalTab, ReferencesJournalTab })
         {
             tab.IsChecked = tab == clicked;
         }
@@ -426,6 +429,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
 
         if (type == "Recipes") RefreshRecipesList();
         if (type == "Poetry") RefreshPoetry();
+        if (type == "References") ReferencesPane.Refresh();
 
         // Re-point at what the new tab shows, so the item of the tab just left can't drag the user back there.
         SaveActiveItem();

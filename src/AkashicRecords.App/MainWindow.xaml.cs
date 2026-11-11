@@ -991,7 +991,7 @@ public partial class MainWindow : Window
                 case OrganisationView org when tab is "Projets" or "Transitions":
                     org.ShowTabForScreenshot(tab);
                     break;
-                case JournauxView jour when tab is "Personal" or "Recipes" or "Poetry" or "Artistic":
+                case JournauxView jour when tab is "Personal" or "Recipes" or "Poetry" or "Artistic" or "References":
                     jour.ShowTabForScreenshot(tab);
                     break;
                 case CollectionsView coll when tab is "Film" or "FilmAnimation" or "TvSeries" or "Anime" or "Livre" or "VideoGame" or "Watchlist":
