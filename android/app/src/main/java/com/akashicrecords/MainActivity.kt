@@ -131,7 +131,7 @@ private val NAV = listOf(
     NavItem("Lecture", "Lecture", iconRes = R.drawable.g_book),
 )
 // Collections moved here when Lecture took its place in the bar (phone only).
-private val MORE = listOf("Organisation", "Collections", "Archives", "Mots croisés")
+private val MORE = listOf("Organisation", "Collections", "Archives", "Jeux")
 private val SECTIONS = NAV.map { it.section } + MORE
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -149,6 +149,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
     }
     var calendarDate by remember { mutableStateOf<LocalDate?>(null) }
     var musicTab by remember { mutableStateOf<String?>(null) }
+    var gameTab by remember { mutableStateOf<String?>(null) } // a game opened from its home-screen icon
     var journalItem by remember { mutableStateOf<Int?>(null) }
     val player = rememberPlayerConnection()
     var showSettings by remember { mutableStateOf(false) }
@@ -163,6 +164,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
         journalItem = null
         calendarDate = null
         musicTab = null
+        gameTab = null
     }
 
     // The open section was just switched off in the settings: move to the first one still on.
@@ -180,6 +182,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
                     journalItem = l.item
                 }
                 "Musique" -> musicTab = l.tab
+                "Jeux" -> gameTab = l.tab
             }
             dataVersion++
         }
@@ -262,7 +265,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
                         "Collections" -> CollectionsSection(db, config)
                         "Lecture" -> com.akashicrecords.reading.LectureSection(db, config)
                         "Archives" -> ArchivesSection(db, config)
-                        "Mots croisés" -> com.akashicrecords.crossword.CrosswordSection(db)
+                        "Jeux" -> com.akashicrecords.games.GamesSection(db, disabled, openGame = gameTab)
                     }
                 }
             }
@@ -275,6 +278,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
                 if ("Organisation" in moreItems) MoreRow("Organisation", "Projets et transitions") { showMore = false; go("Organisation") }
                 if ("Collections" in moreItems) MoreRow("Collections", "Films, séries, livres, jeux — par tier") { showMore = false; go("Collections") }
                 if ("Archives" in moreItems) MoreRow("Archives", "Photos et archive familiale") { showMore = false; go("Archives") }
+                if ("Jeux" in moreItems) MoreRow("Jeux", "Mots croisés") { showMore = false; go("Jeux") }
                 HorizontalDivider(color = Palette.BorderStrong, modifier = Modifier.padding(vertical = 6.dp))
                 MoreRow("Réglages", "Modules, widgets, import des données du PC") { showMore = false; showSettings = true }
             }

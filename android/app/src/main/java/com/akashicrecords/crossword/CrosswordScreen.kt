@@ -33,19 +33,21 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-// Plus → Mots croisés (phone only): grids generated from the bundled word lists, or imported as .ipuz files.
+// Plus → Jeux → Mots croisés (phone only): grids generated from the bundled word lists, or imported as .ipuz files.
+// [onExit]: back to the list of games.
 @Composable
-fun CrosswordSection(db: AkashicDatabase) {
+fun CrosswordSection(db: AkashicDatabase, onExit: () -> Unit = {}) {
     var openId by remember { mutableStateOf<Int?>(null) }
     val id = openId
-    if (id == null) GameList(db, onOpen = { openId = it })
+    if (id == null) GameList(db, onOpen = { openId = it }, onExit = onExit)
     else GameScreen(db, id, onBack = { openId = null })
 }
 
 // ---- List of grids ----
 
 @Composable
-private fun GameList(db: AkashicDatabase, onOpen: (Int) -> Unit) {
+private fun GameList(db: AkashicDatabase, onOpen: (Int) -> Unit, onExit: () -> Unit) {
+    BackHandler(onBack = onExit)
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var games by remember { mutableStateOf<List<CrosswordGame>?>(null) }
@@ -99,7 +101,8 @@ private fun GameList(db: AkashicDatabase, onOpen: (Int) -> Unit) {
     }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        Text("Nouvelle grille", fontSize = 13.sp, color = Palette.TextMuted, modifier = Modifier.padding(top = 12.dp, bottom = 6.dp))
+        TextButton(onClick = onExit, modifier = Modifier.padding(top = 4.dp)) { Text("← Jeux") }
+        Text("Nouvelle grille", fontSize = 13.sp, color = Palette.TextMuted, modifier = Modifier.padding(bottom = 6.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             listOf(7, 8, 9).forEach { size ->
                 Button(onClick = { newGrid(size) }, enabled = !generating, modifier = Modifier.padding(end = 8.dp)) { Text("$size × $size") }
