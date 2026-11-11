@@ -46,6 +46,8 @@ import com.akashicrecords.data.AkashicDatabase
 import com.akashicrecords.data.CalendarEventLink
 import com.akashicrecords.data.ConfigStore
 import com.akashicrecords.data.Modules
+import com.akashicrecords.references.SharedRef
+import com.akashicrecords.references.ShareToReferencesSheet
 import com.akashicrecords.journaux.JournauxSection
 import com.akashicrecords.music.MiniPlayer
 import com.akashicrecords.music.MusicSection
@@ -59,6 +61,10 @@ import kotlinx.coroutines.withContext
 class MainActivity : ComponentActivity() {
     // Latest launch request (notification tap, launcher shortcut): section + optional extras.
     private var launch by mutableStateOf<Launch?>(null)
+    // An image or link shared from another app (Share → Akashic), shown in a sheet over the app.
+    private var share by mutableStateOf<SharedRef?>(null)
+    // Opened just for a share: close afterwards, back to the app that shared.
+    private var openedForShare = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,11 +72,19 @@ class MainActivity : ComponentActivity() {
         val config = ConfigStore(applicationContext)
         Reminders.schedule(applicationContext)
         launch = Launch.from(intent)
+        share = SharedRef.from(intent)
+        openedForShare = share != null && savedInstanceState == null
         setContent {
             MaterialTheme(colorScheme = AkashicColorScheme, typography = AkashicTypography) {
                 // Default text colour for every Text that sets none (M3 falls back to black otherwise).
                 CompositionLocalProvider(LocalContentColor provides Palette.Text) {
                     AkashicApp(db, config, launch) { launch = null }
+                    share?.let { s ->
+                        ShareToReferencesSheet(db, s) {
+                            share = null
+                            if (openedForShare) finish()
+                        }
+                    }
                 }
             }
         }
@@ -85,6 +99,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         launch = Launch.from(intent)
+        SharedRef.from(intent)?.let { share = it }
     }
 }
 

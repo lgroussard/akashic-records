@@ -47,8 +47,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CalendarEventLink::class,
         Book::class,
         BookHighlight::class,
+        RefBoard::class,
+        RefImage::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -90,6 +92,8 @@ abstract class AkashicDatabase : RoomDatabase() {
     abstract fun calendarEventLinkDao(): CalendarEventLinkDao
     abstract fun bookDao(): BookDao
     abstract fun bookHighlightDao(): BookHighlightDao
+    abstract fun refBoardDao(): RefBoardDao
+    abstract fun refImageDao(): RefImageDao
 
     companion object {
         @Volatile
@@ -100,7 +104,7 @@ abstract class AkashicDatabase : RoomDatabase() {
                 context.applicationContext,
                 AkashicDatabase::class.java,
                 "akashic.db",
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { instance = it }
 
         // v2: phone-only poem formatting next to the PC columns (the desktop schema has the same
         // columns, so imports and the future sync carry both layouts).
@@ -127,6 +131,22 @@ abstract class AkashicDatabase : RoomDatabase() {
                     "CREATE TABLE IF NOT EXISTS `BookHighlight` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
                         "`BookId` INTEGER NOT NULL, `Chapter` INTEGER NOT NULL, `Text` TEXT NOT NULL, `Note` TEXT NOT NULL, " +
                         "`Locator` TEXT NOT NULL, `CreatedAt` TEXT NOT NULL, `ObservationId` INTEGER)",
+                )
+            }
+        }
+
+        // v4: Références (image boards). Same two tables in the desktop SchemaInitializer.
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `RefBoard` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`Title` TEXT NOT NULL, `CreatedAt` TEXT NOT NULL)",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `RefImage` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`BoardId` INTEGER, `ImagePath` TEXT NOT NULL, `Title` TEXT NOT NULL, `Author` TEXT NOT NULL, " +
+                        "`Source` TEXT NOT NULL, `SourceUrl` TEXT, `PageUrl` TEXT, `Width` INTEGER NOT NULL, " +
+                        "`Height` INTEGER NOT NULL, `Note` TEXT NOT NULL, `CreatedAt` TEXT NOT NULL)",
                 )
             }
         }

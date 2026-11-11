@@ -17,6 +17,7 @@ object Modules {
             AppModule("Journaux.Poetry", "Poésie"),
             AppModule("Journaux.Recipes", "Recettes"),
             AppModule("Journaux.Artistic", "Archive artistique"),
+            AppModule("Journaux.References", "Références"),
         )),
         AppModule("Musique", "Musique"),
         AppModule("Calendrier", "Calendrier"),

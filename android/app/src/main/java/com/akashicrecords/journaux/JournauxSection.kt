@@ -36,6 +36,7 @@ fun JournauxSection(db: AkashicDatabase, config: ConfigStore, openItem: Int? = n
                 "Poésie" to "Poetry",
                 "Recettes" to "Recipes",
                 "Archive artistique" to "Artistic",
+                "Références" to "References",
             )),
             tab,
         ) { tab = it; config.saveJournauxTab(it) }
@@ -47,6 +48,7 @@ fun JournauxSection(db: AkashicDatabase, config: ConfigStore, openItem: Int? = n
                     "Recipes" -> RecipesJournal(db, openItem)
                     "Poetry" -> PoetryJournal(db, openItem)
                     "Artistic" -> ArtisticJournal(db)
+                    "References" -> com.akashicrecords.references.ReferencesJournal(db)
                 }
             }
         }

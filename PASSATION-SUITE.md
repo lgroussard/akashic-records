@@ -111,7 +111,7 @@
 - Limites : pas de livres récents sous droits ; les prêts d'Internet Archive sont sous DRM ;
   **pas** de bibliothèques pirates (Anna's Archive, LibGen).
 
-### 5. Films et animes
+### 5. Films et animes — abandonné (décision de l'utilisateur, 2026-11-11)
 - **Non** pour les sites de streaming sans droits (type celui cité) : illégal, et instable de toute façon.
 - **Alternatives** :
   - avec le serveur : **Jellyfin** pour ses propres fichiers (appli + API ; un « À voir » présent sur le serveur se lancerait en un appui) ;
@@ -132,7 +132,7 @@
 - En dernier, comme prévu.
 
 ### Ordre conseillé
-**1 → 2** (fondations) → **3** (rapide, gros plaisir) → **4a → 4b** → **6** → **5** (avec le serveur) → **7**.
+**1 → 2** (fondations) → **3** (rapide, gros plaisir) → **4a → 4b** → **6** → **7** → adapter au mobile les modules mal adaptés. (Le 5 est abandonné.)
 Le serveur peut être acheté à tout moment.
 
 ---

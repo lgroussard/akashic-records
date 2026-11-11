@@ -23,7 +23,7 @@ object DesktopImport {
 
     // Tables the phone owns (the PC has them too, empty): never overwritten by an import. Their links into
     // Artwork/Observation, which the import does refill, are repaired right after (ReadingLinks.relinkAfterImport).
-    private val PHONE_ONLY = setOf("Book", "BookHighlight")
+    private val PHONE_ONLY = setOf("Book", "BookHighlight", "RefBoard", "RefImage")
 
     fun run(context: Context, source: Uri, db: AkashicDatabase): Result {
         val work = File(context.cacheDir, "import").apply { deleteRecursively(); mkdirs() }
