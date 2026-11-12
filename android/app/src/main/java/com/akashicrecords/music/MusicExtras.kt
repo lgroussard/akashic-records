@@ -64,11 +64,27 @@ internal fun SimilarPanel(
     var list by remember { mutableStateOf<List<SimilarTrack>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
 
+    // Seconds until iTunes lets requests through again, when the list came back empty because of its limit.
+    var limitedFor by remember { mutableStateOf(0L) }
     LaunchedEffect(seed) {
         val (t, a) = seed ?: return@LaunchedEffect
         loading = true
-        list = withContext(Dispatchers.IO) { Recommendations.similar(t, a) }
-        loading = false
+        limitedFor = 0
+        // Empty because of the iTunes limit (not an unknown title): says so, waits, tries again — twice at most.
+        repeat(3) { attempt ->
+            val refusals = ItunesGate.refusalCount()
+            list = withContext(Dispatchers.IO) { Recommendations.similar(t, a, userAsked = true) }
+            val wait = ItunesGate.searchWaitMs()
+            if (list.isNotEmpty() || ItunesGate.refusalCount() == refusals || attempt == 2) { loading = false; limitedFor = 0; return@LaunchedEffect }
+            loading = false
+            val until = System.currentTimeMillis() + maxOf(wait, 5_000)
+            while (System.currentTimeMillis() < until) {
+                limitedFor = (until - System.currentTimeMillis() + 999) / 1000
+                kotlinx.coroutines.delay(1_000)
+            }
+            limitedFor = 0
+            loading = true
+        }
     }
 
     val s = seed
@@ -78,11 +94,14 @@ internal fun SimilarPanel(
     }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Autour de « ${s.first} »", fontSize = 12.sp, color = Palette.TextFaint, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // The song as it was searched (a file name brought back to title — artist).
+            val shown = remember(s) { Recommendations.seed(s.first, s.second).let { (t, a) -> if (a.isBlank()) t else "$t — $a" } }
+            Text("Autour de « $shown »", fontSize = 12.sp, color = Palette.TextFaint, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             TextButton(onClick = { seed = s.copy() }, enabled = !loading) { Text("⟳") }
         }
         when {
             loading -> Text("Recherche…", color = Palette.TextMuted, modifier = Modifier.padding(12.dp))
+            limitedFor > 0 -> Text("Trop de demandes à iTunes cette minute : nouvel essai dans $limitedFor s.", color = Palette.TextMuted, modifier = Modifier.padding(12.dp))
             list.isEmpty() -> Text("Aucune suggestion (pas de réseau, ou titre inconnu des catalogues).", color = Palette.TextMuted, modifier = Modifier.padding(12.dp))
         }
         // Suggestions go into the folder of the album that is playing (they are "around" it).

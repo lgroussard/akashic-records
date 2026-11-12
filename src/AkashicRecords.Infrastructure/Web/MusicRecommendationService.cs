@@ -1,5 +1,6 @@
 using System.Net.Http;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace AkashicRecords.Infrastructure.Web;
 
@@ -72,7 +73,11 @@ public sealed class MusicRecommendationService
         string title, string? artist, int limit = MaxResults, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(title)) return Array.Empty<SimilarTrack>();
-        var key = $"{CleanTitle(title).ToLowerInvariant()}|{artist?.Trim().ToLowerInvariant()}|{limit}";
+        // A downloaded song is named after its YouTube video ("Daft Punk - Get Lucky (Official Audio) ft. Pharrell…", artist =
+        // the channel): searched as is, iTunes and MusicBrainz matched other songs, so its suggestions drifted away from it.
+        // The seed is brought back to the plain title + artist a suggestion carries (SeedOf).
+        (title, artist) = SeedOf(title, artist);
+        var key = $"{title.ToLowerInvariant()}|{artist?.ToLowerInvariant()}|{limit}";
         lock (SimilarCache)
             if (SimilarCache.TryGetValue(key, out var cached)) return cached;
         // A list cut short by the iTunes limit is not kept, so the next try can complete it.
@@ -93,7 +98,7 @@ public sealed class MusicRecommendationService
         if (!System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable())
             return Array.Empty<SimilarTrack>();
 
-        var clean = CleanTitle(title);
+        var clean = title;
         var query = string.IsNullOrWhiteSpace(artist) ? clean : $"{clean} {artist.Trim()}";
         var result = new List<SimilarTrack>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -119,7 +124,11 @@ public sealed class MusicRecommendationService
 
             // --- Category-based neighbours: MusicBrainz genre first, iTunes as fallback ----
             // (MusicBrainz recordings often carry no genre at all; iTunes always answers.)
-            var genre = await MusicBrainzGenreAsync(query, ct) ?? itunesGenre;
+            // Fielded query when the artist is known: a loose one often landed on a namesake recording (another genre).
+            var mbQuery = string.IsNullOrWhiteSpace(artist) ? clean : $"recording:\"{MbEscape(clean)}\" AND artist:\"{MbEscape(artist)}\"";
+            var genre = await MusicBrainzGenreAsync(mbQuery, ct)
+                ?? (mbQuery != query ? await MusicBrainzGenreAsync(query, ct) : null)
+                ?? itunesGenre;
             if (!string.IsNullOrWhiteSpace(genre))
             {
                 // Same artist, other releases sharing the category...
@@ -406,15 +415,64 @@ public sealed class MusicRecommendationService
     private static string Normalized(string s) => s.Trim().ToLowerInvariant();
 
     // yt-dlp filenames look like "Title [youtubeId]": drop the trailing bracket id so the
-    // search term matches what the music APIs index. A leading track number ("01. Title")
-    // is dropped too.
+    // search term matches what the music APIs index. A leading track number ("01. ", "5.", "07 - ") is dropped too.
     private static string CleanTitle(string raw)
     {
         var t = raw.Trim();
+        t = Regex.Replace(t, @"\s*\[[A-Za-z0-9_-]{11}\]\s*$", ""); // the YouTube id
         var bracket = t.IndexOf('[');
-        if (bracket > 0) t = t[..bracket].Trim();
-        var dot = t.IndexOf(". ", StringComparison.Ordinal);
-        if (dot > 0 && dot <= 2 && int.TryParse(t[..dot], out _)) t = t[(dot + 2)..].Trim();
+        if (bracket > 0 && !t[bracket..].Contains(']')) t = t[..bracket].Trim();
+        t = Regex.Replace(t, @"^\d{1,2}\s*(\.|-|–)\s*", "").Trim();
         return t;
+    }
+
+    private static string MbEscape(string s) => s.Replace("\\", "").Replace("\"", "");
+
+    // Words that only describe the video, not the song: "(Official Audio)", "[HD]", "| Lyrics"…
+    private static readonly Regex Noise = new(
+        @"\b(official|officiel|audio|video|vidéo|clip|lyrics?|paroles|hd|hq|4k|remaster(ed)?|visuali[sz]er|mv|explicit)\b",
+        RegexOptions.IgnoreCase);
+
+    // (title, artist) of a song as the music APIs know it, from a library file name / tags or a suggestion (already
+    // clean: left as is). Steps: video noise in brackets dropped, "ft./feat." credits dropped, "Artist - Title" split
+    // (the artist side found by the known artist, else YouTube's usual order), channel suffixes ("VEVO", " - Topic")
+    // dropped from the artist. Same as the phone's Recommendations.seed.
+    public static (string Title, string Artist) SeedOf(string rawTitle, string? rawArtist)
+    {
+        var t = CleanTitle(rawTitle);
+        // A web slug ("mika-ring-ring", "vianney-je-men-vais-clip-officiel"): words back.
+        if (!t.Contains(' ') && t.Count(c => c == '-' || c == '_') >= 2) t = t.Replace('-', ' ').Replace('_', ' ').TrimEnd('.');
+        // Bracketed parts that are only video noise; other brackets ("(Remix)", "(Live)") stay.
+        t = Regex.Replace(t, @"[\(\[]([^\)\]]*)[\)\]]", m => Noise.IsMatch(m.Groups[1].Value) ? " " : m.Value);
+        // The same noise left bare at the end: "… Lyrics", "… Extreme HD", "… clip officiel".
+        t = Regex.Replace(t, @"(\s+" + Noise + @")+\s*$", "", RegexOptions.IgnoreCase);
+        var pipe = t.IndexOf(" | ", StringComparison.Ordinal);
+        if (pipe > 0) t = t[..pipe];
+        var slashes = t.IndexOf(" // ", StringComparison.Ordinal);
+        if (slashes > 0) t = t[..slashes];
+        t = Regex.Replace(t, @"\s+(ft\.?|feat\.?|featuring)\s+.*$", "", RegexOptions.IgnoreCase);
+        t = Regex.Replace(t, @"\s+", " ").Trim().Trim('-', '–', '—', ' ');
+
+        var artist = (rawArtist ?? "").Trim();
+        artist = Regex.Replace(artist, @"(?i)\s*(vevo|official|- topic)$", "").Trim();
+        // A channel name squeezed together ("DaftPunk" from "DaftPunkVEVO"): spaces back between the words.
+        if (!artist.Contains(' ')) artist = Regex.Replace(artist, @"(?<=\p{Ll})(?=\p{Lu})", " ");
+        // "Artist - Title" (also "Artist - Title - Album"): keep the title side.
+        var parts = Regex.Split(t, @"\s+[-–—]\s+").Select(p => p.Trim()).Where(p => p.Length > 0).ToList();
+        if (parts.Count >= 2)
+        {
+            static string Fold(string s) => new(s.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+            static bool Same(string a, string b)
+            {
+                var x = Fold(a);
+                var y = Fold(b);
+                return x.Length > 0 && y.Length > 0 && (x.Contains(y) || y.Contains(x));
+            }
+            if (artist.Length == 0 || Same(parts[0], artist)) { artist = parts[0]; t = parts[1]; }
+            else if (Same(parts[1], artist)) t = parts[0];
+            // A channel name that is not the artist: YouTube's usual order wins.
+            else { artist = parts[0]; t = parts[1]; }
+        }
+        return (t.Length > 0 ? t : CleanTitle(rawTitle), artist);
     }
 }

@@ -28,48 +28,55 @@ object Recommendations {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<SimilarTrack>>?) = size > 60
     }
 
-    fun similar(title: String, artist: String?, limit: Int = MAX_RESULTS): List<SimilarTrack> {
+    // userAsked: the Similaires list opened by the user. Its iTunes requests count like a search (the larger share), not
+    // like background ones — the automatic chaining of suggestions has often used those up already.
+    fun similar(title: String, artist: String?, limit: Int = MAX_RESULTS, userAsked: Boolean = false): List<SimilarTrack> {
         if (title.isBlank()) return emptyList()
-        val clean = cleanTitle(title)
-        val query = if (artist.isNullOrBlank()) clean else "$clean ${artist.trim()}"
+        // A downloaded song is named after its YouTube video ("Daft Punk - Get Lucky (Official Audio) ft. Pharrell…",
+        // artist = the channel): searched as is, iTunes and MusicBrainz matched other songs, so its suggestions drifted
+        // away from it. The seed is brought back to the plain title + artist a suggestion carries.
+        val (clean, cleanArtist) = seed(title, artist)
+        val query = if (cleanArtist.isBlank()) clean else "$clean $cleanArtist"
         val cacheKey = "${query.lowercase()}|$limit"
         synchronized(similarCache) { similarCache[cacheKey] }?.let { return it }
         // A list cut short by the iTunes limit is not kept, so the next try can complete it.
         val refusalsBefore = ItunesGate.refusalCount()
-        return similarUncached(clean, query, artist, limit).also {
+        return similarUncached(clean, query, cleanArtist.ifBlank { null }, limit, userAsked).also {
             if (it.isNotEmpty() && ItunesGate.refusalCount() == refusalsBefore) synchronized(similarCache) { similarCache[cacheKey] = it }
         }
     }
 
-    private fun similarUncached(clean: String, query: String, artist: String?, limit: Int): List<SimilarTrack> {
+    private fun similarUncached(clean: String, query: String, artist: String?, limit: Int, userAsked: Boolean): List<SimilarTrack> {
         val result = ArrayList<SimilarTrack>()
         val seen = HashSet<String>()
         try {
-            val hits = itunesSearch(query, 3)
+            val hits = itunesSearch(query, 3, userAsked = userAsked)
             var itunesGenre: String? = null
             hits.firstOrNull()?.let { seed ->
                 itunesGenre = seed.genre
                 add(result, seen, seed.title, seed.artist, seed.page, seed.preview, seed.durationMs)
                 seed.collectionId?.let { cid ->
-                    for (t in itunesAlbum(cid, maxOf(1, limit - 3))) add(result, seen, t.title, t.artist, t.page, t.preview, t.durationMs)
+                    for (t in itunesAlbum(cid, maxOf(1, limit - 3), userAsked)) add(result, seen, t.title, t.artist, t.page, t.preview, t.durationMs)
                 }
             }
 
-            val genre = musicBrainzGenre(query) ?: itunesGenre
+            // Fielded query when the artist is known: a loose one often landed on a namesake recording (another genre).
+            val mbQuery = if (artist.isNullOrBlank()) clean else "recording:\"${mbEscape(clean)}\" AND artist:\"${mbEscape(artist)}\""
+            val genre = musicBrainzGenre(mbQuery) ?: (if (mbQuery != query) musicBrainzGenre(query) else null) ?: itunesGenre
             if (!genre.isNullOrBlank()) {
                 if (!artist.isNullOrBlank() && result.size < limit) {
                     for ((t, a) in musicBrainzSearch("genre:\"$genre\" AND artist:\"${artist.trim()}\"", limit - result.size)) {
-                        addEnriched(result, seen, t, a)
+                        addEnriched(result, seen, t, a, userAsked)
                     }
                 }
                 if (result.size < limit) {
                     for ((t, a) in musicBrainzSearch("genre:\"$genre\"", limit - result.size + 2)) {
                         if (result.size >= limit) break
-                        addEnriched(result, seen, t, a)
+                        addEnriched(result, seen, t, a, userAsked)
                     }
                 }
                 if (result.size < limit) {
-                    for (t in itunesSearch(genre.trim(), limit - result.size)) add(result, seen, t.title, t.artist, t.page, t.preview, t.durationMs)
+                    for (t in itunesSearch(genre.trim(), limit - result.size, userAsked = userAsked)) add(result, seen, t.title, t.artist, t.page, t.preview, t.durationMs)
                 }
             }
         } catch (_: Exception) {
@@ -89,19 +96,21 @@ object Recommendations {
     // A MusicBrainz suggestion, completed with its iTunes clip while the background budget allows. Past it the title
     // is kept without a clip (the full track still comes from yt-dlp): one iTunes request per suggestion is what used
     // to eat the whole minute and lock the search out.
-    private fun addEnriched(list: MutableList<SimilarTrack>, seen: MutableSet<String>, title: String, artist: String) {
-        if (!ItunesGate.backgroundAvailable()) { add(list, seen, title, artist, null, null, null); return }
-        val hit = itunesSearch(if (artist.isBlank()) title else "$title $artist", 1).firstOrNull()
+    private fun addEnriched(list: MutableList<SimilarTrack>, seen: MutableSet<String>, title: String, artist: String, userAsked: Boolean) {
+        // User-asked: clips only while 3 requests stay free for a search typed meanwhile.
+        val available = if (userAsked) ItunesGate.searchWaitMs(4) == 0L else ItunesGate.backgroundAvailable()
+        if (!available) { add(list, seen, title, artist, null, null, null); return }
+        val hit = itunesSearch(if (artist.isBlank()) title else "$title $artist", 1, userAsked = userAsked).firstOrNull()
         add(list, seen, title, artist, hit?.page, hit?.preview, hit?.durationMs)
     }
 
-    private fun itunesSearch(query: String, cap: Int, country: String? = null): List<Hit> {
-        val json = get("https://itunes.apple.com/search?term=${enc(query)}&entity=song&limit=$cap" + (country?.let { "&country=$it" } ?: "")) ?: return emptyList()
+    private fun itunesSearch(query: String, cap: Int, country: String? = null, userAsked: Boolean = false): List<Hit> {
+        val json = get("https://itunes.apple.com/search?term=${enc(query)}&entity=song&limit=$cap" + (country?.let { "&country=$it" } ?: ""), search = userAsked) ?: return emptyList()
         return parseItunes(JSONObject(json).optJSONArray("results"), cap)
     }
 
-    private fun itunesAlbum(collectionId: Long, limit: Int): List<Hit> {
-        val json = get("https://itunes.apple.com/lookup?id=$collectionId&entity=song&limit=$limit") ?: return emptyList()
+    private fun itunesAlbum(collectionId: Long, limit: Int, userAsked: Boolean = false): List<Hit> {
+        val json = get("https://itunes.apple.com/lookup?id=$collectionId&entity=song&limit=$limit", search = userAsked) ?: return emptyList()
         return parseItunes(JSONObject(json).optJSONArray("results"), limit)
     }
 
@@ -158,9 +167,9 @@ object Recommendations {
 
     // MusicBrainz answers 403 without an explicit User-Agent.
     // iTunes requests go through ItunesGate (gated = false when the caller already took its slot, see OnlineSearch).
-    internal fun get(url: String, gated: Boolean = true): String? {
+    internal fun get(url: String, gated: Boolean = true, search: Boolean = false): String? {
         val itunes = ItunesGate.isItunes(url)
-        if (itunes && gated && !ItunesGate.tryAcquire(search = false)) return null
+        if (itunes && gated && !ItunesGate.tryAcquire(search = search)) return null
         return try {
             val c = URL(url).openConnection() as HttpURLConnection
             c.connectTimeout = 10_000
@@ -183,14 +192,58 @@ object Recommendations {
 
     private fun JSONObject.str(key: String): String? = optString(key, "").takeIf { it.isNotBlank() }
 
-    // yt-dlp file names look like "Title [youtubeId]"; a leading "01. " track number is dropped too.
+    // yt-dlp file names look like "Title [youtubeId]"; a leading track number ("01. ", "5.", "07 - ") is dropped too.
     fun cleanTitle(raw: String): String {
         var t = raw.trim()
+        t = Regex("\\s*\\[[A-Za-z0-9_-]{11}\\]\\s*$").replace(t, "") // the YouTube id
         val bracket = t.indexOf('[')
-        if (bracket > 0) t = t.substring(0, bracket).trim()
-        val dot = t.indexOf(". ")
-        if (dot in 1..2 && t.substring(0, dot).toIntOrNull() != null) t = t.substring(dot + 2).trim()
+        if (bracket > 0 && !t.substring(bracket).contains(']')) t = t.substring(0, bracket).trim()
+        t = Regex("^\\d{1,2}\\s*(\\.|-|–)\\s*").replace(t, "").trim()
         return t
+    }
+
+    private fun mbEscape(s: String) = s.replace("\\", "").replace("\"", "")
+
+    // Words that only describe the video, not the song: "(Official Audio)", "[HD]", "| Lyrics"…
+    private val NOISE = Regex(
+        "\\b(official|officiel|audio|video|vidéo|clip|lyrics?|paroles|hd|hq|4k|remaster(ed)?|visuali[sz]er|mv|explicit)\\b",
+        RegexOption.IGNORE_CASE,
+    )
+
+    // Desktop SeedOf: (title, artist) of a song as the music APIs know it, from a library file name / tags or a
+    // suggestion (already clean: left as is). Steps: video noise in brackets dropped, "ft./feat." credits dropped,
+    // "Artist - Title" split (the artist side found by the known artist, else YouTube's usual order), channel suffixes
+    // ("VEVO", " - Topic") dropped from the artist.
+    fun seed(rawTitle: String, rawArtist: String?): Pair<String, String> {
+        var t = cleanTitle(rawTitle)
+        // A web slug ("mika-ring-ring", "vianney-je-men-vais-clip-officiel"): words back.
+        if (' ' !in t && t.count { it == '-' || it == '_' } >= 2) t = t.replace('-', ' ').replace('_', ' ').trimEnd('.')
+        // Bracketed parts that are only video noise; other brackets ("(Remix)", "(Live)") stay.
+        t = Regex("[\\(\\[]([^\\)\\]]*)[\\)\\]]").replace(t) { m -> if (NOISE.containsMatchIn(m.groupValues[1])) " " else m.value }
+        // The same noise left bare at the end: "… Lyrics", "… Extreme HD", "… clip officiel".
+        t = Regex("(\\s+${NOISE.pattern})+\\s*$", RegexOption.IGNORE_CASE).replace(t, "")
+        t = t.substringBefore(" | ").substringBefore(" // ")
+        t = Regex("\\s+(ft\\.?|feat\\.?|featuring)\\s+.*$", RegexOption.IGNORE_CASE).replace(t, "")
+        t = Regex("\\s+").replace(t, " ").trim().trim('-', '–', '—', ' ')
+
+        var artist = (rawArtist ?: "").trim()
+        artist = Regex("(?i)\\s*(vevo|official|- topic)$").replace(artist, "").trim()
+        // A channel name squeezed together ("DaftPunk" from "DaftPunkVEVO"): spaces back between the words.
+        if (' ' !in artist) artist = Regex("(?<=\\p{Ll})(?=\\p{Lu})").replace(artist, " ")
+        // "Artist - Title" (also "Artist - Title - Album"): keep the title side.
+        val parts = t.split(Regex("\\s+[-–—]\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
+        if (parts.size >= 2) {
+            fun same(a: String, b: String) = a.isNotBlank() && b.isNotBlank() &&
+                a.lowercase().filter { it.isLetterOrDigit() }.let { x -> b.lowercase().filter { it.isLetterOrDigit() }.let { y -> x.contains(y) || y.contains(x) } }
+            when {
+                // The written name ("Daft Punk") over a squeezed channel one ("DaftPunk" from "DaftPunkVEVO").
+                artist.isBlank() || same(parts[0], artist) -> { artist = parts[0]; t = parts[1] }
+                same(parts[1], artist) -> t = parts[0]
+                // A channel name that is not the artist: YouTube's usual order wins.
+                else -> { artist = parts[0]; t = parts[1] }
+            }
+        }
+        return (t.ifBlank { cleanTitle(rawTitle) }) to artist
     }
 
     // Desktop MatchesSimilar: punctuation-folded containment, so "artist-title [id]" file names
