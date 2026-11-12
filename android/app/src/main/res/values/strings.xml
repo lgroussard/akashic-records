@@ -22,4 +22,6 @@
     <string name="sc_poetry_long">Ouvrir le recueil de poésie</string>
     <string name="sc_reading_short">Lecture</string>
     <string name="sc_reading_long">Reprendre la lecture</string>
+    <string name="sc_tickets_short">Billets</string>
+    <string name="sc_tickets_long">Billets du jour</string>
 </resources>

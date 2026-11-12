@@ -377,6 +377,18 @@ public sealed class SchemaInitializer
                     UpdatedAt TEXT NOT NULL,
                     CompletedAt TEXT
                 );
+
+                -- Billets (phone only, Room v6): tickets attached to a day / calendar event; no screen on the PC.
+                CREATE TABLE IF NOT EXISTS Ticket (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Title TEXT NOT NULL,
+                    FilePath TEXT NOT NULL,
+                    MimeType TEXT NOT NULL,
+                    Date TEXT NOT NULL,
+                    EventId INTEGER,
+                    EventTitle TEXT NOT NULL,
+                    CreatedAt TEXT NOT NULL
+                );
                 """;
             command.ExecuteNonQuery();
         }

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ticket glyph (white): a ticket with side notches and a perforation, for the « Billets » home icon. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M4,6h16a2,2 0,0 1,2 2v2a2,2 0,0 0,0 4v2a2,2 0,0 1,-2 2H4a2,2 0,0 1,-2 -2v-2a2,2 0,0 0,0 -4V8a2,2 0,0 1,2 -2z M14.4,7.8h1.2v2h-1.2z M14.4,11h1.2v2h-1.2z M14.4,14.2h1.2v2h-1.2z" />
+</vector>

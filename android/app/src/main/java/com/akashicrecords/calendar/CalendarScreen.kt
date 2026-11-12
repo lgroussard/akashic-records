@@ -34,6 +34,12 @@ import com.akashicrecords.data.AkashicDatabase
 import com.akashicrecords.data.Birthday
 import com.akashicrecords.data.CalendarEvent
 import com.akashicrecords.data.CalendarEventLink
+import com.akashicrecords.data.Ticket
+import com.akashicrecords.tickets.AttachTicketsSheet
+import com.akashicrecords.tickets.TicketChip
+import com.akashicrecords.tickets.TicketStore
+import com.akashicrecords.tickets.TicketViewer
+import com.akashicrecords.tickets.rememberTicketPicker
 import com.akashicrecords.journaux.dateIso
 import com.akashicrecords.journaux.nowIso
 import kotlinx.coroutines.Dispatchers
@@ -62,7 +68,12 @@ private sealed interface Editing {
 // items under it, then "Prochainement" (next 30 days). + adds an event or a birthday; tapping an
 // item edits it. Project deadlines are shown (edited in Organisation on the PC).
 @Composable
-fun CalendarSection(db: AkashicDatabase, openDate: LocalDate? = null, onOpenLink: (CalendarEventLink) -> Unit = {}) {
+fun CalendarSection(
+    db: AkashicDatabase,
+    openDate: LocalDate? = null,
+    onOpenLink: (CalendarEventLink) -> Unit = {},
+    onOpenTickets: () -> Unit = {},
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var month by remember { mutableStateOf(YearMonth.from(openDate ?: LocalDate.now())) }
@@ -74,6 +85,23 @@ fun CalendarSection(db: AkashicDatabase, openDate: LocalDate? = null, onOpenLink
     var addMenu by remember { mutableStateOf(false) }
     // Links made on the PC (an event or a birthday → a poem, a recipe, a fiche…), by owner "Event:12" / "Birthday:12".
     var links by remember { mutableStateOf<Map<String, List<CalendarEventLink>>>(emptyMap()) }
+    // Billets (phone only): attached to an event, or to a day alone (also when their event is gone after a PC import).
+    var tickets by remember { mutableStateOf<List<Ticket>>(emptyList()) }
+    var eventIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    var viewingTickets by remember { mutableStateOf<Pair<List<Ticket>, Int>?>(null) }
+    var addingTickets by remember { mutableStateOf<List<TicketStore.Incoming>?>(null) }
+    val pickTickets = rememberTicketPicker { addingTickets = it }
+    LaunchedEffect(version, TicketStore.changes) {
+        withContext(Dispatchers.IO) {
+            tickets = db.ticketDao().getAll()
+            eventIds = db.calendarEventDao().getAll().map { it.Id }.toSet()
+        }
+    }
+    fun ticketsOf(item: AgendaItem) =
+        if (item.source == AgendaSource.Event) tickets.filter { it.EventId == item.refId } else emptyList()
+    fun showTickets(list: List<Ticket>, day: LocalDate) {
+        if (list.isNotEmpty()) viewingTickets = list to list.indexOfFirst { it.Date == day.toString() }.coerceAtLeast(0)
+    }
 
     LaunchedEffect(month, version) {
         monthItems = withContext(Dispatchers.IO) { Agenda.month(db, month) }
@@ -122,17 +150,26 @@ fun CalendarSection(db: AkashicDatabase, openDate: LocalDate? = null, onOpenLink
                     }
                     MonthGrid(shown, selected, items) { selected = it }
                 }
-                Text(
-                    selected.format(DAY_HEADER).replaceFirstChar { it.uppercase() },
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(start = 16.dp, top = 10.dp, bottom = 2.dp),
-                )
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 16.dp, top = 6.dp, end = 4.dp)) {
+                    Text(
+                        selected.format(DAY_HEADER).replaceFirstChar { it.uppercase() },
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    // All the tickets, coming up and past.
+                    TextButton(onClick = onOpenTickets) { Text("🎫 Billets", fontSize = 13.sp) }
+                }
+                // Tickets of this day that belong to no (remaining) event.
+                val dayTickets = tickets.filter { it.Date == selected.toString() && (it.EventId == null || it.EventId !in eventIds) }
+                if (dayTickets.isNotEmpty()) {
+                    TicketChip(dayTickets.size, Modifier.padding(start = 16.dp, bottom = 4.dp)) { showTickets(dayTickets, selected) }
+                }
             }
             val ofDay = monthItems.filter { it.date == selected }
             if (ofDay.isEmpty()) {
                 item { Text("Rien ce jour-là.", color = Palette.TextFaint, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) }
             }
-            items(ofDay, key = { "d:" + it.notificationKey }) { AgendaRow(it, showDate = false, linksOf(it), onOpenLink) { open(it) } }
+            items(ofDay, key = { "d:" + it.notificationKey }) { AgendaRow(it, showDate = false, linksOf(it), onOpenLink, ticketsOf(it).size, { showTickets(ticketsOf(it), it.date) }) { open(it) } }
 
             item {
                 Text(
@@ -145,7 +182,7 @@ fun CalendarSection(db: AkashicDatabase, openDate: LocalDate? = null, onOpenLink
             if (next.isEmpty()) {
                 item { Text("Rien dans les 30 prochains jours.", color = Palette.TextFaint, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp)) }
             }
-            items(next, key = { "u:" + it.notificationKey }) { AgendaRow(it, showDate = true, linksOf(it), onOpenLink) { open(it) } }
+            items(next, key = { "u:" + it.notificationKey }) { AgendaRow(it, showDate = true, linksOf(it), onOpenLink, ticketsOf(it).size, { showTickets(ticketsOf(it), it.date) }) { open(it) } }
         }
 
         Box(Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
@@ -155,6 +192,7 @@ fun CalendarSection(db: AkashicDatabase, openDate: LocalDate? = null, onOpenLink
             DropdownMenu(expanded = addMenu, onDismissRequest = { addMenu = false }) {
                 DropdownMenuItem(text = { Text("Événement") }, onClick = { addMenu = false; editing = Editing.Event(null, selected) })
                 DropdownMenuItem(text = { Text("Anniversaire") }, onClick = { addMenu = false; editing = Editing.Bday(null, selected) })
+                DropdownMenuItem(text = { Text("Billet (PDF, image)") }, onClick = { addMenu = false; pickTickets() })
             }
         }
     }
@@ -164,6 +202,8 @@ fun CalendarSection(db: AkashicDatabase, openDate: LocalDate? = null, onOpenLink
         is Editing.Bday -> BirthdayEditor(db, e.birthday, e.day, onDone = { editing = null; version++; Reminders.checkNow(context) })
         null -> {}
     }
+    viewingTickets?.let { (list, i) -> TicketViewer(db, list, i, onClose = { viewingTickets = null }) }
+    addingTickets?.let { items -> AttachTicketsSheet(db, items, day = selected) { addingTickets = null } }
 }
 
 @Composable
@@ -236,6 +276,8 @@ private fun AgendaRow(
     showDate: Boolean,
     links: List<CalendarEventLink> = emptyList(),
     onOpenLink: (CalendarEventLink) -> Unit = {},
+    ticketCount: Int = 0,
+    onOpenTickets: () -> Unit = {},
     onClick: () -> Unit,
 ) {
     Row(
@@ -264,6 +306,7 @@ private fun AgendaRow(
                         .background(Palette.Accent.copy(alpha = 0.12f)).padding(horizontal = 6.dp, vertical = 2.dp),
                 )
             }
+            if (ticketCount > 0) TicketChip(ticketCount, Modifier.padding(top = 3.dp), onClick = onOpenTickets)
         }
         Column(horizontalAlignment = Alignment.End) {
             if (showDate) Text(relativeDay(item.date), fontSize = 12.sp, color = Palette.TextMuted)

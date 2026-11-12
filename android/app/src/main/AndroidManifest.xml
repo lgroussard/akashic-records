@@ -51,6 +51,28 @@
                 android:resource="@xml/shortcuts" />
         </activity>
 
+        <!-- Share → « Billet Akashic »: train tickets, boarding passes… (PDF or picture, several at once), attached to
+             a calendar event or a day. Same activity; MainActivity tells it apart by this alias's name. -->
+        <activity-alias
+            android:name=".ShareTicket"
+            android:exported="true"
+            android:icon="@drawable/ic_launcher"
+            android:label="Billet Akashic"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/pdf" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+        </activity-alias>
+
         <service
             android:name=".music.PlaybackService"
             android:exported="true"

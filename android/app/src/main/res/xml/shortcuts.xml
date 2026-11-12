@@ -69,4 +69,17 @@
             <extra android:name="akashic.section" android:value="Lecture" />
         </intent>
     </shortcut>
+    <shortcut
+        android:shortcutId="tickets"
+        android:enabled="true"
+        android:icon="@drawable/pin_tickets"
+        android:shortcutShortLabel="@string/sc_tickets_short"
+        android:shortcutLongLabel="@string/sc_tickets_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.akashicrecords"
+            android:targetClass="com.akashicrecords.MainActivity">
+            <extra android:name="akashic.section" android:value="Billets" />
+        </intent>
+    </shortcut>
 </shortcuts>

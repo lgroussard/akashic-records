@@ -63,6 +63,8 @@ class MainActivity : ComponentActivity() {
     private var launch by mutableStateOf<Launch?>(null)
     // An image or link shared from another app (Share → Akashic), shown in a sheet over the app.
     private var share by mutableStateOf<SharedRef?>(null)
+    // Tickets shared to « Billet Akashic », shown in the attach sheet.
+    private var ticketShare by mutableStateOf<List<com.akashicrecords.tickets.TicketStore.Incoming>?>(null)
     // Opened just for a share: close afterwards, back to the app that shared.
     private var openedForShare = false
 
@@ -72,8 +74,9 @@ class MainActivity : ComponentActivity() {
         val config = ConfigStore(applicationContext)
         Reminders.schedule(applicationContext)
         launch = Launch.from(intent)
-        share = SharedRef.from(intent)
-        openedForShare = share != null && savedInstanceState == null
+        ticketShare = sharedTickets(intent)
+        share = if (!isTicketShare(intent)) SharedRef.from(intent) else null
+        openedForShare = (share != null || ticketShare != null) && savedInstanceState == null
         setContent {
             MaterialTheme(colorScheme = AkashicColorScheme, typography = AkashicTypography) {
                 // Default text colour for every Text that sets none (M3 falls back to black otherwise).
@@ -82,6 +85,12 @@ class MainActivity : ComponentActivity() {
                     share?.let { s ->
                         ShareToReferencesSheet(db, s) {
                             share = null
+                            if (openedForShare) finish()
+                        }
+                    }
+                    ticketShare?.let { items ->
+                        com.akashicrecords.tickets.AttachTicketsSheet(db, items) {
+                            ticketShare = null
                             if (openedForShare) finish()
                         }
                     }
@@ -99,7 +108,25 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         launch = Launch.from(intent)
-        SharedRef.from(intent)?.let { share = it }
+        if (isTicketShare(intent)) sharedTickets(intent)?.let { ticketShare = it }
+        else SharedRef.from(intent)?.let { share = it }
+    }
+
+    private fun isTicketShare(intent: Intent?) = intent?.component?.className?.endsWith(".ShareTicket") == true
+
+    // Files shared to « Billet Akashic » (the .ShareTicket alias): one or several PDFs / pictures. Nothing usable: says
+    // so (never falls back to the Références sheet).
+    private fun sharedTickets(intent: Intent?): List<com.akashicrecords.tickets.TicketStore.Incoming>? {
+        if (intent == null || !isTicketShare(intent)) return null
+        @Suppress("DEPRECATION")
+        val uris = when (intent.action) {
+            Intent.ACTION_SEND -> listOfNotNull(intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM))
+            Intent.ACTION_SEND_MULTIPLE -> intent.getParcelableArrayListExtra<android.net.Uri>(Intent.EXTRA_STREAM).orEmpty()
+            else -> emptyList()
+        }
+        val items = uris.mapNotNull { com.akashicrecords.tickets.TicketStore.describe(applicationContext, it, intent.type) }
+        if (items.isEmpty()) android.widget.Toast.makeText(this, "Ce partage ne contient ni PDF ni image.", android.widget.Toast.LENGTH_LONG).show()
+        return items.takeIf { it.isNotEmpty() }
     }
 }
 
@@ -110,6 +137,7 @@ data class Launch(val section: String, val tab: String?, val date: LocalDate?, v
         const val EXTRA_TAB = "akashic.tab"
         const val EXTRA_ITEM = "akashic.item" // a poem or recipe id, opened directly
         const val PLAYER = "Player" // section value opening the full player (music notification)
+        const val TICKETS = "Billets" // section value opening the tickets on today's (shortcut)
 
         fun from(intent: Intent?): Launch? {
             val section = intent?.getStringExtra(Reminders.EXTRA_SECTION) ?: return null
@@ -159,6 +187,8 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
     // The full player (from the mini-player, or a link to the old Queue / Similar tabs); null = closed.
     var fullPlayer by remember { mutableStateOf<Boolean?>(null) }
     var miniCollapsed by remember { mutableStateOf(config.miniPlayerCollapsed()) }
+    // The Billets list over the app: null = closed, true = opened by the shortcut (straight to today's tickets).
+    var ticketsHub by remember { mutableStateOf<Boolean?>(null) }
     // Bumped after a PC import (and on deep links) so the section re-reads its state.
     var dataVersion by remember { mutableStateOf(0) }
 
@@ -179,6 +209,11 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
     }
 
     fun handle(l: Launch) {
+        // The « Billets » shortcut: today's tickets (or the next ones) at once, over whatever screen was open.
+        if (l.section == Launch.TICKETS) {
+            ticketsHub = true
+            return
+        }
         // The music notification: the full player on « À suivre », over whatever screen was open.
         if (l.section == Launch.PLAYER) {
             if (Modules.isEnabled(disabled, "Musique")) fullPlayer = false
@@ -274,7 +309,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
                         "Organisation" -> OrganisationSection(db, config)
                         "Journaux" -> JournauxSection(db, config, openItem = journalItem)
                         "Musique" -> MusicSection(db, config, player, initialTab = musicTab, onOpenPlayer = { similar -> fullPlayer = similar })
-                        "Calendrier" -> CalendarSection(db, openDate = calendarDate, onOpenLink = { openCalendarLink(it) })
+                        "Calendrier" -> CalendarSection(db, openDate = calendarDate, onOpenLink = { openCalendarLink(it) }, onOpenTickets = { ticketsHub = false })
                         "Collections" -> CollectionsSection(db, config)
                         "Lecture" -> com.akashicrecords.reading.LectureSection(db, config)
                         "Archives" -> ArchivesSection(db, config)
@@ -290,6 +325,10 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
                 }
             }
         }
+    }
+
+    ticketsHub?.let { current ->
+        com.akashicrecords.tickets.TicketsHub(db, onClose = { ticketsHub = null }, openCurrent = current)
     }
 
     fullPlayer?.let { similar ->

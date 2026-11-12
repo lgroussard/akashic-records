@@ -50,8 +50,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         RefBoard::class,
         RefImage::class,
         CrosswordGame::class,
+        Ticket::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -96,6 +97,7 @@ abstract class AkashicDatabase : RoomDatabase() {
     abstract fun refBoardDao(): RefBoardDao
     abstract fun refImageDao(): RefImageDao
     abstract fun crosswordGameDao(): CrosswordGameDao
+    abstract fun ticketDao(): TicketDao
 
     companion object {
         @Volatile
@@ -106,7 +108,7 @@ abstract class AkashicDatabase : RoomDatabase() {
                 context.applicationContext,
                 AkashicDatabase::class.java,
                 "akashic.db",
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6).build().also { instance = it }
 
         // v2: phone-only poem formatting next to the PC columns (the desktop schema has the same
         // columns, so imports and the future sync carry both layouts).
@@ -160,6 +162,17 @@ abstract class AkashicDatabase : RoomDatabase() {
                     "CREATE TABLE IF NOT EXISTS `CrosswordGame` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
                         "`Title` TEXT NOT NULL, `Source` TEXT NOT NULL, `PuzzleJson` TEXT NOT NULL, `Progress` TEXT NOT NULL, " +
                         "`CreatedAt` TEXT NOT NULL, `UpdatedAt` TEXT NOT NULL, `CompletedAt` TEXT)",
+                )
+            }
+        }
+
+        // v6: Billets (phone only). Same table in the desktop SchemaInitializer.
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `Ticket` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`Title` TEXT NOT NULL, `FilePath` TEXT NOT NULL, `MimeType` TEXT NOT NULL, `Date` TEXT NOT NULL, " +
+                        "`EventId` INTEGER, `EventTitle` TEXT NOT NULL, `CreatedAt` TEXT NOT NULL)",
                 )
             }
         }

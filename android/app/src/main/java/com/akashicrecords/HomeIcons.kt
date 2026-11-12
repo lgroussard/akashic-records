@@ -17,6 +17,8 @@ object HomeIcons {
         Icon("pin_poetry", "Poésie", "Le recueil de poésie", R.drawable.pin_poetry, R.drawable.g_white_poetry, 0xFF9B7BFF, "Journaux", "Poetry"),
         Icon("pin_calendar", "Calendrier", "Le planning et les événements", R.drawable.pin_calendar, R.drawable.g_white_calendar, 0xFF34C77B, "Calendrier", null),
         Icon("pin_reading", "Lecture", "Reprendre le livre en cours", R.drawable.pin_reading, R.drawable.g_white_book, 0xFFE8A33D, "Lecture", null),
+        // Opens today's tickets (or the next ones) straight away, full screen.
+        Icon("pin_tickets", "Billets", "Tes billets du jour", R.drawable.pin_tickets, R.drawable.g_white_ticket, 0xFF5B8DEF, Launch.TICKETS, null),
         // One per game of the Jeux section (games.GAMES), opening the game itself.
         Icon("pin_crossword", "Mots croisés", "Tes grilles de mots croisés", R.drawable.pin_crossword, R.drawable.g_white_crossword, 0xFF3CB6C9, "Jeux", "Crosswords"),
     )
