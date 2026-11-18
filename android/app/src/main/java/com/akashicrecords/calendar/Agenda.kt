@@ -57,6 +57,11 @@ data class AgendaItem(
     // Same key as the desktop (Source:RefId:yyyy-MM-dd): one reminder per occurrence.
     val notificationKey: String get() = "$source:$refId:$date"
 
+    // What Reminders remembers as "already notified": the occurrence and the time its reminder was
+    // due [at], so an event moved to another hour after its reminder went out can ring again. The
+    // date stays last: old keys are pruned on it.
+    fun notifiedKey(at: LocalDateTime): String = "$source:$refId:$at:$date"
+
     // When the reminder should fire: lead minutes back from the clock time, or from 09:00 for
     // all-day items. Null = no reminder for this item.
     fun reminderTime(): LocalDateTime? {
@@ -71,6 +76,11 @@ data class AgendaItem(
         return reference.minusMinutes(lead.toLong())
     }
 }
+
+// The earliest reminder of [items] still to come after [now]: the moment the reminder alarm is
+// armed for. Those already due are handled (notified or marked) by the check that precedes.
+fun nextReminderAt(items: List<AgendaItem>, now: LocalDateTime): LocalDateTime? =
+    items.mapNotNull { it.reminderTime() }.filter { it > now }.minOrNull()
 
 object Agenda {
     // All items whose date falls in [from, to] (inclusive), recurring ones materialised per year.

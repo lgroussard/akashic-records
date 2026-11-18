@@ -1,9 +1,11 @@
 package com.akashicrecords.calendar
 
 import android.Manifest
+import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -24,14 +26,21 @@ import com.akashicrecords.data.AkashicDatabase
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.ZoneId
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 // Phone version of the desktop calendar toasts (MainWindow.CheckCalendarReminders):
 //   * a morning summary of today's agenda, once a day (from 08:00);
 //   * a reminder per item at its lead time (per kind, desktop defaults), birthdays on the day at
 //     09:00 as a heads-up notification.
-// Runs in WorkManager every 15 minutes (so a reminder can be a few minutes late), plus right after
-// an edit. Notified occurrences are remembered so each one pings once.
+// Runs in WorkManager every 15 minutes (so a reminder can be a few minutes late), right after an
+// edit, and on an alarm armed for the next reminder (the phone asleep delays the periodic work by
+// hours). Notified occurrences are remembered so each one pings once.
 object Reminders {
     private const val CHANNEL_AGENDA = "agenda"
     private const val CHANNEL_BIRTHDAYS = "birthdays"
@@ -78,7 +87,10 @@ object Reminders {
         )
     }
 
-    suspend fun check(context: Context) {
+    // The worker and the alarm can land together: one check at a time, or both would notify.
+    private val checking = Mutex()
+
+    suspend fun check(context: Context) = checking.withLock {
         ensureChannels(context)
         val db = AkashicDatabase.get(context)
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -95,10 +107,12 @@ object Reminders {
             if (todays.isNotEmpty()) notifySummary(context, todays)
         }
 
-        for (item in Agenda.range(db, today, today.plusDays(35))) {
-            val key = item.notificationKey
-            if (key in notified) continue
+        val items = Agenda.range(db, today, today.plusDays(35))
+        for (item in items) {
             val at = item.reminderTime() ?: continue
+            val key = item.notifiedKey(at)
+            // notificationKey: what was stored before the reminder time became part of the key.
+            if (key in notified || item.notificationKey in notified) continue
             if (at > now) continue
             // Covered by today's summary if it was already due when the summary went out.
             val coveredBySummary = item.date == today && summaryAt != null && summaryAt.toLocalDate() == today && at <= summaryAt
@@ -115,6 +129,22 @@ object Reminders {
         val cutoff = today.minusDays(2)
         notified.removeAll { k -> runCatching { LocalDate.parse(k.substringAfterLast(':')) < cutoff }.getOrDefault(true) }
         prefs.edit().putStringSet(KEY_NOTIFIED, notified).apply()
+
+        armAlarm(context, nextReminderAt(items, now))
+    }
+
+    // The periodic work is put off for hours while the phone sleeps (Doze): the next reminder also
+    // gets an alarm that goes through it. Inexact on purpose (it may come a few minutes late): an
+    // exact one needs a special permission. Every check re-arms it, so it follows the notifications
+    // and the edits; nothing left to remind: no alarm.
+    private fun armAlarm(context: Context, at: LocalDateTime?) {
+        val alarms = context.getSystemService(AlarmManager::class.java)
+        val intent = PendingIntent.getBroadcast(
+            context, 0, Intent(context, ReminderAlarmReceiver::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        if (at == null) alarms.cancel(intent)
+        else alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(), intent)
     }
 
     private fun canNotify(context: Context) =
@@ -176,5 +206,20 @@ class ReminderWorker(context: Context, params: WorkerParameters) : CoroutineWork
         // Same cadence keeps the home-screen widgets current (agenda of the day, journal page).
         com.akashicrecords.widgets.Widgets.refreshAll(applicationContext)
         return Result.success()
+    }
+}
+
+// The alarm of the next reminder (Reminders.armAlarm), and the phone restarting, which drops it:
+// both run the check, which notifies what is due and arms the following one.
+class ReminderAlarmReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val pending = goAsync()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                Reminders.check(context.applicationContext)
+            } finally {
+                pending.finish()
+            }
+        }
     }
 }

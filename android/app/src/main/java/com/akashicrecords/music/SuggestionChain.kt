@@ -1,12 +1,18 @@
 package com.akashicrecords.music
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Bundle
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.ShuffleOrder
 import com.akashicrecords.data.AkashicDatabase
 import com.akashicrecords.data.ConfigStore
 import com.akashicrecords.data.MusicTrack
@@ -59,13 +65,25 @@ object PlayerItems {
         item?.mediaId?.let { it.startsWith(REMOTE_PREFIX) || it.startsWith(PREVIEW_PREFIX) } == true
 }
 
+// Media item indices in the order the player really goes through them: the queue order, or the
+// shuffled one when [shuffled].
+internal fun Timeline.playOrder(shuffled: Boolean): List<Int> {
+    val order = ArrayList<Int>(windowCount)
+    var i = getFirstWindowIndex(shuffled)
+    while (i != C.INDEX_UNSET && order.size < windowCount) {
+        order += i
+        i = getNextWindowIndex(i, Player.REPEAT_MODE_OFF, shuffled)
+    }
+    return order
+}
+
 // Desktop AdvanceAsync, in the playback service so it also runs with the screen off. As soon as
 // fewer than AHEAD (2) tracks follow the current one, suggestions are appended until there are,
 // each the next unheard one: the local copy if the title is in the library, else the full track
 // fetched by yt-dlp, else its 30 s clip. Keeping two ready means ⏭ always has a target, even
 // while the following one loads. When the pool runs dry it is refilled from the newest queued
 // track. A new queue (first item changes) restarts the pool, like the desktop PlayQueue.
-class SuggestionChain(private val context: Context, private val player: Player) {
+class SuggestionChain(private val context: Context, private val player: ExoPlayer) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val db = AkashicDatabase.get(context)
     private val library = MusicLibrary.get(context)
@@ -79,7 +97,7 @@ class SuggestionChain(private val context: Context, private val player: Player) 
 
     // ⏭ pressed while the next suggestion is still loading: jump to it once it is appended.
     fun requestSkip() {
-        skipRequested = true
+        skipRequested = allowed()
     }
 
     private companion object {
@@ -89,7 +107,8 @@ class SuggestionChain(private val context: Context, private val player: Player) 
 
     private val listener = object : Player.Listener {
         override fun onEvents(p: Player, events: Player.Events) {
-            if (events.containsAny(Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_TIMELINE_CHANGED)) onQueueMoved()
+            // Shuffle switched: what is left to play after the current track is no longer the same.
+            if (events.containsAny(Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_TIMELINE_CHANGED, Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED)) onQueueMoved()
         }
 
         // Unplayable entry (expired stream, bad file): move on instead of stopping.
@@ -104,8 +123,10 @@ class SuggestionChain(private val context: Context, private val player: Player) 
 
     init {
         player.addListener(listener)
-        // Temp suggestion files of a previous session (app cache only).
-        Downloader.streamDir(context).listFiles()?.forEach { it.delete() }
+        // Temp suggestion files of a previous session (app cache only), except the ones still in
+        // the saved queue: playback may resume on them (PlaybackService.onPlaybackResumption).
+        val kept = SavedQueue.files(context)
+        Downloader.streamDir(context).listFiles()?.forEach { if (it.absolutePath !in kept) it.delete() }
     }
 
     fun release() {
@@ -133,11 +154,11 @@ class SuggestionChain(private val context: Context, private val player: Player) 
             job = null
         }
         player.currentMediaItem?.let { played += titleOf(it) }
-        if (ahead() < AHEAD && job?.isActive != true) {
+        if (ahead() < AHEAD && job?.isActive != true && allowed()) {
             val key = runKey
             // Tops the queue up one track at a time until AHEAD tracks follow the current one.
             job = scope.launch {
-                while (ahead() < AHEAD && key == runKey) {
+                while (ahead() < AHEAD && key == runKey && allowed()) {
                     if (!appendNext(key)) break
                 }
             }
@@ -156,7 +177,32 @@ class SuggestionChain(private val context: Context, private val player: Player) 
         played.any { Recommendations.matches(it, title) } ||
             (0 until player.mediaItemCount).any { Recommendations.matches(titleOf(player.getMediaItemAt(it)), title) }
 
-    private fun ahead() = player.mediaItemCount - 1 - player.currentMediaItemIndex
+    // The « Enchaîner des suggestions » setting. Each suggestion is a whole track to download, so
+    // "Wi-Fi seulement" means an unmetered network; no network at all counts as not allowed.
+    private fun allowed(): Boolean = when (ConfigStore(context).suggestionChain()) {
+        ConfigStore.CHAIN_NEVER -> false
+        ConfigStore.CHAIN_WIFI -> {
+            val cm = context.getSystemService(ConnectivityManager::class.java)
+            cm.getNetworkCapabilities(cm.activeNetwork)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true
+        }
+        else -> true
+    }
+
+    // Tracks the player will still play after the current one, counted up to AHEAD. Asked to the
+    // player rather than computed from the indices: in shuffle the last entry of the queue is not
+    // the last one played.
+    private fun ahead(): Int {
+        val timeline = player.currentTimeline
+        if (timeline.isEmpty) return 0
+        var count = 0
+        var i = player.currentMediaItemIndex
+        while (count < AHEAD) {
+            i = timeline.getNextWindowIndex(i, player.repeatMode, player.shuffleModeEnabled)
+            if (i == C.INDEX_UNSET) break
+            count++
+        }
+        return count
+    }
 
     // Appends one suggestion; false when none could be found or loaded.
     private suspend fun appendNext(key: String?): Boolean {
@@ -197,10 +243,15 @@ class SuggestionChain(private val context: Context, private val player: Player) 
         val ended = player.playbackState == Player.STATE_ENDED
         val wasLast = ahead() == 0
         player.addMediaItem(item)
+        // ExoPlayer drops a new entry at a random spot of the shuffled order, possibly before the
+        // current track, where it would never play: the suggestion goes last in that order too.
+        val added = player.mediaItemCount - 1
+        val shuffled = player.currentTimeline.playOrder(shuffled = true).filter { it != added } + added
+        player.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(shuffled.toIntArray(), System.nanoTime()))
         // The fetch outlasted the track, or ⏭ was pressed meanwhile: go to the new entry.
         if (ended || (skipRequested && wasLast)) {
             skipRequested = false
-            player.seekTo(player.currentMediaItemIndex + 1, 0)
+            player.seekToNextMediaItem()
             player.play()
         }
         return true
