@@ -438,6 +438,18 @@ public sealed class SchemaInitializer
         MigrateCalendarEventLinkOwner(connection);
         MigrateObservationOwner(connection);
 
+        // Budget amounts written by a French Windows carry a comma ("-45,90"): rewritten with a point, the
+        // one form MoneyText writes. Harmless to run again (no row matches once done).
+        foreach (var (table, column) in new[]
+                 {
+                     ("BudgetTransaction", "Amount"), ("BudgetCategory", "MonthlyCap"), ("BudgetPlanLine", "MonthlyAmount"),
+                 })
+        {
+            using var fix = connection.CreateCommand();
+            fix.CommandText = $"UPDATE {table} SET {column} = REPLACE({column}, ',', '.') WHERE {column} LIKE '%,%';";
+            fix.ExecuteNonQuery();
+        }
+
         // The typing-window width opened at a 300 base before settling at 900. Rows seeded under that first
         // default carry 300, and ALTER's column default never rewrites existing rows — so they are lifted
         // once. A one-time flag guards it: a reader who later narrows a poem back to exactly 300 (base 900

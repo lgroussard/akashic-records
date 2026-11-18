@@ -27,7 +27,8 @@ public sealed record StatementParseResult(
 // date-parses wins, the one that number-parses wins, the longest-text column is the label).
 // Amounts tolerate "1.234,56", "-1 234,56", "(50,00)", "45,00 DR", split debit/credit columns,
 // and whole-column cent values (÷100 when the column holds bare large integers).
-// Re-import idempotence: ExternalId = normalized "date|label|amount" string, checked before insert.
+// Re-import idempotence: ExternalId = normalized "date|label|amount" string, checked before insert
+// (the importing view adds "|#2", "|#3"… to identical rows of one statement, which are distinct operations).
 public sealed class StatementImporter
 {
     private static readonly char[] CandidateDelimiters = [',', ';', '\t'];

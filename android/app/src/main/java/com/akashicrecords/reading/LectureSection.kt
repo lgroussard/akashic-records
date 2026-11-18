@@ -42,6 +42,7 @@ import com.akashicrecords.data.Artwork
 import com.akashicrecords.data.Book
 import com.akashicrecords.data.BookHighlight
 import com.akashicrecords.data.ConfigStore
+import com.akashicrecords.journaux.AppScope
 import com.akashicrecords.journaux.nowIso
 import com.akashicrecords.media.LocalImage
 import kotlinx.coroutines.Dispatchers
@@ -205,7 +206,7 @@ private fun BookSheet(db: AkashicDatabase, initial: Book, onDismiss: () -> Unit)
                 Text("Les passages surlignés y sont des observations, reliables aux projets artistiques.", fontSize = 11.sp, color = Palette.TextFaint)
                 Row {
                     TextButton(onClick = { choosing = true }) { Text("Lier à une autre fiche") }
-                    TextButton(onClick = { scope.launch { withContext(Dispatchers.IO) { db.bookDao().update(book.copy(ArtworkId = null)) }; reload() } }) { Text("Délier") }
+                    TextButton(onClick = { scope.launch { withContext(Dispatchers.IO) { db.bookDao().setArtwork(book.Id, null) }; reload() } }) { Text("Délier") }
                 }
             } else {
                 Text("Pas encore de fiche : elle se crée au premier passage surligné, ou maintenant.", fontSize = 12.sp, color = Palette.TextMuted)
@@ -220,7 +221,7 @@ private fun BookSheet(db: AkashicDatabase, initial: Book, onDismiss: () -> Unit)
                         a.Title,
                         modifier = Modifier.fillMaxWidth().clickable {
                             choosing = false
-                            scope.launch { withContext(Dispatchers.IO) { db.bookDao().update(book.copy(ArtworkId = a.Id)) }; reload() }
+                            scope.launch { withContext(Dispatchers.IO) { db.bookDao().setArtwork(book.Id, a.Id) }; reload() }
                         }.padding(vertical = 8.dp),
                     )
                 }
@@ -271,6 +272,7 @@ internal fun ReaderScreen(db: AkashicDatabase, config: ConfigStore, bookId: Int,
     var edit by remember { mutableStateOf<HighlightEdit?>(null) }
     var web by remember { mutableStateOf<ReaderWeb?>(null) }
     var pendingMark by remember { mutableStateOf<Int?>(null) }
+    var positionKnown by remember { mutableStateOf(false) }
     val saved = remember { config.readerLook() }
     var look by remember { mutableStateOf(ReaderLook(saved.first, saved.second, saved.third)) }
 
@@ -303,6 +305,21 @@ internal fun ReaderScreen(db: AkashicDatabase, config: ConfigStore, bookId: Int,
         delay(500)
         val progression = if (pages > 1) page.toDouble() / (pages - 1) else 0.0
         withContext(Dispatchers.IO) { ReadingStore.savePosition(db, bookId, chapter, progression, e.chapters.size, e.overall(chapter, progression)) }
+        positionKnown = true
+    }
+    // Leaving within that half second cancels the save above: the page just turned is saved here. Only once a
+    // position has been saved, i.e. the page counts are those of the resumed chapter and not the opening defaults.
+    DisposableEffect(Unit) {
+        onDispose {
+            val e = epub
+            if (e != null && positionKnown) {
+                val ch = chapter
+                val progression = if (pages > 1) page.toDouble() / (pages - 1) else 0.0
+                val count = e.chapters.size
+                val overall = e.overall(ch, progression)
+                AppScope.launch { ReadingStore.savePosition(db, bookId, ch, progression, count, overall) }
+            }
+        }
     }
     // Highlights redrawn whenever the list changes (saved, edited, deleted).
     LaunchedEffect(highlights, web) { web?.setHighlights(marksOf(chapter)) }

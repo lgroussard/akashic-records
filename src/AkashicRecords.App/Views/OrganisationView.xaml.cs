@@ -406,6 +406,7 @@ public partial class OrganisationView : UserControl, ISearchNavigable, IRemember
     private void DeleteProjectButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (_selectedProject is null) return;
+        if (!ConfirmDelete.Ask($"Supprimer le projet « {_selectedProject.Title} » et ses tâches ?")) return;
 
         _projectRepo.Delete(_selectedProject.Id);
         _selectedProject = null;
@@ -594,6 +595,7 @@ public partial class OrganisationView : UserControl, ISearchNavigable, IRemember
     private void DeleteTransitionButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (_selectedTransition is null) return;
+        if (!ConfirmDelete.Ask($"Supprimer la transition « {_selectedTransition.Title} » et ses étapes ?")) return;
 
         _transitionRepo.Delete(_selectedTransition.Id);
         _selectedTransition = null;

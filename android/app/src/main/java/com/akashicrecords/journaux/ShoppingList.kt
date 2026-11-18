@@ -50,8 +50,9 @@ private suspend fun addRecipeToList(db: AkashicDatabase, recipe: Recipe, factor:
         }
         val sources = existing.Source.split(" · ").filter { it.isNotBlank() }
         val merged = existing.copy(
-            // An amount only adds to an amount; a line without one ("Sel, poivre") stays as it is.
-            Quantity = if (existing.Quantity != null && quantity != null) existing.Quantity + quantity else existing.Quantity,
+            // An amount adds to an amount; a line waiting without one ("citrons", typed by hand) takes the
+            // recipe's, and one with an amount keeps it when the recipe gives none.
+            Quantity = if (existing.Quantity != null && quantity != null) existing.Quantity + quantity else existing.Quantity ?: quantity,
             Source = (sources + recipe.Title).distinct().joinToString(" · "),
         )
         dao.update(merged)

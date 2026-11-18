@@ -84,6 +84,16 @@ class ShoppingParserTest {
         )
     }
 
+    // One line without an amount opening the list is a product, not the title of a part.
+    @Test
+    fun keepsAProductWithoutAmountAtTheTop() {
+        assertEquals(listOf("Huile d'olive", "2 oignons", "Sel"), shown("Huile d'olive\n2 oignons\nSel"))
+        assertEquals(
+            listOf("200 g de riz", "Coriandre fraîche", "1 citron vert"),
+            shown("Pour 2 personnes\n\n200 g de riz\n\nCoriandre fraîche\n1 citron vert"),
+        )
+    }
+
     @Test
     fun scales() {
         val text = "200 g de lentilles\n3 gros oignons\n1,5 L de bouillon\nSel"

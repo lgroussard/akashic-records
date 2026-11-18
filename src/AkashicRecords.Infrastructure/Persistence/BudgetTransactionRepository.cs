@@ -24,7 +24,7 @@ public sealed class BudgetTransactionRepository
             """;
         command.Parameters.AddWithValue("$date", tx.Date.ToString("yyyy-MM-dd"));
         command.Parameters.AddWithValue("$label", tx.Label);
-        command.Parameters.AddWithValue("$amount", tx.Amount.ToString());
+        command.Parameters.AddWithValue("$amount", MoneyText.Format(tx.Amount));
         command.Parameters.AddWithValue("$category", (object?)tx.CategoryId ?? DBNull.Value);
         command.Parameters.AddWithValue("$source", tx.Source);
         command.Parameters.AddWithValue("$external", tx.ExternalId);
@@ -57,7 +57,7 @@ public sealed class BudgetTransactionRepository
                 Id = reader.GetInt32(0),
                 Date = DateTime.Parse(reader.GetString(1)),
                 Label = reader.GetString(2),
-                Amount = decimal.Parse(reader.GetString(3)),
+                Amount = MoneyText.Parse(reader.GetString(3)),
                 CategoryId = reader.IsDBNull(4) ? null : reader.GetInt32(4),
                 Source = reader.GetString(5),
                 ExternalId = reader.IsDBNull(6) ? null : reader.GetString(6),
@@ -178,7 +178,7 @@ public sealed class BudgetTransactionRepository
         var results = new List<(int, string, decimal)>();
         using var reader = command.ExecuteReader();
         while (reader.Read())
-            results.Add((reader.GetInt32(0), reader.GetString(1), decimal.Parse(reader.GetString(2))));
+            results.Add((reader.GetInt32(0), reader.GetString(1), MoneyText.Parse(reader.GetString(2))));
         return results;
     }
 

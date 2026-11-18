@@ -141,10 +141,9 @@ object ReadingStore {
     // Where reading stopped. Overall progress: given by the epub (chapters weighted by their length), else
     // chapters (or pages) done + share of the current one.
     suspend fun savePosition(db: AkashicDatabase, bookId: Int, chapter: Int, progression: Double, chapterCount: Int, overallRead: Double? = null) {
-        val book = db.bookDao().getById(bookId) ?: return
         val overall = overallRead?.coerceIn(0.0, 1.0)
             ?: if (chapterCount <= 0) 0.0 else ((chapter + progression.coerceIn(0.0, 1.0)) / chapterCount).coerceIn(0.0, 1.0)
-        db.bookDao().update(book.copy(Locator = "$chapter:$progression", Progress = overall, LastReadAt = nowIso()))
+        db.bookDao().setPosition(bookId, "$chapter:$progression", overall, nowIso())
     }
 
     fun parseLocator(locator: String?): Pair<Int, Double> {
@@ -179,7 +178,7 @@ object ReadingLinks {
             val a = Artwork(Title = book.Title, Category = LIVRES, Tier = DEFAULT_TIER, CreatedAt = nowIso(), CoverImagePath = cover, WatchPriority = 0)
             a.copy(Id = db.artworkDao().add(a).toInt())
         }
-        if (book.ArtworkId != artwork.Id) db.bookDao().update(book.copy(ArtworkId = artwork.Id))
+        if (book.ArtworkId != artwork.Id) db.bookDao().setArtwork(book.Id, artwork.Id)
         artwork
     }
 

@@ -29,8 +29,10 @@ import com.akashicrecords.SwipePages
 import com.akashicrecords.data.AkashicDatabase
 import com.akashicrecords.data.Book
 import com.akashicrecords.data.ConfigStore
+import com.akashicrecords.journaux.AppScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 // Opens a book in the reader that fits its format: text (epub) or pages (PDF, comic).
@@ -66,7 +68,17 @@ private fun PageReader(db: AkashicDatabase, book: Book, onClose: () -> Unit) {
         doc = withContext(Dispatchers.IO) { runCatching { PageDoc.open(ReadingStore.fileOf(context, book)) }.getOrElse { e -> error = e.message; null } }
         doc?.let { page = page.coerceIn(0, (it.pageCount - 1).coerceAtLeast(0)) }
     }
-    DisposableEffect(Unit) { onDispose { doc?.close() } }
+    DisposableEffect(Unit) {
+        onDispose {
+            // The save below waits half a second and is cancelled by leaving: the page just turned is saved here.
+            doc?.let { d ->
+                val p = page
+                val count = d.pageCount
+                AppScope.launch { ReadingStore.savePosition(db, book.Id, p, 0.0, count) }
+            }
+            doc?.close()
+        }
+    }
 
     val d = doc
     LaunchedEffect(page, d) {

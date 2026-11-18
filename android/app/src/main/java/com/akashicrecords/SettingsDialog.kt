@@ -36,6 +36,7 @@ import com.akashicrecords.data.ConfigStore
 import com.akashicrecords.data.DesktopImport
 import com.akashicrecords.data.Modules
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -54,8 +55,33 @@ fun SettingsDialog(
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
 
+    var undoing by remember { mutableStateOf(false) }
+    var hasBackup by remember { mutableStateOf(DesktopImport.lastBackup(context) != null) }
+
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) picked = uri
+    }
+
+    // An import, or the way back from one. Not cancellable: closing the dialog (or rotating the phone) midway
+    // would skip the relink that follows the database part. The two failures read differently, because after
+    // the first step the data HAS been replaced.
+    suspend fun replaceData(work: () -> DesktopImport.Result) {
+        status = withContext(NonCancellable + Dispatchers.IO) {
+            val r = try {
+                work()
+            } catch (e: Exception) {
+                return@withContext "Échec, rien n'a été modifié dans la base : ${e.message}"
+            }
+            try {
+                com.akashicrecords.reading.ReadingLinks.relinkAfterImport(context, db)
+                "Terminé : ${r.rows} lignes dans ${r.tables} tables, ${r.mediaFiles} fichiers média."
+            } catch (e: Exception) {
+                "Données remplacées, mais les surlignages des livres n'ont pas pu être rattachés : ${e.message}"
+            }
+        }
+        hasBackup = DesktopImport.lastBackup(context) != null
+        if (status?.startsWith("Échec") != true) onImported()
+        busy = false
     }
 
     AlertDialog(
@@ -80,6 +106,9 @@ fun SettingsDialog(
                 )
                 Spacer(Modifier.height(8.dp))
                 Button(onClick = { pick.launch(arrayOf("*/*")) }, enabled = !busy) { Text("Choisir un fichier…") }
+                if (hasBackup) {
+                    TextButton(onClick = { undoing = true }, enabled = !busy) { Text("Revenir avant le dernier import") }
+                }
                 status?.let {
                     Spacer(Modifier.height(8.dp))
                     Text(it, fontSize = 12.sp)
@@ -105,19 +134,33 @@ fun SettingsDialog(
                     picked = null
                     busy = true
                     status = "Import en cours…"
-                    scope.launch {
-                        status = try {
-                            val r = withContext(Dispatchers.IO) { DesktopImport.run(context, uri, db).also { com.akashicrecords.reading.ReadingLinks.relinkAfterImport(context, db) } }
-                            onImported()
-                            "Import terminé : ${r.rows} lignes dans ${r.tables} tables, ${r.mediaFiles} fichiers média."
-                        } catch (e: Exception) {
-                            "Échec de l'import, rien n'a été modifié : ${e.message}"
-                        }
-                        busy = false
-                    }
+                    scope.launch { replaceData { DesktopImport.run(context, uri, db) } }
                 }) { Text("Remplacer") }
             },
             dismissButton = { TextButton(onClick = { picked = null }) { Text("Annuler") } },
+        )
+    }
+
+    if (undoing) {
+        AlertDialog(
+            onDismissRequest = { undoing = false },
+            title = { Text("Revenir avant le dernier import ?") },
+            text = {
+                Text(
+                    "Journaux, recettes, poèmes, calendrier… reviennent à ce qu'ils étaient sur ce téléphone juste " +
+                        "avant le dernier import. Ce qui a été écrit depuis sera perdu. Les photos remplacées par " +
+                        "l'import ne sont pas restaurées.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    undoing = false
+                    busy = true
+                    status = "Retour en arrière…"
+                    scope.launch { replaceData { DesktopImport.undo(context, db) } }
+                }) { Text("Revenir") }
+            },
+            dismissButton = { TextButton(onClick = { undoing = false }) { Text("Annuler") } },
         )
     }
 }

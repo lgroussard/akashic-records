@@ -1,8 +1,9 @@
 # Backup the app's runtime data before any build/clean.
 # Usage: powershell -ExecutionPolicy Bypass -File .github/rules/backup-data.ps1
 #
-# Copies data\, music\, config\ from the active bin output into .github/data-backup/
-# so a clean build can never destroy user data.
+# Copies data\, music\, media\, config\ from the active bin output into .github/data-backup/
+# so a clean build can never destroy user data. media\ holds the imported images (journal photos,
+# covers, archive): the database only keeps their paths.
 
 $ErrorActionPreference = 'Stop'
 
@@ -22,7 +23,7 @@ if (-not (Test-Path $bin)) {
 $backupDir = Join-Path $backupRoot (Get-Date -Format "yyyy-MM-dd_HH-mm-ss")
 New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
 
-$folders = @('data', 'music', 'config')
+$folders = @('data', 'music', 'media', 'config')
 foreach ($f in $folders) {
     $src = Join-Path $bin $f
     if (Test-Path $src) {

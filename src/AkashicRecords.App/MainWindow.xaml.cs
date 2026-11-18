@@ -66,11 +66,7 @@ public partial class MainWindow : Window
         _filmOfTheDayService = new FilmOfTheDayService(_watchlistRepository);
         new SchemaInitializer(new SqliteConnectionFactory()).EnsureCreated();
         FitToScreen();
-
-        _config = _configService.Load();
-        _filmOfTheDayService = new FilmOfTheDayService(_watchlistRepository);
-        new SchemaInitializer(new SqliteConnectionFactory()).EnsureCreated();
-        FitToScreen();
+        ApplyModuleVisibility();
 
         // One-shot debounce: started on each keystroke, stopped as soon as it fires so the app
         // never keeps a timer ticking while idle (§45).

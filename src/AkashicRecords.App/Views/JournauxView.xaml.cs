@@ -473,6 +473,8 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
         // old visual tree still holds the typed values, and no LostFocus is guaranteed to have fired
         // on the focused field. Flush before the tree goes away, or the edits die with this instance.
         FlushPoemEdits();
+        FlushEntryEdits();
+        SaveRecipeFields();
 
         if (PresentationSource.FromVisual(this) is HwndSource hwndSource)
         {
@@ -819,13 +821,16 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
         Execute(new CanvasCommand(
             doAction: () =>
             {
-                element.Id = _canvasRepository.Add(element);
+                // A redo puts back the same row (same Id) and the same visual: the commands stacked after
+                // this one (move, resize, delete, arrows) hold that Id and that visual.
+                if (visual is null) element.Id = _canvasRepository.Add(element);
+                else _canvasRepository.Restore(element);
                 if (element.Type == CanvasElementType.ObservationReference && element.ObservationId is int obsId)
                 {
                     createdLink = !_referenceRepository.Exists(obsId, element.ProjectId);
                     _referenceRepository.Link(obsId, element.ProjectId);
                 }
-                visual = CreateVisual(element);
+                visual ??= CreateVisual(element);
                 _elementVisuals[element.Id] = visual;
                 ElementCanvas.Children.Add(visual);
             },
@@ -936,11 +941,15 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
         if (_currentProject is null) return;
 
         var connector = new CanvasConnector { ProjectId = _currentProject.Id, FromElementId = fromElementId, ToElementId = toElementId };
+        var added = false;
 
         Execute(new CanvasCommand(
             doAction: () =>
             {
-                connector.Id = _connectorRepository.Add(connector);
+                // Same Id on a redo, for the same reason as in AddElement.
+                if (!added) connector.Id = _connectorRepository.Add(connector);
+                else _connectorRepository.Restore(connector);
+                added = true;
                 AddConnectorVisual(connector);
             },
             undoAction: () => RemoveConnectorVisual(connector.Id)));
@@ -1492,6 +1501,31 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
         return entry;
     }
 
+    // What is typed on the journal page and not saved yet (the focused field has had no LostFocus).
+    // A day with nothing typed still gets no row.
+    private void FlushEntryEdits()
+    {
+        var title = EntryTitleInput.Text.Trim();
+        var text = EntryTextInput.Text;
+        var tags = EntryTagsInput.Text.Trim();
+
+        if (_selectedEntry is null)
+        {
+            if (title.Length == 0 && text.Length == 0 && tags.Length == 0) return;
+        }
+        else if ((_selectedEntry.Title ?? string.Empty) == title && (_selectedEntry.Text ?? string.Empty) == text
+                 && (_selectedEntry.Tags ?? string.Empty) == tags)
+        {
+            return;
+        }
+
+        var entry = EnsureSelectedEntryExists();
+        entry.Title = title;
+        entry.Text = text;
+        entry.Tags = tags;
+        _journalEntryRepository.Update(entry.Id, entry.Title, entry.Text, entry.EntryDate, entry.Tags);
+    }
+
     private void EntryTitleInput_OnLostFocus(object sender, RoutedEventArgs e)
     {
         var title = EntryTitleInput.Text.Trim();
@@ -1549,6 +1583,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
             deleteButton.Click += (_, e) =>
             {
                 e.Handled = true;
+                if (!ConfirmDelete.Ask("Supprimer cette photo du journal ?")) return;
                 _journalPhotoRepository.Delete(photo.Id);
                 MediaStorage.DeleteFile(photo.ImagePath);
                 RefreshEntryPhotos();
@@ -1575,6 +1610,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
     private void DeleteEntryButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (_selectedEntry is null) return;
+        if (!ConfirmDelete.Ask($"Supprimer l'entrée du {_currentPageDate:d MMMM yyyy}, avec ses photos et ses observations ?")) return;
 
         foreach (var photo in _journalPhotoRepository.GetByEntry(_selectedEntry.Id))
         {
@@ -1798,7 +1834,18 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
     {
         if (_selectedRecipe is null) return;
 
+        SaveRecipeFields();
+        RefreshRecipesList();
+    }
+
+    // Writes the recipe page's fields to the open recipe. Also called when the section goes away, where
+    // the list must not be rebuilt.
+    private void SaveRecipeFields()
+    {
+        if (_selectedRecipe is null) return;
+
         _selectedRecipe.Title = RecipeTitleInput.Text.Trim();
+        _selectedRecipe.Category = RecipeCategoryInput.Text.Trim();
         _selectedRecipe.Ingredients = RecipeIngredientsInput.Text;
         _selectedRecipe.Instructions = RecipeInstructionsInput.Text;
         _selectedRecipe.Notes = RecipeNotesInput.Text;
@@ -1816,8 +1863,6 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
             _recipeRepository.UpdateServings(_selectedRecipe.Id, servings);
         }
         RecipeServingsInput.Text = servings > 0 ? servings.ToString() : string.Empty;
-
-        RefreshRecipesList();
     }
 
     private void RefreshRecipeCoverImage()
@@ -1861,6 +1906,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
     private void DeleteRecipeButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (_selectedRecipe is null) return;
+        if (!ConfirmDelete.Ask($"Supprimer la recette « {_selectedRecipe.Title} » ?")) return;
 
         if (_selectedRecipe.CoverImagePath is { } path) MediaStorage.DeleteFile(path);
         _recipeRepository.Delete(_selectedRecipe.Id);
@@ -3141,6 +3187,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
     private void DeletePoemButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (_selectedPoem is null) return;
+        if (!ConfirmDelete.Ask($"Supprimer le poème « {_selectedPoem.Title} » ?")) return;
 
         if (_selectedPoem.ImagePath is { } path) MediaStorage.DeleteFile(path);
         _poemRepository.Delete(_selectedPoem.Id);
