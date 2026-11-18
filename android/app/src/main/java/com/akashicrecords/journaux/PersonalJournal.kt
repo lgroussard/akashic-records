@@ -180,6 +180,7 @@ private fun EntryPage(
                 shape = RoundedCornerShape(8.dp),
             ) { Text("+ Photo") }
         }
+        entryId?.let { ObservationsBlock(db, "JournalEntry", it) }
         if (entryId != null) {
             TextButton(onClick = { confirmEntry = true }) { Text("Supprimer cette entrée", color = Palette.TextMuted) }
         }

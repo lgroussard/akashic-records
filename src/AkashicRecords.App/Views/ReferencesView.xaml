@@ -75,6 +75,8 @@
                                       SelectionChanged="ViewerBoard_OnSelectionChanged"/>
                             <Button x:Name="ViewerSourceButton" Content="Source ↗" Style="{StaticResource SecondaryButtonStyle}"
                                     Margin="8,0,0,0" Click="ViewerSource_OnClick"/>
+                            <Button x:Name="ViewerObservationsButton" Content="✎ Observations" Style="{StaticResource SecondaryButtonStyle}"
+                                    Margin="8,0,0,0" Click="ViewerObservations_OnClick"/>
                             <Button x:Name="ViewerDeleteButton" Content="Supprimer" Style="{StaticResource SecondaryButtonStyle}"
                                     Margin="8,0,0,0" Click="ViewerDelete_OnClick"/>
                             <Button DockPanel.Dock="Right" Content="Fermer" Style="{StaticResource SecondaryButtonStyle}"

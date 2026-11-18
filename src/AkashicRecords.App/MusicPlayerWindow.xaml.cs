@@ -223,8 +223,29 @@ public partial class MusicPlayerWindow : Window
         ResetPosition();
     }
 
+    // The library track on screen, if any: observations attach to library tracks, not to streamed suggestions.
+    private MusicTrack? _observedTrack;
+
+    private void ObservationsButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_observedTrack is not { } track) return;
+        var title = string.IsNullOrWhiteSpace(track.Artist) ? track.Title : $"{track.Title} — {track.Artist}";
+        Views.ObservationsDialog.Open(this, Observation.MusicTrackOwner, track.Id, title);
+        RefreshObservationsButton();
+    }
+
+    private void RefreshObservationsButton()
+    {
+        ObservationsButton.Visibility = _observedTrack is null ? Visibility.Collapsed : Visibility.Visible;
+        if (_observedTrack is null) return;
+        var label = Views.ObservationsDialog.ButtonLabel(Observation.MusicTrackOwner, _observedTrack.Id);
+        ObservationsButton.ToolTip = label.TrimStart('✎', ' ') + " sur ce titre";
+    }
+
     private void ShowStreamNowPlaying(QueueEntry entry)
     {
+        _observedTrack = null;
+        RefreshObservationsButton();
         TitleText.Text = string.IsNullOrWhiteSpace(entry.Title) ? "(sans titre)" : entry.Title;
         ArtistText.Text = entry.Artist;
         PlayPauseButton.Content = "…";
@@ -265,6 +286,8 @@ public partial class MusicPlayerWindow : Window
 
     private void UpdateNowPlaying(MusicTrack track)
     {
+        _observedTrack = track;
+        RefreshObservationsButton();
         TitleText.Text = string.IsNullOrWhiteSpace(track.Title) ? "(sans titre)" : track.Title;
         ArtistText.Text = track.Artist;
         PlayPauseButton.Content = _isPlaying ? "⏸" : "▶";

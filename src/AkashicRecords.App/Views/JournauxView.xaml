@@ -80,6 +80,9 @@
                                         Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextMutedBrush}" Cursor="Hand" FontSize="18"/>
                                 <Button Content="›" Click="NextEntryButton_OnClick" Width="30" Height="30"
                                         Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextMutedBrush}" Cursor="Hand" FontSize="18"/>
+                                <Button x:Name="EntryObservationsButton" Content="✎ Observations" Style="{StaticResource MiniButtonStyle}"
+                                        Click="EntryObservationsButton_OnClick" Margin="14,0,0,0" VerticalAlignment="Center"
+                                        ToolTip="Ce que ce jour a représenté — et le lier à un projet artistique"/>
                                 <Button x:Name="DeleteEntryButton" Content="Supprimer cette entrée" Style="{StaticResource MiniButtonStyle}"
                                         Click="DeleteEntryButton_OnClick" Margin="14,0,0,0" VerticalAlignment="Center"/>
                             </StackPanel>
@@ -311,7 +314,11 @@
                         </StackPanel>
 
                         <!-- Delete -->
-                        <Button Grid.Row="7" x:Name="DeleteRecipeButton" Content="Supprimer la recette" Style="{StaticResource MiniButtonStyle}" Click="DeleteRecipeButton_OnClick" HorizontalAlignment="Left"/>
+                        <StackPanel Grid.Row="7" Orientation="Horizontal" HorizontalAlignment="Left">
+                            <Button x:Name="RecipeObservationsButton" Content="✎ Observations" Style="{StaticResource MiniButtonStyle}"
+                                    Click="RecipeObservationsButton_OnClick" Margin="0,0,8,0"/>
+                            <Button x:Name="DeleteRecipeButton" Content="Supprimer la recette" Style="{StaticResource MiniButtonStyle}" Click="DeleteRecipeButton_OnClick"/>
+                        </StackPanel>
                     </Grid>
                 </Border>
             </Grid>
@@ -691,6 +698,8 @@
                                     <Button Content="Image…" Style="{StaticResource MiniButtonStyle}" Click="SetPoemImageButton_OnClick" FontSize="11" Margin="0,0,4,0"/>
                                     <Button x:Name="RemovePoemImageButton" Content="✕" Style="{StaticResource MiniButtonStyle}" Click="RemovePoemImageButton_OnClick"
                                             FontSize="11" Visibility="Collapsed" Margin="0,0,12,0"/>
+                                    <Button x:Name="PoemObservationsButton" Content="✎ Observations" Style="{StaticResource MiniButtonStyle}"
+                                            Click="PoemObservationsButton_OnClick" FontSize="11" Margin="0,0,12,0"/>
                                     <Button x:Name="DeletePoemButton" Content="Supprimer le poème" Style="{StaticResource MiniButtonStyle}" Click="DeletePoemButton_OnClick" FontSize="11"/>
                                 </StackPanel>
                             </Grid>
@@ -788,18 +797,38 @@
                         </ComboBox>
                         <TextBox x:Name="NewProjectTitleInput" Style="{StaticResource DarkTextBoxStyle}" Width="160" Margin="0,0,8,4"/>
                         <Button Content="Nouveau projet" Style="{StaticResource SecondaryButtonStyle}" Click="NewProjectButton_OnClick" Margin="0,0,16,4"/>
-                        <Button Content="Ajouter texte" Style="{StaticResource SecondaryButtonStyle}" Click="AddTextNoteButton_OnClick" Margin="0,0,4,4"/>
-                        <Button Content="Ajouter image" Style="{StaticResource SecondaryButtonStyle}" Click="AddImageButton_OnClick" Margin="0,0,4,4"/>
-                        <Button Content="Ajouter référence" Style="{StaticResource SecondaryButtonStyle}" Click="AddReferenceButton_OnClick" Margin="0,0,4,4"/>
-                        <Button x:Name="DrawArrowButton" Content="Tracer une flèche" Style="{StaticResource SecondaryButtonStyle}" Click="DrawArrowButton_OnClick" Margin="0,0,16,4"/>
-                        <Button Content="Annuler" Style="{StaticResource MiniButtonStyle}" Click="UndoButton_OnClick" Margin="0,0,4,4"/>
-                        <Button Content="Rétablir" Style="{StaticResource MiniButtonStyle}" Click="RedoButton_OnClick" Margin="0,0,4,4"/>
+                        <!-- Two faces of one project: the free-form board, and the Fil — the list of everything it references. -->
+                        <ToggleButton x:Name="CanvasModeToggle" Content="Canvas" IsChecked="True" Style="{StaticResource SubTabStyle}"
+                                      Click="ProjectModeToggle_OnClick" Margin="0,0,4,4"/>
+                        <ToggleButton x:Name="FilModeToggle" Content="Fil" Style="{StaticResource SubTabStyle}"
+                                      Click="ProjectModeToggle_OnClick" Margin="0,0,16,4"
+                                      ToolTip="Tout ce que ce projet référence, par type"/>
+                        <StackPanel x:Name="CanvasToolsPanel" Orientation="Horizontal">
+                            <Button Content="Ajouter texte" Style="{StaticResource SecondaryButtonStyle}" Click="AddTextNoteButton_OnClick" Margin="0,0,4,4"/>
+                            <Button Content="Ajouter image" Style="{StaticResource SecondaryButtonStyle}" Click="AddImageButton_OnClick" Margin="0,0,4,4"/>
+                            <Button Content="Ajouter référence" Style="{StaticResource SecondaryButtonStyle}" Click="AddReferenceButton_OnClick" Margin="0,0,4,4"/>
+                            <Button x:Name="DrawArrowButton" Content="Tracer une flèche" Style="{StaticResource SecondaryButtonStyle}" Click="DrawArrowButton_OnClick" Margin="0,0,16,4"/>
+                            <Button Content="Annuler" Style="{StaticResource MiniButtonStyle}" Click="UndoButton_OnClick" Margin="0,0,4,4"/>
+                            <Button Content="Rétablir" Style="{StaticResource MiniButtonStyle}" Click="RedoButton_OnClick" Margin="0,0,4,4"/>
+                        </StackPanel>
+                        <Button x:Name="FilAddButton" Content="＋ Ajouter une observation" Style="{StaticResource SecondaryButtonStyle}"
+                                Click="AddReferenceButton_OnClick" Margin="0,0,4,4" Visibility="Collapsed"/>
                     </WrapPanel>
 
-                    <Border Grid.Row="1" Style="{StaticResource CardBorderStyle}" Padding="0">
+                    <Border x:Name="CanvasBoard" Grid.Row="1" Style="{StaticResource CardBorderStyle}" Padding="0">
                         <ScrollViewer x:Name="CanvasScrollViewer" HorizontalScrollBarVisibility="Hidden"
                                       VerticalScrollBarVisibility="Hidden" PreviewMouseWheel="CanvasScrollViewer_OnPreviewMouseWheel">
                             <Canvas x:Name="ElementCanvas" Width="3000" Height="3000" Background="{StaticResource CanvasGridBrush}"/>
+                        </ScrollViewer>
+                    </Border>
+
+                    <!-- Fil: every observation the project references, grouped by the kind of item it sits on. -->
+                    <Border x:Name="FilBoard" Grid.Row="1" Style="{StaticResource CardBorderStyle}" Padding="18,14" Visibility="Collapsed">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <ScrollViewer.Resources>
+                                <Style TargetType="ScrollBar" BasedOn="{StaticResource ThinVerticalScrollBarStyle}"/>
+                            </ScrollViewer.Resources>
+                            <StackPanel x:Name="FilHost" MinWidth="620" MaxWidth="860" HorizontalAlignment="Left"/>
                         </ScrollViewer>
                     </Border>
                 </Grid>
@@ -820,7 +849,7 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
-                            <TextBlock Grid.Row="0" Text="PICK AN OBSERVATION" Style="{StaticResource PanelSectionHeaderStyle}" Margin="0,0,0,10"/>
+                            <TextBlock Grid.Row="0" Text="CHOISIR UNE OBSERVATION" Style="{StaticResource PanelSectionHeaderStyle}" Margin="0,0,0,10"/>
                             <ListBox Grid.Row="1" x:Name="ObservationPickerList" DisplayMemberPath="Label"
                                      Background="Transparent" Foreground="{StaticResource TextBrush}" BorderThickness="0"
                                      SelectionChanged="ObservationPickerList_OnSelectionChanged"/>

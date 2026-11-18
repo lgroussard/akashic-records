@@ -193,6 +193,7 @@ private fun RecipePage(db: AkashicDatabase, recipe: Recipe, onDeleted: () -> Uni
         Field("Préparation", r.Instructions, { r = r.copy(Instructions = it) }, minLines = 6)
         Field("Notes personnelles", r.Notes, { r = r.copy(Notes = it) }, minLines = 2)
         Field("Tags", r.Tags, { r = r.copy(Tags = it) })
+        ObservationsBlock(db, "Recipe", r.Id)
         TextButton(onClick = { confirm = true }) { Text("Supprimer la recette", color = Palette.TextMuted) }
         Spacer(Modifier.height(24.dp))
     }

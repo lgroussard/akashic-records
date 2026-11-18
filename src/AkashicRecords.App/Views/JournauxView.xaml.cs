@@ -204,6 +204,11 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
                 var project = _projectRepository.GetById(result.PrimaryId);
                 if (project is not null) OpenProject(project);
                 break;
+
+            case SearchResultKind.RefImage:
+                SwitchJournalTab(ReferencesJournalTab, "References");
+                ReferencesPane.OpenImage(result.PrimaryId);
+                break;
         }
     }
 
@@ -216,12 +221,16 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
             "Poetry" => PoetryJournalTab,
             "Artistic" => ArtisticJournalTab,
             "References" => ReferencesJournalTab,
+            "Fil" => ArtisticJournalTab, // the artistic tab, on a project's Fil instead of its canvas
             _ => PersonalJournalTab
         };
+        var fil = tab == "Fil";
+        if (fil) tab = "Artistic";
         SwitchJournalTab(target, tab);
 
         if (tab == "Recipes") RefreshRecipesList();
         else if (tab == "Poetry") RefreshPoetry();
+        else if (fil) { RefreshProjectsList(); SetFilMode(true); }
         else if (tab == "Artistic") RefreshProjectsList();
         else RefreshCalendarChips();
     }
@@ -313,7 +322,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
                        : _openRecueil is not null ? $"Poetry:Recueil:{_openRecueil.Id}"
                        : _poetryStandaloneActive ? "Poetry:Standalone:"
                        : "Poetry:Shelf:",
-            "Artistic" => _currentProject is null ? null : $"Artistic:Project:{_currentProject.Id}",
+            "Artistic" => _currentProject is null ? null : $"Artistic:{(_filMode ? "ProjectFil" : "Project")}:{_currentProject.Id}",
             _ => null
         };
         _config.JournauxActiveItem = payload;
@@ -384,10 +393,15 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
                 ShowStandalonePoems();
                 break;
             case "Project":
+            case "ProjectFil":
                 if (id >= 0)
                 {
                     var project = _projectRepository.GetById(id);
-                    if (project is not null) OpenProject(project);
+                    if (project is not null)
+                    {
+                        SetFilMode(kind == "ProjectFil");
+                        OpenProject(project);
+                    }
                 }
                 break;
             default: // "Shelf"
@@ -611,6 +625,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
             AddConnectorVisual(connector);
         }
 
+        if (_filMode) RefreshFil();
         CanvasRoot.Focus();
     }
 
@@ -707,7 +722,14 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
     {
         if (_currentProject is null) return;
 
-        ObservationPickerList.ItemsSource = _observationRepository.GetAllWithArtwork();
+        // Observations on any kind of item. From the Fil, the ones the project already holds are left out.
+        var all = _observationRepository.GetAllWithOwner();
+        if (_filMode)
+        {
+            var linked = _referenceRepository.GetByProject(_currentProject.Id).Select(r => r.ObservationId).ToHashSet();
+            all = all.Where(o => !linked.Contains(o.ObservationId)).ToList();
+        }
+        ObservationPickerList.ItemsSource = all;
         ReferencePickerOverlay.Visibility = Visibility.Visible;
         ReferencePickerOverlay.Focus();
     }
@@ -727,6 +749,14 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
 
         ReferencePickerOverlay.Visibility = Visibility.Collapsed;
         ObservationPickerList.SelectedItem = null;
+
+        // From the Fil the observation is only linked to the project; no box is put on the board.
+        if (_filMode)
+        {
+            _referenceRepository.Link(summary.ObservationId, _currentProject.Id);
+            RefreshFil();
+            return;
+        }
 
         AddElement(new CanvasElement
         {
@@ -781,7 +811,10 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
     private void AddElement(CanvasElement element)
     {
         FrameworkElement? visual = null;
-        int? referenceId = null;
+        // Putting an observation on the board links it to the project (it then shows in the Fil). The
+        // link is only this command's to undo when the command created it: an observation already in
+        // the Fil keeps its link.
+        var createdLink = false;
 
         Execute(new CanvasCommand(
             doAction: () =>
@@ -789,7 +822,8 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
                 element.Id = _canvasRepository.Add(element);
                 if (element.Type == CanvasElementType.ObservationReference && element.ObservationId is int obsId)
                 {
-                    referenceId = _referenceRepository.Add(new Reference { ObservationId = obsId, ProjectId = element.ProjectId });
+                    createdLink = !_referenceRepository.Exists(obsId, element.ProjectId);
+                    _referenceRepository.Link(obsId, element.ProjectId);
                 }
                 visual = CreateVisual(element);
                 _elementVisuals[element.Id] = visual;
@@ -800,16 +834,14 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
                 ElementCanvas.Children.Remove(visual);
                 _elementVisuals.Remove(element.Id);
                 _canvasRepository.Delete(element.Id);
-                if (referenceId is int rid) _referenceRepository.Delete(rid);
+                if (createdLink && element.ObservationId is int obsId) _referenceRepository.Unlink(obsId, element.ProjectId);
             }));
     }
 
+    // Removing an observation's box only takes it off the board: the project keeps referencing the
+    // observation, which stays in the Fil (unlink it there).
     private void DeleteElement(CanvasElement element, FrameworkElement visual)
     {
-        int? referenceId = element.Type == CanvasElementType.ObservationReference
-            ? _referenceRepository.GetByProject(element.ProjectId).FirstOrDefault(r => r.ObservationId == element.ObservationId)?.Id
-            : null;
-
         // Arrows attached to this element can't dangle - they're removed together with it and restored together on undo.
         var affectedConnectors = _connectorRepository.GetByProject(element.ProjectId)
             .Where(c => c.FromElementId == element.Id || c.ToElementId == element.Id)
@@ -822,16 +854,11 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
                 ElementCanvas.Children.Remove(visual);
                 _elementVisuals.Remove(element.Id);
                 _canvasRepository.Delete(element.Id);
-                if (referenceId is int rid) _referenceRepository.Delete(rid);
             },
             undoAction: () =>
             {
                 _canvasRepository.Restore(element);
                 _elementVisuals[element.Id] = visual;
-                if (element.Type == CanvasElementType.ObservationReference && element.ObservationId is int obsId)
-                {
-                    referenceId = _referenceRepository.Add(new Reference { ObservationId = obsId, ProjectId = element.ProjectId });
-                }
                 ElementCanvas.Children.Add(visual);
                 foreach (var connector in affectedConnectors)
                 {
@@ -1198,13 +1225,11 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
 
     private FrameworkElement CreateReferenceContent(CanvasElement element)
     {
-        var observation = element.ObservationId is int obsId ? _observationRepository.GetById(obsId) : null;
-        var artwork = observation is not null ? _artworkRepository.GetById(observation.ArtworkId) : null;
+        // The owner can be any kind of item (a work, a poem, a journal day…), so the title comes from the summary.
+        var observation = element.ObservationId is int obsId ? _observationRepository.GetSummary(obsId) : null;
 
         // Shown directly on the canvas (no popup) - resize the element to read more of the observation.
-        var header = observation is not null && artwork is not null
-            ? $"{artwork.Title} — {observation.Subject}"
-            : "(deleted observation)";
+        var header = observation?.Label ?? "(observation supprimée)";
         var body = observation?.Content ?? string.Empty;
 
         var panel = new StackPanel();
@@ -1259,6 +1284,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
         EntryTitleInput.Text = _selectedEntry?.Title ?? string.Empty;
         EntryTextInput.Text = _selectedEntry?.Text ?? string.Empty;
         EntryTagsInput.Text = _selectedEntry?.Tags ?? string.Empty;
+        RefreshObservationButtons();
         RenderEntryTags();
         RefreshEntryPhotos();
 
@@ -1556,6 +1582,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
             MediaStorage.DeleteFile(photo.ImagePath);
         }
         _journalEntryRepository.Delete(_selectedEntry.Id);
+        _observationRepository.DeleteByOwner(Observation.JournalEntryOwner, _selectedEntry.Id);
 
         RefreshCalendarChips();
         NavigateToDate(_currentPageDate);
@@ -1676,6 +1703,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
         SaveActiveItem();
 
         RecipePageTitleText.Text = recipe?.Title ?? "No recipe";
+        RefreshObservationButtons();
         RecipeTitleInput.Text = recipe?.Title ?? string.Empty;
         RecipeIngredientsInput.Text = recipe?.Ingredients ?? string.Empty;
         RecipeInstructionsInput.Text = recipe?.Instructions ?? string.Empty;
@@ -1826,6 +1854,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
 
         if (_selectedRecipe.CoverImagePath is { } path) MediaStorage.DeleteFile(path);
         _recipeRepository.Delete(_selectedRecipe.Id);
+        _observationRepository.DeleteByOwner(Observation.RecipeOwner, _selectedRecipe.Id);
 
         _selectedRecipe = null;
         RefreshRecipesList();
@@ -2635,6 +2664,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
         var recueils = (List<Recueil?>)PoemRecueilPicker.ItemsSource;
 
         _poemSelectionToFormat = null;
+        RefreshObservationButtons();
         PoemTitleInput.Text = poem?.Title ?? string.Empty;
         LoadPoemContent(poem);
         PoemTagsInput.Text = poem?.Tags ?? string.Empty;
@@ -3104,6 +3134,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
 
         if (_selectedPoem.ImagePath is { } path) MediaStorage.DeleteFile(path);
         _poemRepository.Delete(_selectedPoem.Id);
+        _observationRepository.DeleteByOwner(Observation.PoemOwner, _selectedPoem.Id);
 
         _selectedPoem = null;
         if (_openRecueil is not null) OpenRecueilBook(_openRecueil);

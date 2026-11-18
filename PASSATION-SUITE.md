@@ -168,5 +168,10 @@ Le serveur peut être acheté à tout moment.
 - **Base Room** en version 2 : toute nouvelle colonne = nouvelle `Migration` dans `AkashicDatabase.kt`
   **et** l'équivalent `AddColumnIfMissing` dans `SchemaInitializer.cs` côté PC (les deux schémas doivent rester alignés
   pour l'import et la future synchro).
+- **Clés étrangères** : contrairement à ce que disait `HANDOFF.md`, elles sont **actives** côté PC
+  (`Microsoft.Data.Sqlite` les active par défaut). Voir `HANDOFF.md` §8 avant toute migration qui retire une contrainte.
+- **Observations partout + Fil (2026-11-12)** : une observation peut appartenir à n'importe quel élément
+  (`OwnerKind` / `OwnerId`), un projet artistique sert de thème, et sa page **Fil** liste tout ce qu'il référence.
+  Détail dans `HANDOFF.md` §8. Téléphone : mêmes colonnes (Room v7) et vues en lecture seule.
 - **Méthode** : tester pour de vrai sur l'émulateur (captures d'écran, données importées du PC) avant d'annoncer qu'un
   point marche ; plusieurs bugs n'ont été trouvés qu'ainsi (migration manquante, boutons du widget musique, décembre vide).

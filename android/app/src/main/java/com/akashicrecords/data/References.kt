@@ -64,6 +64,9 @@ interface RefImageDao {
     @Query("SELECT * FROM RefImage ORDER BY CreatedAt DESC, Id DESC")
     suspend fun getAll(): List<RefImage>
 
+    @Query("SELECT * FROM RefImage WHERE Id = :id")
+    suspend fun getById(id: Int): RefImage?
+
     @Query("SELECT * FROM RefImage WHERE BoardId = :boardId ORDER BY CreatedAt DESC, Id DESC")
     suspend fun forBoard(boardId: Int): List<RefImage>
 

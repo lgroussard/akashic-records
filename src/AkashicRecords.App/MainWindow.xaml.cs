@@ -701,6 +701,7 @@ public partial class MainWindow : Window
         SearchResultKind.Transition => "Organisation.Transitions",
         SearchResultKind.MusicTrack => "Musique",
         SearchResultKind.BudgetTransaction => "Budget.Transactions",
+        SearchResultKind.RefImage => "Journaux.References",
         _ => result.Section,
     };
 

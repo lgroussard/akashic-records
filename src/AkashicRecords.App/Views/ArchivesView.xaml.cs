@@ -594,6 +594,7 @@ public partial class ArchivesView : UserControl, ISearchNavigable, IRemembersVie
         SaveActiveItem();
         ViewerImage.Source = LoadImage(MediaStorage.ResolveFullPath(photo.ImagePath));
         ViewerCounterText.Text = $"{_viewerIndex + 1} / {_filteredPhotos.Count}";
+        ViewerObservationsButton.Content = ObservationsDialog.ButtonLabel(Observation.PhotoOwner, photo.Id);
 
         _isRebuildingCombos = true;
         RebuildViewerAlbums();
@@ -730,6 +731,13 @@ public partial class ArchivesView : UserControl, ISearchNavigable, IRemembersVie
 
     private void DeletePhotoButton_OnClick(object sender, RoutedEventArgs e) => DeleteCurrentPhoto();
 
+    private void ViewerObservationsButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (CurrentPhoto is not { } photo) return;
+        ObservationsDialog.Open(this, Observation.PhotoOwner, photo.Id, photo.Title.Length > 0 ? photo.Title : "(photo sans titre)");
+        ViewerObservationsButton.Content = ObservationsDialog.ButtonLabel(Observation.PhotoOwner, photo.Id);
+    }
+
     private void DeleteCurrentPhoto()
     {
         if (CurrentPhoto is not { } photo) return;
@@ -761,6 +769,7 @@ public partial class ArchivesView : UserControl, ISearchNavigable, IRemembersVie
         }
 
         _photoRepo.Delete(photo.Id);
+        new ObservationRepository(new SqliteConnectionFactory()).DeleteByOwner(Observation.PhotoOwner, photo.Id);
 
         RefreshGrid();
 

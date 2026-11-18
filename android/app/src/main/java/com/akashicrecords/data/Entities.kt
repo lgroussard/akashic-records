@@ -1,5 +1,6 @@
 package com.akashicrecords.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import androidx.room.TypeConverter
@@ -36,6 +37,10 @@ data class ArtworkEvaluation(
     val Score: Int,
 )
 
+// An observation belongs to any item (schema v7): OwnerKind is one of Artwork, JournalEntry, Poem, Recipe, Photo,
+// RefImage, MusicTrack (the PC's SearchResultKind names) and OwnerId that item's id. ArtworkId stays NOT NULL, as on
+// the PC, and is 0 when the owner is not an artwork. The phone only creates artwork observations (Collections fiche,
+// book highlights); the other kinds arrive from the PC and are shown read-only.
 @Entity(tableName = "Observation")
 data class Observation(
     @PrimaryKey(autoGenerate = true) val Id: Int = 0,
@@ -43,7 +48,15 @@ data class Observation(
     val Subject: String,
     val Content: String,
     val CreatedAt: String,
-)
+    @ColumnInfo(defaultValue = "Artwork") val OwnerKind: String = "Artwork",
+    @ColumnInfo(defaultValue = "0") val OwnerId: Int = 0,
+) {
+    companion object {
+        // Every place the phone writes one goes through here, so owner and ArtworkId never disagree.
+        fun ofArtwork(artworkId: Int, subject: String, content: String, createdAt: String) =
+            Observation(ArtworkId = artworkId, Subject = subject, Content = content, CreatedAt = createdAt, OwnerKind = "Artwork", OwnerId = artworkId)
+    }
+}
 
 // ---- Journaux ----
 @Entity(tableName = "JournalEntry")

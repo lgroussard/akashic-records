@@ -69,6 +69,32 @@ public partial class App : Application
             return;
         }
 
+        // The shared observations panel, pointed at one item: `Observations:<OwnerKind>:<Id>`
+        // (e.g. Observations:Poem:7). Its dialog is modal, so the panel is rendered in a plain window.
+        if (section.Equals("Observations", StringComparison.OrdinalIgnoreCase))
+        {
+            var owner = (subTab ?? string.Empty).Split(':', 2);
+            var panel = new Views.ObservationsPanel { Width = 440, Margin = new Thickness(20) };
+            panel.SetOwner(owner[0], owner.Length > 1 && int.TryParse(owner[1], out var ownerId) ? ownerId : 0);
+            var host = new Window
+            {
+                WindowStartupLocation = WindowStartupLocation.Manual, Left = 0, Top = 0,
+                SizeToContent = SizeToContent.WidthAndHeight, WindowStyle = WindowStyle.None,
+                Background = (System.Windows.Media.Brush)FindResource("AppBgBrush"), Content = panel,
+            };
+            host.Show();
+            var panelSettle = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
+            panelSettle.Tick += (_, _) =>
+            {
+                panelSettle.Stop();
+                try { CaptureElement(panel, outputPath); }
+                catch (Exception ex) { LogCrash(ex); }
+                finally { host.Close(); Shutdown(); }
+            };
+            panelSettle.Start();
+            return;
+        }
+
         // The music player is also a standalone top-level window (not hosted in MainWindow).
         if (section.Equals("Music", StringComparison.OrdinalIgnoreCase) ||
             section.Equals("Musique", StringComparison.OrdinalIgnoreCase))

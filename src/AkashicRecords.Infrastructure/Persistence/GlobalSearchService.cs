@@ -20,6 +20,7 @@ public sealed class GlobalSearchService
     private readonly TransitionRepository _transitionRepository;
     private readonly MusicTrackRepository _musicTrackRepository;
     private readonly BudgetTransactionRepository _budgetTxRepository;
+    private readonly RefImageRepository _refImageRepository;
 
     public GlobalSearchService(SqliteConnectionFactory connectionFactory)
     {
@@ -34,6 +35,7 @@ public sealed class GlobalSearchService
         _transitionRepository = new TransitionRepository(connectionFactory);
         _musicTrackRepository = new MusicTrackRepository(connectionFactory);
         _budgetTxRepository = new BudgetTransactionRepository(connectionFactory);
+        _refImageRepository = new RefImageRepository(connectionFactory);
     }
 
     public IReadOnlyList<SearchResult> Search(string query, int maxResults = 60)
@@ -59,11 +61,19 @@ public sealed class GlobalSearchService
             }
         }
 
-        foreach (var obs in _observationRepository.GetAllWithArtwork())
+        // Observations on any kind of item; a hit opens the item that owns the observation.
+        foreach (var obs in _observationRepository.GetAllWithOwner())
         {
-            Add(Rank(q, obs.Subject, obs.Content), () => new SearchResult(
-                SearchResultKind.Observation, "Collections", $"{obs.ArtworkTitle} — {obs.Subject}",
-                Snippet(q, obs.Subject, obs.Content), obs.ArtworkId, obs.ObservationId, (int)obs.ArtworkCategory));
+            Add(Rank(q, obs.Subject, obs.Content), () => obs.ToSearchResult(Snippet(q, obs.Subject, obs.Content)));
+        }
+
+        // --- Journaux: reference images ---
+        foreach (var image in _refImageRepository.GetAll())
+        {
+            var title = image.Title.Length > 0 ? image.Title : "(image sans titre)";
+            Add(Rank(q, image.Title, image.Author, image.Note), () => new SearchResult(
+                SearchResultKind.RefImage, "Journaux", title, Snippet(q, image.Title, image.Author, image.Note),
+                image.Id, null, null));
         }
 
         // --- Journaux: artistic projects, journal entries, recipes, poems ---
@@ -221,6 +231,8 @@ public sealed class GlobalSearchService
             SearchResultKind.MusicTrack => Pick(_musicTrackRepository.GetById(primaryId), t => (t.CoverImagePath, FirstText(t.Artist, t.Album))),
             SearchResultKind.BudgetTransaction => Pick(_budgetTxRepository.GetAll().FirstOrDefault(t => t.Id == primaryId),
                 t => (null, $"{t.Label} · {t.Date:dd/MM/yyyy} · {t.Amount:0.00}")),
+            SearchResultKind.RefImage => Pick(_refImageRepository.GetAll().FirstOrDefault(i => i.Id == primaryId),
+                i => (i.ImagePath, FirstText(i.Note, i.Author))),
             _ => null, // ArtisticProject carries nothing but a title — the chip shows the title alone.
         };
     }

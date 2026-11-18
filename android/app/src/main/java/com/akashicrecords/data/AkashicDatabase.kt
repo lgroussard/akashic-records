@@ -52,7 +52,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CrosswordGame::class,
         Ticket::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -108,7 +108,7 @@ abstract class AkashicDatabase : RoomDatabase() {
                 context.applicationContext,
                 AkashicDatabase::class.java,
                 "akashic.db",
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7).build().also { instance = it }
 
         // v2: phone-only poem formatting next to the PC columns (the desktop schema has the same
         // columns, so imports and the future sync carry both layouts).
@@ -174,6 +174,16 @@ abstract class AkashicDatabase : RoomDatabase() {
                         "`Title` TEXT NOT NULL, `FilePath` TEXT NOT NULL, `MimeType` TEXT NOT NULL, `Date` TEXT NOT NULL, " +
                         "`EventId` INTEGER, `EventTitle` TEXT NOT NULL, `CreatedAt` TEXT NOT NULL)",
                 )
+            }
+        }
+
+        // v7: an observation can belong to any item, not only an artwork. Same two columns and the same backfill in
+        // the desktop SchemaInitializer; the rows from before are artwork observations.
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `Observation` ADD COLUMN `OwnerKind` TEXT NOT NULL DEFAULT 'Artwork'")
+                db.execSQL("ALTER TABLE `Observation` ADD COLUMN `OwnerId` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("UPDATE `Observation` SET `OwnerId` = `ArtworkId` WHERE `OwnerKind` = 'Artwork' AND `OwnerId` = 0")
             }
         }
     }

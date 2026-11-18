@@ -69,6 +69,12 @@ interface ObservationDao {
 
     @Query("SELECT * FROM Observation WHERE Id = :id")
     suspend fun getById(id: Int): Observation?
+
+    @Query("SELECT * FROM Observation WHERE OwnerKind = :kind AND OwnerId = :id ORDER BY CreatedAt")
+    suspend fun forOwner(kind: String, id: Int): List<Observation>
+
+    @Query("SELECT * FROM Observation ORDER BY CreatedAt DESC, Id DESC")
+    suspend fun getAll(): List<Observation>
 }
 
 @Dao
@@ -168,6 +174,9 @@ interface ArtisticProjectDao {
 
     @Query("SELECT * FROM ArtisticProject ORDER BY Title")
     suspend fun getAll(): List<ArtisticProject>
+
+    @Query("SELECT * FROM ArtisticProject WHERE Id = :id")
+    suspend fun getById(id: Int): ArtisticProject?
 }
 
 @Dao
@@ -327,6 +336,9 @@ interface MusicTrackDao {
 
     @Query("SELECT * FROM MusicTrack ORDER BY Album, Title")
     suspend fun getAll(): List<MusicTrack>
+
+    @Query("SELECT * FROM MusicTrack WHERE Id = :id")
+    suspend fun getById(id: Int): MusicTrack?
 
     @Query("UPDATE MusicTrack SET Title = :title, Artist = :artist WHERE Id = :id")
     suspend fun updateMetadata(id: Int, title: String, artist: String)

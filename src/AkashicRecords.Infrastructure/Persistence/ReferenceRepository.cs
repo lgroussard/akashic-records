@@ -45,6 +45,35 @@ public sealed class ReferenceRepository
         return ReadAll(command);
     }
 
+    public bool Exists(int observationId, int projectId)
+    {
+        using var connection = _connectionFactory.CreateOpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM Reference WHERE ObservationId = $observationId AND ProjectId = $projectId LIMIT 1;";
+        command.Parameters.AddWithValue("$observationId", observationId);
+        command.Parameters.AddWithValue("$projectId", projectId);
+        return command.ExecuteScalar() is not null;
+    }
+
+    // Links an observation to a project once; a second call for the same pair is a no-op.
+    public void Link(int observationId, int projectId)
+    {
+        if (!Exists(observationId, projectId))
+        {
+            Add(new Reference { ObservationId = observationId, ProjectId = projectId });
+        }
+    }
+
+    public void Unlink(int observationId, int projectId)
+    {
+        using var connection = _connectionFactory.CreateOpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM Reference WHERE ObservationId = $observationId AND ProjectId = $projectId;";
+        command.Parameters.AddWithValue("$observationId", observationId);
+        command.Parameters.AddWithValue("$projectId", projectId);
+        command.ExecuteNonQuery();
+    }
+
     public void Delete(int id)
     {
         using var connection = _connectionFactory.CreateOpenConnection();

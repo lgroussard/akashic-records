@@ -289,6 +289,7 @@ private fun PoemPage(db: AkashicDatabase, original: Poem, recueils: List<Recueil
             },
         )
         Field("Tags", p.Tags, { p = p.copy(Tags = it) })
+        ObservationsBlock(db, "Poem", p.Id)
         TextButton(onClick = { confirm = true }) { Text("Supprimer le poème", color = Palette.TextMuted) }
         Spacer(Modifier.height(24.dp))
         }

@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.util.LruCache
 import android.webkit.MimeTypeMap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -16,6 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -67,23 +69,42 @@ object MediaFiles {
     }
 }
 
+// Decoded images kept in memory, so a cover or a photo is read and decoded once instead of every time it
+// scrolls back into view or its screen is reopened. Keyed by path + size; the file's modification time rides
+// along so a replaced file (same path) is decoded again. Bounded to an eighth of the app's heap (48 MB at
+// most): the least recently shown images are dropped first.
+private class CachedImage(val image: ImageBitmap, val bytes: Int, val modified: Long)
+
+private val imageCache = object : LruCache<String, CachedImage>(
+    (Runtime.getRuntime().maxMemory() / 8).coerceAtMost(48L * 1024 * 1024).toInt(),
+) {
+    override fun sizeOf(key: String, value: CachedImage) = value.bytes
+}
+
 // Shows a media image stored under a desktop-style relative path, or a placeholder when the
 // file is not on the phone (e.g. a PC-imported entry whose media were not imported).
 @Composable
 fun LocalImage(relativePath: String?, modifier: Modifier = Modifier, maxSide: Int = 1024, crop: Boolean = true) {
     val context = LocalContext.current
-    var bitmap by remember(relativePath) { mutableStateOf<Bitmap?>(null) }
-    var missing by remember(relativePath) { mutableStateOf(false) }
-    LaunchedEffect(relativePath) {
-        bitmap = withContext(Dispatchers.IO) {
-            MediaFiles.resolve(context, relativePath)?.let { MediaFiles.decode(it, maxSide) }
+    val key = "$relativePath|$maxSide"
+    // Starts on the cached image when there is one: no placeholder flash, no decode.
+    var image by remember(key) { mutableStateOf(imageCache.get(key)?.image) }
+    var missing by remember(key) { mutableStateOf(false) }
+    LaunchedEffect(key) {
+        val loaded = withContext(Dispatchers.IO) {
+            val file = MediaFiles.resolve(context, relativePath) ?: return@withContext null
+            val modified = file.lastModified()
+            imageCache.get(key)?.takeIf { it.modified == modified }
+                ?: MediaFiles.decode(file, maxSide)?.let { CachedImage(it.asImageBitmap(), it.byteCount, modified) }
+                    ?.also { imageCache.put(key, it) }
         }
-        missing = bitmap == null
+        image = loaded?.image
+        missing = loaded == null
     }
-    val bmp = bitmap
-    if (bmp != null) {
+    val shown = image
+    if (shown != null) {
         Image(
-            bmp.asImageBitmap(),
+            shown,
             contentDescription = null,
             contentScale = if (crop) ContentScale.Crop else ContentScale.Fit,
             modifier = modifier,

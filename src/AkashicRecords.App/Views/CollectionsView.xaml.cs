@@ -25,7 +25,6 @@ public partial class CollectionsView : UserControl, ISearchNavigable, IRemembers
 
     // Display-only wrappers so list items can carry their db Id for the delete buttons.
     private sealed record EvaluationItem(int Id, string Text);
-    private sealed record ObservationItem(int Id, string Text);
 
     private readonly ArtworkRepository _artworkRepository = new(new SqliteConnectionFactory());
     private readonly EvaluationAxisRepository _axisRepository = new(new SqliteConnectionFactory());
@@ -203,13 +202,7 @@ public partial class CollectionsView : UserControl, ISearchNavigable, IRemembers
         // Observation hit: best-effort select/scroll its row within the opened fiche.
         if (result.Kind == SearchResultKind.Observation && result.SecondaryId is int observationId)
         {
-            var match = (ObservationsList.ItemsSource as IEnumerable<ObservationItem>)
-                ?.FirstOrDefault(o => o.Id == observationId);
-            if (match is not null)
-            {
-                ObservationsList.SelectedItem = match;
-                ObservationsList.ScrollIntoView(match);
-            }
+            ObservationsPanel.Highlight(observationId);
         }
     }
 
@@ -479,6 +472,8 @@ public partial class CollectionsView : UserControl, ISearchNavigable, IRemembers
 
         if (film.CoverImagePath is { } path) MediaStorage.DeleteFile(path);
         _artworkRepository.Delete(film.Id);
+        // An observation's owner is not a foreign key (it can be any kind of item): its observations go by hand.
+        _observationRepository.DeleteByOwner(Observation.ArtworkOwner, film.Id);
 
         if (_selectedFilm?.Id == film.Id) CloseFiche();
         RefreshArtworks();
@@ -826,39 +821,11 @@ public partial class CollectionsView : UserControl, ISearchNavigable, IRemembers
     private void RefreshObservations()
     {
         if (_selectedFilm is null) return;
-
-        ObservationsList.ItemsSource = _observationRepository.GetByArtwork(_selectedFilm.Id)
-            .Select(o => new ObservationItem(o.Id, $"{o.Subject}: {o.Content}"))
-            .ToList();
+        ObservationsPanel.SetOwner(Observation.ArtworkOwner, _selectedFilm.Id);
     }
 
-    private void AddObservationButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        if (_selectedFilm is null) return;
-
-        var subject = ObservationSubjectInput.Text.Trim();
-        var content = ObservationContentInput.Text.Trim();
-        if (subject.Length == 0 || content.Length == 0) return;
-
-        _observationRepository.Add(new Observation
-        {
-            ArtworkId = _selectedFilm.Id,
-            Subject = subject,
-            Content = content,
-            CreatedAt = DateTime.Now
-        });
-
-        ObservationSubjectInput.Clear();
-        ObservationContentInput.Clear();
-        RefreshObservations();
-    }
-
-    private void DeleteObservationButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        var id = (int)((Button)sender).Tag;
-        _observationRepository.Delete(id);
-        RefreshObservations();
-    }
+    // Keeps the "N obs." badge on the tier cards in step with the fiche.
+    private void ObservationsPanel_OnChanged(object? sender, EventArgs e) => RefreshArtworks();
 
     // --- Watchlist ("À voir") ---
 

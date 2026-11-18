@@ -198,7 +198,7 @@ private fun ArtworkPage(db: AkashicDatabase, id: Int, onBack: () -> Unit) {
                 val c = content.trim()
                 subject = ""; content = ""
                 scope.launch {
-                    withContext(Dispatchers.IO) { db.observationDao().add(Observation(ArtworkId = id, Subject = s, Content = c, CreatedAt = nowIso())) }
+                    withContext(Dispatchers.IO) { db.observationDao().add(Observation.ofArtwork(id, s, c, nowIso())) }
                     reloadObservations()
                 }
             },

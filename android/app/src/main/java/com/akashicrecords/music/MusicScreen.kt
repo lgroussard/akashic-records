@@ -426,48 +426,39 @@ internal fun QueueList(player: PlayerConnection) {
     }
 }
 
-// The mini-player shrunk: a small bubble above the page — ♪ (with how far the song is, as a ring) brings the bar
-// back, ❚❚/▶ pauses or resumes. Dragged with a finger wherever it covers nothing; the spot is kept. Nothing queued:
-// nothing shown.
+// The mini-player folded (⌄): a slim strip docked above the navigation bar. It is part of the bottom bar, not laid
+// over the page, so it never hides a word of what is being read while the music keeps playing. ⌃ or the title
+// unfolds the bar; ❚❚/▶ pauses or resumes; the line under it shows how far the song is. Nothing queued: nothing shown.
 @Composable
-fun MiniBubble(player: PlayerConnection, config: ConfigStore, modifier: Modifier = Modifier, onExpand: () -> Unit) {
+fun MiniStrip(player: PlayerConnection, onExpand: () -> Unit) {
     val ui = player.ui
-    var drag by remember { mutableStateOf(config.miniBubbleOffset()) }
     if (ui.currentIndex < 0) return
-    // Kept on screen: from the start spot (bottom right, 140 dp up) to the left edge and up to below the top bar.
-    val screen = androidx.compose.ui.platform.LocalConfiguration.current
-    val density = androidx.compose.ui.platform.LocalDensity.current
-    val minX = -with(density) { (screen.screenWidthDp.dp - 130.dp).toPx() }
-    val minY = -with(density) { (screen.screenHeightDp.dp - 360.dp).toPx() }
-    val maxY = with(density) { 120.dp.toPx() }
-    fun clamp(o: androidx.compose.ui.geometry.Offset) = androidx.compose.ui.geometry.Offset(o.x.coerceIn(minX, 0f), o.y.coerceIn(minY, maxY))
-    drag = clamp(drag)
-    Row(
-        modifier
-            .offset { IntOffset(drag.x.roundToInt(), drag.y.roundToInt()) }
-            .pointerInput(Unit) {
-                detectDragGestures(onDragEnd = { config.saveMiniBubbleOffset(drag) }) { change, amount ->
-                    change.consume()
-                    drag = clamp(drag + amount)
-                }
+    Column(Modifier.fillMaxWidth().background(Palette.Surface2)) {
+        Row(Modifier.fillMaxWidth().height(26.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.weight(1f).fillMaxHeight().clickable(onClick = onExpand).padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("⌃", fontSize = 13.sp, color = Palette.TextFaint)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    listOf(ui.title.ifBlank { "Aucune piste" }, ui.artist).filter { it.isNotBlank() }.joinToString(" — "),
+                    fontSize = 11.sp, color = Palette.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
             }
-            .shadow(6.dp, RoundedCornerShape(24.dp))
-            .clip(RoundedCornerShape(24.dp)).background(Palette.Surface2).padding(4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(40.dp).clip(RoundedCornerShape(20.dp)).clickable(onClick = onExpand), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(
-                progress = { if (ui.durationMs > 0) (ui.positionMs.toFloat() / ui.durationMs).coerceIn(0f, 1f) else 0f },
-                modifier = Modifier.size(34.dp), strokeWidth = 2.dp, color = Palette.Accent, trackColor = Palette.Surface3,
-            )
-            Text("♪", fontSize = 16.sp)
+            Box(
+                Modifier.fillMaxHeight().width(52.dp).clickable { player.togglePlay() },
+                contentAlignment = Alignment.Center,
+            ) { Text(if (ui.isPlaying) "❚❚" else "▶", fontSize = 12.sp, color = Palette.Accent) }
         }
-        Box(Modifier.size(40.dp).clip(RoundedCornerShape(20.dp)).clickable { player.togglePlay() }, contentAlignment = Alignment.Center) {
-            Text(if (ui.isPlaying) "❚❚" else "▶", fontSize = 15.sp, color = Palette.Accent)
+        if (ui.durationMs > 0) {
+            LinearProgressIndicator(
+                progress = { (ui.positionMs.toFloat() / ui.durationMs).coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().height(2.dp), color = Palette.Accent,
+            )
         }
     }
 }
-
 // Persistent bar at the bottom of every section once something is queued; a tap on the song opens the full player
 // (FullPlayer: shuffle, position, À suivre, Similaires).
 @Composable
@@ -489,7 +480,7 @@ fun MiniPlayer(player: PlayerConnection, db: AkashicDatabase, onCollapse: () -> 
             .padding(horizontal = 12.dp, vertical = 4.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            // ⌄ shrinks the bar to a small bubble (MiniBubble), e.g. while reading.
+            // ⌄ folds the bar into a slim strip (MiniStrip), e.g. while reading.
             Box(
                 Modifier.size(32.dp, 40.dp).clickable(onClick = onCollapse),
                 contentAlignment = Alignment.Center,

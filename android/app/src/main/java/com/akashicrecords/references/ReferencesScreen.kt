@@ -39,6 +39,8 @@ import com.akashicrecords.data.AkashicDatabase
 import com.akashicrecords.data.RefBoard
 import com.akashicrecords.data.RefImage
 import com.akashicrecords.journaux.ConfirmDelete
+import com.akashicrecords.journaux.ObservationsBlock
+import com.akashicrecords.journaux.REF_IMAGES_SHARED
 import com.akashicrecords.journaux.nowIso
 import com.akashicrecords.media.LocalImage
 import com.akashicrecords.music.RemoteImages
@@ -151,7 +153,7 @@ fun ReferencesJournal(db: AkashicDatabase) {
 
     viewing?.let { img ->
         ImageViewer(
-            img, boards,
+            db, img, boards,
             onMove = { board ->
                 scope.launch {
                     withContext(Dispatchers.IO) { db.refImageDao().update(img.copy(BoardId = board)) }
@@ -314,7 +316,7 @@ private fun SearchResults(db: AkashicDatabase, query: String, key: Int, boards: 
 
 @Composable
 private fun ImageViewer(
-    img: RefImage, boards: List<RefBoard>, onMove: (Int?) -> Unit, onNewBoard: () -> Unit, onDelete: () -> Unit, onClose: () -> Unit,
+    db: AkashicDatabase, img: RefImage, boards: List<RefBoard>, onMove: (Int?) -> Unit, onNewBoard: () -> Unit, onDelete: () -> Unit, onClose: () -> Unit,
 ) {
     val context = LocalContext.current
     var confirm by remember { mutableStateOf(false) }
@@ -323,9 +325,12 @@ private fun ImageViewer(
             Box(Modifier.weight(1f).fillMaxWidth().clickable(onClick = onClose), contentAlignment = Alignment.Center) {
                 LocalImage(img.ImagePath, Modifier.fillMaxSize(), maxSide = 2048, crop = false)
             }
-            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+            // Bounded, so a long list of observations scrolls here instead of squeezing the image out.
+            Column(Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState())) {
                 if (img.Title.isNotBlank()) Text(img.Title, fontSize = 15.sp, color = Palette.Text)
                 Text(listOf(img.Author, img.Source).filter { it.isNotBlank() }.joinToString(" · "), fontSize = 12.sp, color = Palette.TextMuted)
+                // Read-only, and only once the PC and the phone hold the same reference images (see REF_IMAGES_SHARED).
+                if (REF_IMAGES_SHARED) ObservationsBlock(db, "RefImage", img.Id)
                 BoardMenu(boards, img.BoardId, onPick = onMove, onNewBoard = onNewBoard)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     (img.PageUrl ?: img.SourceUrl)?.let { url -> TextButton(onClick = { open(context, url) }) { Text("Source ↗") } }

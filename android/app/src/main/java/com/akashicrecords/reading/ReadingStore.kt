@@ -198,7 +198,7 @@ object ReadingLinks {
         withContext(Dispatchers.IO) {
             val artwork = ensureArtwork(context, db, book)
             val draft = h.copy(Id = db.bookHighlightDao().add(h).toInt())
-            val obsId = db.observationDao().add(Observation(ArtworkId = artwork.Id, Subject = subject, Content = observationText(draft), CreatedAt = draft.CreatedAt)).toInt()
+            val obsId = db.observationDao().add(Observation.ofArtwork(artwork.Id, subject, observationText(draft), draft.CreatedAt)).toInt()
             draft.copy(ObservationId = obsId).also { db.bookHighlightDao().update(it) }
         }
 
@@ -243,7 +243,7 @@ object ReadingLinks {
             for (h in bookHighlights) {
                 val text = observationText(h)
                 val match = observations.firstOrNull { it.Id == h.ObservationId && it.Content == text } ?: observations.firstOrNull { it.Content == text }
-                val obsId = match?.Id ?: db.observationDao().add(Observation(ArtworkId = artwork.Id, Subject = book.Title, Content = text, CreatedAt = h.CreatedAt)).toInt()
+                val obsId = match?.Id ?: db.observationDao().add(Observation.ofArtwork(artwork.Id, book.Title, text, h.CreatedAt)).toInt()
                 if (obsId != h.ObservationId) db.bookHighlightDao().update(h.copy(ObservationId = obsId))
             }
         }

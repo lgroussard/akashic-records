@@ -146,6 +146,9 @@
                         <Button x:Name="SaveButton" Content="⤓" Style="{StaticResource PlayerGhostButton}"
                                 Visibility="Collapsed" Click="SaveButton_OnClick"
                                 ToolTip="Ajouter à la file de téléchargement"/>
+                        <Button x:Name="ObservationsButton" Content="✎" Style="{StaticResource PlayerGhostButton}"
+                                Visibility="Collapsed" Click="ObservationsButton_OnClick"
+                                ToolTip="Observations sur ce titre"/>
                         <Button x:Name="ExpandButton" Content="▾" Style="{StaticResource PlayerIconButton}"
                                 Click="ExpandButton_OnClick" ToolTip="Développer"/>
                         <Button Content="✕" Style="{StaticResource PlayerIconButton}"

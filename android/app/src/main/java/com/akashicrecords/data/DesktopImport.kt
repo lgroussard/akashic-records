@@ -16,7 +16,7 @@ import java.util.zip.ZipInputStream
 // The phone database is REPLACED table by table: every table the desktop also has is emptied
 // and refilled with the desktop rows, Ids included, so all cross-references stay valid.
 // Columns are matched by name (the Room entities mirror the desktop schema); a NOT NULL phone
-// column the desktop lacks gets a neutral default.
+// column the desktop lacks keeps its own default when it has one, and gets a neutral value otherwise.
 object DesktopImport {
 
     data class Result(val tables: Int, val rows: Int, val mediaFiles: Int)
@@ -62,7 +62,8 @@ object DesktopImport {
                     val srcCols = src.rawQuery("PRAGMA table_info(`$table`)", null).use(::columns)
                     val shared = destCols.keys.filter { it in srcCols.keys }
                     if (shared.isEmpty()) continue
-                    val fillers = destCols.filter { (name, col) -> name !in srcCols && col.notNull }
+                    // A column with a default of its own (Observation.OwnerKind = 'Artwork') is left to SQLite.
+                    val fillers = destCols.filter { (name, col) -> name !in srcCols && col.notNull && !col.hasDefault }
 
                     dest.execSQL("DELETE FROM `$table`")
                     src.rawQuery("SELECT ${shared.joinToString { "`$it`" }} FROM `$table`", null).use { c ->
@@ -82,6 +83,9 @@ object DesktopImport {
                     }
                     tables++
                 }
+                // A desktop database from before observations had an owner: its rows are all artwork observations
+                // (OwnerKind took its default above). Same backfill as the migration; a no-op on a current dump.
+                dest.execSQL("UPDATE `Observation` SET `OwnerId` = `ArtworkId` WHERE `OwnerKind` = 'Artwork' AND `OwnerId` = 0")
                 dest.setTransactionSuccessful()
             } finally {
                 dest.endTransaction()
@@ -93,13 +97,14 @@ object DesktopImport {
         return Result(tables, rows, media)
     }
 
-    private data class Col(val type: String, val notNull: Boolean)
+    private data class Col(val type: String, val notNull: Boolean, val hasDefault: Boolean)
 
     private fun columns(c: Cursor): Map<String, Col> = buildMap {
         val name = c.getColumnIndexOrThrow("name")
         val type = c.getColumnIndexOrThrow("type")
         val notNull = c.getColumnIndexOrThrow("notnull")
-        while (c.moveToNext()) put(c.getString(name), Col(c.getString(type).uppercase(), c.getInt(notNull) == 1))
+        val default = c.getColumnIndexOrThrow("dflt_value")
+        while (c.moveToNext()) put(c.getString(name), Col(c.getString(type).uppercase(), c.getInt(notNull) == 1, !c.isNull(default)))
     }
 
     private fun put(v: ContentValues, name: String, c: Cursor, i: Int) {

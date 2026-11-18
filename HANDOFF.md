@@ -128,7 +128,7 @@ All four nav sections now have real content; several ambient/utility windows add
 - **Button inside an `Expander` header** also toggles the expander — set `e.Handled=true` in its Click (used by the per-album ▶).
 - **Resizeable custom-chrome window**: `WindowStyle=None`+`AllowsTransparency=True` needs `ResizeMode="CanResizeWithGrip"`; `SizeToContent` must be `Manual` to allow manual height (toggle to `Height` when collapsed to auto-shrink).
 - **Dead code** to clean up later: `Artwork.WatchPriority` + `ArtworkRepository.GetWatchlistCandidates/UpdateWatchPriority` (replaced by `WatchlistItem`); `MainWindow._artworkRepository`; `Playlist`/`PlaylistTrack` repos.
-- **PRAGMA foreign_keys still NOT enabled** — `ON DELETE` clauses are declarative; repos delete children manually. Consider enabling globally in a hardening pass.
+- ~~PRAGMA foreign_keys still NOT enabled~~ — **wrong, corrected 2026-11-12**: `Microsoft.Data.Sqlite` turns foreign keys ON by default for every connection, so the `REFERENCES … ON DELETE CASCADE` clauses in `SchemaInitializer` are enforced and do cascade. See §8.
 - **Build/dev**: `dotnet` not on PATH → `& "C:\Program Files\dotnet\dotnet.exe"`; kill `AkashicRecords.App` before building (self-DLL lock → MSB3027); build log is UTF-16; one terminal is `cmd` (`&` fails — retry hits PowerShell).
 
 ### 7.3 Known pre-existing bug (not from this session)
@@ -139,5 +139,32 @@ All four nav sections now have real content; several ambient/utility windows add
 
 ### 7.5 Fixed bug: track auto-advance cascading through the queue
 Root cause: `PlayAt()` didn't reset `PositionSlider` before opening the next track. Old `Value` (e.g. 199s) stayed while `MediaOpened` lowered `Maximum` to the new (shorter) track's duration — WPF auto-clamps `Value` to the new `Maximum`, firing `ValueChanged`, which the handler mistook for a user seek and did `_mediaPlayer.Position = TimeSpan.FromSeconds(clampedValue)` — seeking the new track to near its end, instantly re-firing `MediaEnded` and cascading forward through several tracks. Fix: reset `PositionSlider.Value=0`/`Maximum=1` (guarded by `_updatingPositionFromTimer`) at the start of `PlayAt()`, before `_mediaPlayer.Open(...)`.
-**General lesson**: when a Slider's `Maximum` can shrink below the current `Value`, WPF's auto-clamp fires `ValueChanged` as if the user moved it — any handler that reacts to `ValueChanged` by driving external state (like seeking a player) must reset `Value` first whenever `Maximum` is about to change, not just guard on who's "supposed" to be updating it.
+**General lesson (slider)**: when a Slider's `Maximum` can shrink below the current `Value`, WPF's auto-clamp fires `ValueChanged` as if the user moved it — any handler that reacts to `ValueChanged` by driving external state (like seeking a player) must reset `Value` first whenever `Maximum` is about to change, not just guard on who's "supposed" to be updating it.
 
+---
+
+## 8. Session update (2026-11-12) — observations on any item + the Fil
+
+The spec's core idea (keep what things *meant*, link it into projects) used to work for Collections artworks only. Now:
+
+- **An observation can belong to any item.** `Observation` has `OwnerKind` (a `SearchResultKind` name: `Artwork`, `JournalEntry`, `Poem`, `Recipe`, `Photo`, `RefImage`, `MusicTrack` — constants on `Domain/Observation.cs`) and `OwnerId`. `ArtworkId` stays for the Collections queries and is `0` for any other owner.
+- **A theme is an artistic project.** No new concept: `Reference(ObservationId, ProjectId)` is "this project references this observation". `ReferenceRepository.Link/Unlink/Exists` (Link is idempotent).
+- **One panel everywhere**: `Views/ObservationsPanel` (add / edit / delete, project chips, « ＋ projet » menu incl. « Nouveau projet… »). Embedded in the Collections fiche; opened in a modal by `Views/ObservationsDialog` from a « ✎ Observations · N » button on the journal day, recipe, poem, photo viewer, reference-image viewer and the music player (library tracks only).
+- **The Fil** (`Views/JournauxView.Fil.cs`): Archive artistique has a **Canvas | Fil** switch. Fil lists every observation the open project references, grouped by owner kind; a card opens its owner through `MainWindow.NavigateToSearchResult`; ✕ unlinks. « ＋ Ajouter une observation » reuses the canvas picker. The view state remembers Fil vs Canvas (`Artistic:ProjectFil:<id>`).
+- **Canvas change**: putting an observation on the board links it to the project; removing the box no longer unlinks it (it stays in the Fil — unlink there).
+- **Search**: observations on any owner are searchable and open the owner; reference images are searchable (`SearchResultKind.RefImage`, `ReferencesView.OpenImage`).
+- **Owner deletion**: the owner is not a foreign key, so each delete path calls `ObservationRepository.DeleteByOwner(kind, id)` (artwork, journal entry, recipe, poem, photo, reference image). Music tracks pruned by the library scanner are not covered — their observations simply stop being listed (`GetAllWithOwner` skips missing owners).
+- **Headless captures**: `--screenshot Journaux:Fil <png>` and `--screenshot Observations:<OwnerKind>:<Id> <png>`.
+
+### Foreign keys ARE enforced (gotcha)
+`Microsoft.Data.Sqlite` opens every connection with foreign keys ON. Consequences:
+- The old `Observation.ArtworkId … REFERENCES Artwork` rejected a non-artwork owner, so `SchemaInitializer.MigrateObservationOwner` **rebuilds the table** without it (create new → copy → drop → rename), with `PRAGMA foreign_keys = OFF` around it — with FKs on, `DROP TABLE` deletes the rows first and would cascade into `Reference` and `CanvasElement`. Any future "drop a constraint" migration must do the same.
+- Deleting an observation cascades to its `Reference` rows **and its canvas boxes** (and their arrows).
+- The comment in `CalendarEventLinkRepository` saying FKs are off is wrong too (its manual delete is still needed: that link has no FK).
+
+### Phone
+Same two columns on Room (v7 migration), read-only Fil and observation blocks — done in a separate session; check `android/` and `PASSATION-SUITE.md`. Creating observations on the phone outside Collections / book highlights waits for sync (the PC import replaces shared tables).
+
+### Verified / not verified
+- Verified on a copy of the real db: migration (incl. a seeded old-shape row with a Reference and a canvas box), repositories, search, deletes, no orphan links; headless captures of the Fil, the panel and the host pages.
+- **Not** verified by hand: opening the dialog from each page, the « ＋ projet » menu, clicking a Fil card through to its owner.

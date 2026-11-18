@@ -40,12 +40,16 @@ public sealed class SchemaInitializer
                     Score INTEGER NOT NULL
                 );
 
+                -- Owned by any kind of item (OwnerKind + OwnerId), so no foreign key on the owner; see
+                -- MigrateObservationOwner for databases created under the artwork-only shape.
                 CREATE TABLE IF NOT EXISTS Observation (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    ArtworkId INTEGER NOT NULL REFERENCES Artwork(Id) ON DELETE CASCADE,
+                    ArtworkId INTEGER NOT NULL DEFAULT 0,
                     Subject TEXT NOT NULL,
                     Content TEXT NOT NULL,
-                    CreatedAt TEXT NOT NULL
+                    CreatedAt TEXT NOT NULL,
+                    OwnerKind TEXT NOT NULL DEFAULT 'Artwork',
+                    OwnerId INTEGER NOT NULL DEFAULT 0
                 );
 
                 CREATE TABLE IF NOT EXISTS ArtisticProject (
@@ -420,6 +424,7 @@ public sealed class SchemaInitializer
         AddColumnIfMissing(connection, "DownloadItem", "FolderId", "INTEGER");
         AddColumnIfMissing(connection, "CalendarEvent", "EndDate", "TEXT");
         MigrateCalendarEventLinkOwner(connection);
+        MigrateObservationOwner(connection);
 
         // The typing-window width opened at a 300 base before settling at 900. Rows seeded under that first
         // default carry 300, and ALTER's column default never rewrites existing rows — so they are lifted
@@ -474,6 +479,52 @@ public sealed class SchemaInitializer
         using var drop = connection.CreateCommand();
         drop.CommandText = "ALTER TABLE CalendarEventLink DROP COLUMN EventId;";
         drop.ExecuteNonQuery();
+    }
+
+    // An observation used to belong to an artwork only (ArtworkId NOT NULL REFERENCES Artwork). It can now
+    // belong to any item: OwnerKind is a SearchResultKind name (Artwork, JournalEntry, Poem, Recipe, Photo,
+    // RefImage, MusicTrack) and OwnerId that item's id; ArtworkId stays for the Collections queries and is
+    // 0 for any other owner. Microsoft.Data.Sqlite enforces foreign keys, so the old REFERENCES clause
+    // rejects that 0 and the table has to be rebuilt without it — SQLite cannot drop a constraint in
+    // place. Foreign keys are switched off around the rebuild: with them on, DROP TABLE deletes the rows
+    // first and would cascade into Reference and CanvasElement. Existing rows are artwork observations
+    // and keep their ids. Same columns on the phone (Room v7).
+    private static void MigrateObservationOwner(Microsoft.Data.Sqlite.SqliteConnection connection)
+    {
+        if (HasColumn(connection, "Observation", "OwnerKind")) return;
+
+        void Run(string sql)
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = sql;
+            command.ExecuteNonQuery();
+        }
+
+        Run("PRAGMA foreign_keys = OFF;");
+        try
+        {
+            using var transaction = connection.BeginTransaction();
+            Run("""
+                CREATE TABLE Observation_new (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ArtworkId INTEGER NOT NULL DEFAULT 0,
+                    Subject TEXT NOT NULL,
+                    Content TEXT NOT NULL,
+                    CreatedAt TEXT NOT NULL,
+                    OwnerKind TEXT NOT NULL DEFAULT 'Artwork',
+                    OwnerId INTEGER NOT NULL DEFAULT 0
+                );
+                INSERT INTO Observation_new (Id, ArtworkId, Subject, Content, CreatedAt, OwnerKind, OwnerId)
+                    SELECT Id, ArtworkId, Subject, Content, CreatedAt, 'Artwork', ArtworkId FROM Observation;
+                DROP TABLE Observation;
+                ALTER TABLE Observation_new RENAME TO Observation;
+                """);
+            transaction.Commit();
+        }
+        finally
+        {
+            Run("PRAGMA foreign_keys = ON;");
+        }
     }
 
     // No migration framework yet - for a db created before a column existed, add it in place.

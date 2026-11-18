@@ -240,14 +240,16 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
     }
     // A link of a calendar event or birthday (made on the PC) → the item in its module. Poems and recipes open
     // on the item itself; the other kinds open their module on the right tab.
-    fun openCalendarLink(link: CalendarEventLink) {
-        val target = when (link.Kind) {
-            "Poem" -> Launch("Journaux", "Poetry", null, link.PrimaryId)
-            "Recipe" -> Launch("Journaux", "Recipes", null, link.PrimaryId)
+    // The same coordinates serve the Fil of an artistic project (kind + id of the item an observation is about).
+    fun openItem(kind: String, id: Int, category: Int?) {
+        val target = when (kind) {
+            "Poem" -> Launch("Journaux", "Poetry", null, id)
+            "Recipe" -> Launch("Journaux", "Recipes", null, id)
             "JournalEntry" -> Launch("Journaux", "Personal", null, null)
             "ArtisticProject" -> Launch("Journaux", "Artistic", null, null)
+            "RefImage" -> Launch("Journaux", "References", null, null)
             "Artwork", "Observation" -> {
-                link.Category?.let { config.saveCollectionsCategory(it.toString()) }
+                category?.let { config.saveCollectionsCategory(it.toString()) }
                 Launch("Collections", null, null, null)
             }
             "Photo" -> Launch("Archives", null, null, null)
@@ -258,6 +260,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
         }
         target?.let { handle(it) }
     }
+    fun openCalendarLink(link: CalendarEventLink) = openItem(link.Kind, link.PrimaryId, link.Category)
 
     // Reminders need the notification permission (Android 13+); asked once, at first launch.
     val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
@@ -275,8 +278,13 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
         bottomBar = {
             Column {
                 // Musique switched off: no mini-player either (its tap would open a hidden section).
-                if (Modules.isEnabled(disabled, "Musique") && !miniCollapsed) {
-                    MiniPlayer(player, db, onCollapse = { miniCollapsed = true; config.saveMiniPlayerCollapsed(true) }) { fullPlayer = false }
+                // Folded (⌄), it is a slim strip docked here: nothing floats over the page being read.
+                if (Modules.isEnabled(disabled, "Musique")) {
+                    if (miniCollapsed) {
+                        com.akashicrecords.music.MiniStrip(player) { miniCollapsed = false; config.saveMiniPlayerCollapsed(false) }
+                    } else {
+                        MiniPlayer(player, db, onCollapse = { miniCollapsed = true; config.saveMiniPlayerCollapsed(true) }) { fullPlayer = false }
+                    }
                 }
                 NavigationBar(containerColor = Palette.Surface1, tonalElevation = 0.dp) {
                     navItems.forEach { item ->
@@ -307,7 +315,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
                 Column(Modifier.fillMaxSize().padding(top = 4.dp)) {
                     when (section) {
                         "Organisation" -> OrganisationSection(db, config)
-                        "Journaux" -> JournauxSection(db, config, openItem = journalItem)
+                        "Journaux" -> JournauxSection(db, config, openItem = journalItem, onOpenItem = { kind, id, category -> openItem(kind, id, category) })
                         "Musique" -> MusicSection(db, config, player, initialTab = musicTab, onOpenPlayer = { similar -> fullPlayer = similar })
                         "Calendrier" -> CalendarSection(db, openDate = calendarDate, onOpenLink = { openCalendarLink(it) }, onOpenTickets = { ticketsHub = false })
                         "Collections" -> CollectionsSection(db, config)
@@ -315,13 +323,6 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
                         "Archives" -> ArchivesSection(db, config)
                         "Jeux" -> com.akashicrecords.games.GamesSection(db, disabled, openGame = gameTab, openItem = gameItem)
                     }
-                }
-            }
-            // The mini-player shrunk to a bubble (⌄): out of the way while reading, one tap brings it back. It starts
-            // on the right above the + buttons and the reader's footer, and can be dragged anywhere (kept).
-            if (Modules.isEnabled(disabled, "Musique") && miniCollapsed) {
-                com.akashicrecords.music.MiniBubble(player, config, Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 140.dp)) {
-                    miniCollapsed = false; config.saveMiniPlayerCollapsed(false)
                 }
             }
         }

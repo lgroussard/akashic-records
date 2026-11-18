@@ -195,6 +195,10 @@
                         <ComboBox x:Name="ViewerAlbumCombo" Margin="0,0,0,20"
                                   SelectionChanged="ViewerAlbumCombo_OnSelectionChanged"/>
 
+                        <Button x:Name="ViewerObservationsButton" Content="✎ Observations" Click="ViewerObservationsButton_OnClick"
+                                Padding="10,6" HorizontalAlignment="Left" Cursor="Hand" Margin="0,0,0,12"
+                                ToolTip="Ce que cette photo représente — et la lier à un projet artistique"/>
+
                         <Button Content="Supprimer la photo" Click="DeletePhotoButton_OnClick"
                                 Foreground="White" Background="#7A2A2A" BorderThickness="0"
                                 Padding="10,6" HorizontalAlignment="Left" Cursor="Hand"/>

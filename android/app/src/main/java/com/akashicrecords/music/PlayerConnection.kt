@@ -83,6 +83,16 @@ class PlayerConnection(context: Context) {
         )
     }
 
+    // The playhead alone, for the twice-a-second ticker. refresh() rebuilds everything, the whole queue
+    // included (one object per queued track): on a library-sized queue that is thousands of allocations
+    // per tick on the main thread, for a value that only moved by half a second.
+    fun refreshPosition() {
+        val c = controller ?: return
+        val position = c.currentPosition.coerceAtLeast(0)
+        val duration = c.duration.takeIf { it > 0 } ?: 0
+        if (position != ui.positionMs || duration != ui.durationMs) ui = ui.copy(positionMs = position, durationMs = duration)
+    }
+
     // Replaces the queue with [tracks] and starts at [startIndex] (desktop PlayQueue).
     fun playQueue(tracks: List<Pair<MusicTrack, android.net.Uri>>, startIndex: Int) {
         val c = controller ?: return
@@ -152,7 +162,7 @@ fun rememberPlayerConnection(): PlayerConnection {
     // Position ticker: the listener does not fire while the playhead simply advances.
     LaunchedEffect(connection) {
         while (true) {
-            if (connection.ui.isPlaying) connection.refresh()
+            if (connection.ui.isPlaying) connection.refreshPosition()
             delay(500)
         }
     }

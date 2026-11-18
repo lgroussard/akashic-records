@@ -23,6 +23,7 @@ public partial class ReferencesView : UserControl
 
     private readonly RefBoardRepository _boardRepository = new(new SqliteConnectionFactory());
     private readonly RefImageRepository _imageRepository = new(new SqliteConnectionFactory());
+    private readonly ObservationRepository _observationRepository = new(new SqliteConnectionFactory());
 
     private IReadOnlyList<RefBoard> _boards = Array.Empty<RefBoard>();
     private IReadOnlyList<RefImage> _images = Array.Empty<RefImage>();
@@ -348,6 +349,8 @@ public partial class ReferencesView : UserControl
         ViewerMeta.Text = string.Join(" · ", new[] { img.Author, img.Source }.Where(s => !string.IsNullOrWhiteSpace(s)));
         ViewerSaveButton.Visibility = Visibility.Collapsed;
         ViewerDeleteButton.Visibility = Visibility.Visible;
+        ViewerObservationsButton.Visibility = Visibility.Visible;
+        ViewerObservationsButton.Content = ObservationsDialog.ButtonLabel(Observation.RefImageOwner, img.Id);
         ViewerSourceButton.Visibility = (img.PageUrl ?? img.SourceUrl) is null ? Visibility.Collapsed : Visibility.Visible;
         FillBoardCombo(img.BoardId);
         ViewerImage.Source = null;
@@ -367,6 +370,7 @@ public partial class ReferencesView : UserControl
         ViewerSaveButton.IsEnabled = !saved;
         ViewerSaveButton.Content = saved ? "✓ Enregistrée" : "Enregistrer";
         ViewerDeleteButton.Visibility = Visibility.Collapsed;
+        ViewerObservationsButton.Visibility = Visibility.Collapsed; // a search hit is not saved yet
         ViewerSourceButton.Visibility = hit.PageUrl is null ? Visibility.Collapsed : Visibility.Visible;
         FillBoardCombo(_filter >= 0 ? _filter : null);
         ViewerImage.Source = RemoteCache.TryGetValue(hit.ThumbUrl, out var thumb) ? thumb : null;
@@ -426,10 +430,27 @@ public partial class ReferencesView : UserControl
         if (_viewing is not { } img) return;
         if (MessageBox.Show("Supprimer cette image ?", "Références", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK) return;
         _imageRepository.Delete(img.Id);
+        _observationRepository.DeleteByOwner(Observation.RefImageOwner, img.Id);
         MediaStorage.DeleteFile(img.ImagePath);
         Viewer.Visibility = Visibility.Collapsed;
         _viewing = null;
         Refresh();
+    }
+
+    private void ViewerObservations_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_viewing is not { } img) return;
+        ObservationsDialog.Open(this, Observation.RefImageOwner, img.Id, img.Title.Length > 0 ? img.Title : "(image sans titre)");
+        ViewerObservationsButton.Content = ObservationsDialog.ButtonLabel(Observation.RefImageOwner, img.Id);
+    }
+
+    // Opens a saved image in the viewer by id (a global-search hit, or a card of a project's Fil).
+    public void OpenImage(int imageId)
+    {
+        if (_query is not null) BackToBoards();
+        _images = _imageRepository.GetAll();
+        _boards = _boardRepository.GetAll();
+        if (_images.FirstOrDefault(i => i.Id == imageId) is { } img) OpenSaved(img);
     }
 
     private void ViewerClose_OnClick(object sender, RoutedEventArgs e) => Viewer.Visibility = Visibility.Collapsed;
