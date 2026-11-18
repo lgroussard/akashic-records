@@ -1710,13 +1710,14 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
         RecipeNotesInput.Text = recipe?.Notes ?? string.Empty;
         RecipeTagsInput.Text = recipe?.Tags ?? string.Empty;
         RecipeCategoryInput.Text = recipe?.Category ?? string.Empty;
+        RecipeServingsInput.Text = recipe is { Servings: > 0 } ? recipe.Servings.ToString() : string.Empty;
         RefreshRecipeCoverImage();
 
         var isEnabled = recipe is not null;
         foreach (var input in new Control[]
                  {
                      RecipeTitleInput, RecipeCategoryInput, RecipeIngredientsInput,
-                     RecipeInstructionsInput, RecipeNotesInput, RecipeTagsInput, DeleteRecipeButton
+                     RecipeInstructionsInput, RecipeNotesInput, RecipeTagsInput, RecipeServingsInput, DeleteRecipeButton
                  })
         {
             input.IsEnabled = isEnabled;
@@ -1806,6 +1807,15 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
 
         _recipeRepository.Update(_selectedRecipe.Id, _selectedRecipe.Title, _selectedRecipe.Category,
             _selectedRecipe.Ingredients, _selectedRecipe.Instructions, _selectedRecipe.Notes, _selectedRecipe.Tags);
+
+        // Anything that is not a positive whole number means "not said" and empties the box.
+        var servings = int.TryParse(RecipeServingsInput.Text.Trim(), out var parsed) && parsed > 0 ? parsed : 0;
+        if (servings != _selectedRecipe.Servings)
+        {
+            _selectedRecipe.Servings = servings;
+            _recipeRepository.UpdateServings(_selectedRecipe.Id, servings);
+        }
+        RecipeServingsInput.Text = servings > 0 ? servings.ToString() : string.Empty;
 
         RefreshRecipesList();
     }

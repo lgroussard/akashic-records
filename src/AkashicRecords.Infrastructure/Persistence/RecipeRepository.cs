@@ -18,8 +18,8 @@ public sealed class RecipeRepository
         using var command = connection.CreateCommand();
         command.CommandText =
             """
-            INSERT INTO Recipe (Title, Category, Ingredients, Instructions, Notes, Tags, CoverImagePath, CreatedAt)
-            VALUES ($title, $category, $ingredients, $instructions, $notes, $tags, $coverImagePath, $createdAt);
+            INSERT INTO Recipe (Title, Category, Ingredients, Instructions, Notes, Tags, CoverImagePath, CreatedAt, Servings)
+            VALUES ($title, $category, $ingredients, $instructions, $notes, $tags, $coverImagePath, $createdAt, $servings);
             SELECT last_insert_rowid();
             """;
         AddParameters(command, recipe);
@@ -30,7 +30,7 @@ public sealed class RecipeRepository
     {
         using var connection = _connectionFactory.CreateOpenConnection();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, Title, Category, Ingredients, Instructions, Notes, Tags, CoverImagePath, CreatedAt FROM Recipe ORDER BY Title;";
+        command.CommandText = "SELECT Id, Title, Category, Ingredients, Instructions, Notes, Tags, CoverImagePath, CreatedAt, Servings FROM Recipe ORDER BY Title;";
 
         var results = new List<Recipe>();
         using var reader = command.ExecuteReader();
@@ -59,6 +59,16 @@ public sealed class RecipeRepository
         command.Parameters.AddWithValue("$instructions", instructions);
         command.Parameters.AddWithValue("$notes", notes);
         command.Parameters.AddWithValue("$tags", tags);
+        command.Parameters.AddWithValue("$id", id);
+        command.ExecuteNonQuery();
+    }
+
+    public void UpdateServings(int id, int servings)
+    {
+        using var connection = _connectionFactory.CreateOpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE Recipe SET Servings = $servings WHERE Id = $id;";
+        command.Parameters.AddWithValue("$servings", servings);
         command.Parameters.AddWithValue("$id", id);
         command.ExecuteNonQuery();
     }
@@ -92,6 +102,7 @@ public sealed class RecipeRepository
         command.Parameters.AddWithValue("$tags", recipe.Tags);
         command.Parameters.AddWithValue("$coverImagePath", (object?)recipe.CoverImagePath ?? DBNull.Value);
         command.Parameters.AddWithValue("$createdAt", recipe.CreatedAt.ToString("O"));
+        command.Parameters.AddWithValue("$servings", recipe.Servings);
     }
 
     private static Recipe ReadRecipe(SqliteDataReader reader) => new()
@@ -104,6 +115,7 @@ public sealed class RecipeRepository
         Notes = reader.GetString(5),
         Tags = reader.GetString(6),
         CoverImagePath = reader.IsDBNull(7) ? null : reader.GetString(7),
-        CreatedAt = DateTime.Parse(reader.GetString(8))
+        CreatedAt = DateTime.Parse(reader.GetString(8)),
+        Servings = reader.GetInt32(9)
     };
 }

@@ -393,6 +393,17 @@ public sealed class SchemaInitializer
                     EventTitle TEXT NOT NULL,
                     CreatedAt TEXT NOT NULL
                 );
+
+                -- Liste de courses (phone only, Room v8): the checklist built from the recipes; no screen on the PC.
+                CREATE TABLE IF NOT EXISTS ShoppingItem (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Name TEXT NOT NULL,
+                    Quantity REAL,
+                    Unit TEXT NOT NULL,
+                    IsDone INTEGER NOT NULL,
+                    Source TEXT NOT NULL,
+                    CreatedAt TEXT NOT NULL
+                );
                 """;
             command.ExecuteNonQuery();
         }
@@ -403,6 +414,7 @@ public sealed class SchemaInitializer
         AddColumnIfMissing(connection, "CanvasElement", "Width", "REAL");
         AddColumnIfMissing(connection, "CanvasElement", "Height", "REAL");
         AddColumnIfMissing(connection, "Recipe", "Category", "TEXT NOT NULL DEFAULT ''");
+        AddColumnIfMissing(connection, "Recipe", "Servings", "INTEGER NOT NULL DEFAULT 0");
         AddColumnIfMissing(connection, "Recueil", "Summary", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing(connection, "Poem", "TextAlignment", "TEXT NOT NULL DEFAULT 'Left'");
         AddColumnIfMissing(connection, "Poem", "Margin", "REAL NOT NULL DEFAULT 0");

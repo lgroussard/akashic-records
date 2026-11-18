@@ -51,8 +51,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         RefImage::class,
         CrosswordGame::class,
         Ticket::class,
+        ShoppingItem::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -98,6 +99,7 @@ abstract class AkashicDatabase : RoomDatabase() {
     abstract fun refImageDao(): RefImageDao
     abstract fun crosswordGameDao(): CrosswordGameDao
     abstract fun ticketDao(): TicketDao
+    abstract fun shoppingItemDao(): ShoppingItemDao
 
     companion object {
         @Volatile
@@ -108,7 +110,7 @@ abstract class AkashicDatabase : RoomDatabase() {
                 context.applicationContext,
                 AkashicDatabase::class.java,
                 "akashic.db",
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8).build().also { instance = it }
 
         // v2: phone-only poem formatting next to the PC columns (the desktop schema has the same
         // columns, so imports and the future sync carry both layouts).
@@ -184,6 +186,19 @@ abstract class AkashicDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE `Observation` ADD COLUMN `OwnerKind` TEXT NOT NULL DEFAULT 'Artwork'")
                 db.execSQL("ALTER TABLE `Observation` ADD COLUMN `OwnerId` INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("UPDATE `Observation` SET `OwnerId` = `ArtworkId` WHERE `OwnerKind` = 'Artwork' AND `OwnerId` = 0")
+            }
+        }
+
+        // v8: the shopping list (phone only) and the portions a recipe gives, which the list scales from. Same
+        // table and same column in the desktop SchemaInitializer.
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `Recipe` ADD COLUMN `Servings` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `ShoppingItem` (`Id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`Name` TEXT NOT NULL, `Quantity` REAL, `Unit` TEXT NOT NULL, `IsDone` INTEGER NOT NULL, " +
+                        "`Source` TEXT NOT NULL, `CreatedAt` TEXT NOT NULL)",
+                )
             }
         }
     }

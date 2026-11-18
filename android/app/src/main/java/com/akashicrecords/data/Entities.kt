@@ -86,6 +86,9 @@ data class Recipe(
     val Tags: String,
     val CoverImagePath: String?,
     val CreatedAt: String,
+    // Portions (one person, one meal) the recipe gives as written; 0 = not said (schema v8). The shopping
+    // list scales the ingredients from it.
+    @ColumnInfo(defaultValue = "0") val Servings: Int = 0,
 )
 
 @Entity(tableName = "Recueil")

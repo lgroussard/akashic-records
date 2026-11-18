@@ -177,3 +177,14 @@ Third ambient widget, same shape as Film du jour but over the recipe journal: `R
 
 - Verified: the solution builds. **Not** verified by hand: the widget on screen, ↻, the click-through, the Monday rollover.
 - PC only — nothing on the phone.
+
+---
+
+## 10. Session update (2026-11-17) — liste de courses (phone) + portions
+
+- **Phone, Journaux → Recettes → 🛒** (`journaux/ShoppingList.kt`): a checklist filled from recipes (« ＋ Depuis des recettes »: tick recipes, set Personnes and, per recipe, Repas) or by hand. Ticked lines drop to « Dans le panier »; « Retirer les cochés », « Vider la liste ».
+- **Ingredients stay free text.** `journaux/ShoppingParser.kt` (no Android, unit-tested in `app/src/test`) reads one ingredient per line: a leading number is an amount (g/kg, ml/cl/l, c. à s., c. à c., or a count; a range keeps its upper bound), remarks after a dash / comma / « + » / bracket are dropped, « Pour 4 personnes » and section titles are skipped. Same name + same unit add up across recipes; names are not otherwise matched (« 1 oignon » and « 3 gros oignons » stay apart) and are not re-pluralised (« 4 oignon »).
+- **Portions**: `Recipe.Servings` (0 = not said) on both sides — PC field « Portions » on the recipe page, phone field on the recipe page. When empty, a « Pour N … » line in the ingredients is used; with neither, the recipe goes in unscaled. Factor = repas × personnes / portions.
+- **Schema**: Room v8 (`MIGRATION_7_8`: `Recipe.Servings`, table `ShoppingItem`), mirrored in `SchemaInitializer`. `ShoppingItem` is phone-owned (`DesktopImport.PHONE_ONLY`).
+- `tools/AddRecipe`: lists the recipes of a db, dumps their ingredients, or adds one from a JSON file.
+- Verified: 5 parser tests; release APK installed over the previous one on the emulator (migration ran, recipes intact), list built from two recipes for two people, amounts added up, ticking, list kept across a reinstall. **Not** verified: on the real phone; the PC « Portions » field on screen (compiled only).

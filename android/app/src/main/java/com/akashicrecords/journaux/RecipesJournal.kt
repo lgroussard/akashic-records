@@ -41,6 +41,7 @@ internal fun RecipesJournal(db: AkashicDatabase, initialOpen: Int? = null) {
     var search by remember { mutableStateOf("") }
     var category by remember { mutableStateOf<String?>(null) }
     var openId by remember { mutableStateOf(initialOpen) }
+    var shopping by remember { mutableStateOf(false) }
 
     suspend fun reload() {
         recipes = withContext(Dispatchers.IO) { db.recipeDao().getAll() }
@@ -84,6 +85,11 @@ internal fun RecipesJournal(db: AkashicDatabase, initialOpen: Int? = null) {
         return
     }
 
+    if (shopping) {
+        ShoppingList(db, recipes, onBack = { shopping = false })
+        return
+    }
+
     // List pages: "Toutes" then one per category — the chips and a swipe move between them.
     val pagesByCategory: List<String?> = listOf<String?>(null) + categories
 
@@ -111,6 +117,8 @@ internal fun RecipesJournal(db: AkashicDatabase, initialOpen: Int? = null) {
                     openId = id
                 }
             }) { Text("+") }
+            Spacer(Modifier.width(8.dp))
+            OutlinedButton(onClick = { shopping = true }) { Text("🛒") }
         }
         if (categories.isNotEmpty()) {
             Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
@@ -189,6 +197,12 @@ private fun RecipePage(db: AkashicDatabase, recipe: Recipe, onDeleted: () -> Uni
         Text("Toucher la photo pour la changer", fontSize = 10.sp, color = Palette.TextFaint)
         Field("Titre", r.Title, { r = r.copy(Title = it) })
         Field("Catégorie", r.Category, { r = r.copy(Category = it) })
+        // Empty = not said; the shopping list then falls back on a "Pour 4 personnes" line in the ingredients.
+        Field(
+            "Portions que donne la recette",
+            if (r.Servings > 0) r.Servings.toString() else "",
+            { r = r.copy(Servings = it.filter(Char::isDigit).take(3).toIntOrNull() ?: 0) },
+        )
         Field("Ingrédients", r.Ingredients, { r = r.copy(Ingredients = it) }, minLines = 4)
         Field("Préparation", r.Instructions, { r = r.copy(Instructions = it) }, minLines = 6)
         Field("Notes personnelles", r.Notes, { r = r.copy(Notes = it) }, minLines = 2)

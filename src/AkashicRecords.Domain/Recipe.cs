@@ -13,5 +13,8 @@ public sealed class Recipe
     // Comma-separated - simple free-form tagging, no fixed taxonomy.
     public string Tags { get; set; } = string.Empty;
     public string? CoverImagePath { get; set; }
+    // How many portions (one person, one meal) the recipe gives as written; 0 = not said. The phone's
+    // shopping list scales the ingredients from it.
+    public int Servings { get; set; }
     public DateTime CreatedAt { get; set; }
 }

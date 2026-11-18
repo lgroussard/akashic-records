@@ -281,6 +281,16 @@
                                          BorderThickness="1" BorderBrush="{StaticResource AppBorderBrush}"
                                          Padding="8,6"/>
                             </StackPanel>
+                            <!-- Portions the recipe gives as written: the phone's shopping list scales from it. -->
+                            <StackPanel Grid.Column="2" Margin="37,0,0,0" HorizontalAlignment="Left" Width="90">
+                                <TextBlock Text="Portions" Style="{StaticResource FieldLabelStyle}"/>
+                                <TextBox x:Name="RecipeServingsInput" LostFocus="RecipeField_OnLostFocus"
+                                         Foreground="{StaticResource TextBrush}"
+                                         Background="{StaticResource Surface2Brush}"
+                                         BorderThickness="1" BorderBrush="{StaticResource AppBorderBrush}"
+                                         Padding="8,6"
+                                         ToolTip="Nombre de portions que donne la recette (une personne, un repas)"/>
+                            </StackPanel>
                         </Grid>
 
                         <!-- Ingrédients: tall field, stretches to fill the card (mockup proportion) -->
