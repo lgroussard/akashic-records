@@ -22,6 +22,10 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            // Signed with the same (debug) key as every APK installed so far, so the release build updates
+            // the installed app in place and keeps its data. Release is what goes on the phone: a debug
+            // build is debuggable, which makes Compose screens several times slower to open.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

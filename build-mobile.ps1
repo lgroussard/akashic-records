@@ -76,14 +76,17 @@ if (-not $SkipApk) {
 
     Push-Location $android
     try {
-        & .\gradlew.bat assembleDebug --console=plain
+        # Release, not debug: a debuggable build runs Compose several times slower (cold start measured
+        # at 0.9 s against 0.3 s, section switches twice as slow). It is signed with the same key as the
+        # debug builds installed before (see app/build.gradle.kts), so it updates the app in place.
+        & .\gradlew.bat assembleRelease --console=plain
         if ($LASTEXITCODE -ne 0) { throw "Echec du build Gradle (code $LASTEXITCODE)." }
     }
     finally {
         Pop-Location
     }
 
-    $apk = Join-Path $android 'app\build\outputs\apk\debug\app-debug.apk'
+    $apk = Join-Path $android 'app\build\outputs\apk\release\app-release.apk'
     Copy-Item $apk (Join-Path $OutDir 'akashic-records.apk') -Force
     Write-Host "APK : $(Join-Path $OutDir 'akashic-records.apk')" -ForegroundColor Green
 
