@@ -12,12 +12,14 @@ public sealed class TrayIcon : IDisposable
     private readonly ToolStripMenuItem _startWithWindowsItem;
     private readonly ToolStripMenuItem _filmWidgetItem;
     private readonly ToolStripMenuItem _remindersItem;
+    private readonly ToolStripMenuItem _recipeWidgetItem;
 
     public event Action? ToggleRequested;
     public event Action? ExitRequested;
     public event Action<bool>? StartWithWindowsChanged;
     public event Action<bool>? FilmWidgetToggled;
     public event Action<bool>? RemindersToggled;
+    public event Action<bool>? RecipeWidgetToggled;
     public event Action? DownloaderRequested;
 
     public TrayIcon(string tooltip, bool startWithWindowsInitiallyChecked)
@@ -28,6 +30,10 @@ public sealed class TrayIcon : IDisposable
         _filmWidgetItem = new ToolStripMenuItem("Film du jour") { CheckOnClick = true };
         _filmWidgetItem.CheckedChanged += FilmWidgetItem_OnCheckedChanged;
         menu.Items.Add(_filmWidgetItem);
+
+        _recipeWidgetItem = new ToolStripMenuItem("Plats de la semaine") { CheckOnClick = true };
+        _recipeWidgetItem.CheckedChanged += RecipeWidgetItem_OnCheckedChanged;
+        menu.Items.Add(_recipeWidgetItem);
 
         _remindersItem = new ToolStripMenuItem("Rappels bureau") { CheckOnClick = true };
         _remindersItem.CheckedChanged += RemindersItem_OnCheckedChanged;
@@ -73,6 +79,17 @@ public sealed class TrayIcon : IDisposable
         _remindersItem.Checked = value;
         _remindersItem.CheckedChanged += RemindersItem_OnCheckedChanged;
     }
+
+    public void SetRecipeChecked(bool value)
+    {
+        if (_recipeWidgetItem.Checked == value) return;
+        _recipeWidgetItem.CheckedChanged -= RecipeWidgetItem_OnCheckedChanged;
+        _recipeWidgetItem.Checked = value;
+        _recipeWidgetItem.CheckedChanged += RecipeWidgetItem_OnCheckedChanged;
+    }
+
+    private void RecipeWidgetItem_OnCheckedChanged(object? sender, EventArgs e) =>
+        RecipeWidgetToggled?.Invoke(_recipeWidgetItem.Checked);
 
     private void FilmWidgetItem_OnCheckedChanged(object? sender, EventArgs e) =>
         FilmWidgetToggled?.Invoke(_filmWidgetItem.Checked);

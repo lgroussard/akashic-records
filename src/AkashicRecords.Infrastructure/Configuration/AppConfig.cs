@@ -62,6 +62,13 @@ public sealed class AppConfig
     public double? RemindersWidgetLeft { get; set; }
     public double? RemindersWidgetTop { get; set; }
 
+    // "Plats de la semaine" widget: the recipes drawn for the week starting RecipeOfTheWeekStart (a Monday).
+    public bool ShowRecipeOfTheWeek { get; set; } = true;
+    public List<int> RecipeOfTheWeekIds { get; set; } = new();
+    public DateTime? RecipeOfTheWeekStart { get; set; }
+    public double? RecipeWidgetLeft { get; set; }
+    public double? RecipeWidgetTop { get; set; }
+
     // Floating "add to library" button, shown while a suggestion not in the library plays.
     public bool ShowMusicSaveWidget { get; set; } = true;
     public double? MusicSaveWidgetLeft { get; set; }

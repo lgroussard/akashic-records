@@ -168,3 +168,12 @@ Same two columns on Room (v7 migration), read-only Fil and observation blocks �
 ### Verified / not verified
 - Verified on a copy of the real db: migration (incl. a seeded old-shape row with a Reference and a canvas box), repositories, search, deletes, no orphan links; headless captures of the Fil, the panel and the host pages.
 - **Not** verified by hand: opening the dialog from each page, the « ＋ projet » menu, clicking a Fil card through to its owner.
+
+---
+
+## 9. Session update (2026-11-16) — « Plats de la semaine » widget
+
+Third ambient widget, same shape as Film du jour but over the recipe journal: `RecipeOfTheWeekService` draws `PicksPerWeek` (2) recipes that hold from Monday to Sunday (`AppConfig.RecipeOfTheWeekIds` / `RecipeOfTheWeekStart`), a new week avoiding last week's picks while other recipes exist. `RecipeOfTheWeekWidget`: one row per recipe (click → opens it in Journaux via the search deep-link, showing the main window if hidden), ↻ draws others, ✕ hides. Tray item « Plats de la semaine »; refreshed by the existing midnight timer; follows the `Journaux.Recipes` module (off → no widget). Nothing shows while the recipe journal is empty.
+
+- Verified: the solution builds. **Not** verified by hand: the widget on screen, ↻, the click-through, the Monday rollover.
+- PC only — nothing on the phone.

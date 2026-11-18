@@ -44,6 +44,9 @@ public partial class MainWindow : Window
     private AkashicRecords.Domain.WatchlistItem? _todaysFilmPick;
     private AkashicRecords.Domain.WatchlistItem? _todaysAnimPick;
     private DispatcherTimer? _midnightTimer;
+    private RecipeOfTheWeekWidget? _recipeWidget;
+    private readonly RecipeOfTheWeekService _recipeOfTheWeekService = new(new RecipeRepository(new SqliteConnectionFactory()));
+    private IReadOnlyList<AkashicRecords.Domain.Recipe> _weekRecipes = Array.Empty<AkashicRecords.Domain.Recipe>();
     private CalendarToast? _calendarToast;
     private readonly CalendarService _calendarService = new(new SqliteConnectionFactory());
     // Lead-time reminder check. Only started when a future timed reminder actually exists
@@ -146,6 +149,7 @@ public partial class MainWindow : Window
         _trayIcon.StartWithWindowsChanged += StartupManager.SetEnabled;
         _trayIcon.FilmWidgetToggled += OnFilmWidgetToggled;
         _trayIcon.RemindersToggled += OnRemindersToggled;
+        _trayIcon.RecipeWidgetToggled += OnRecipeWidgetToggled;
         _trayIcon.DownloaderRequested += ToggleDownloader;
 
         InitializeAmbientWidgets();
@@ -164,6 +168,10 @@ public partial class MainWindow : Window
         _trayIcon?.SetFilmChecked(_config.ShowFilmOfTheDay && hasFilm);
         if (_config.ShowFilmOfTheDay && hasFilm) ShowFilmWidget();
         ScheduleMidnightRefresh();
+
+        ComputeWeekRecipes();
+        _trayIcon?.SetRecipeChecked(_config.ShowRecipeOfTheWeek && _weekRecipes.Count > 0);
+        if (_config.ShowRecipeOfTheWeek) ShowRecipeWidget();
 
         var reminders = LoadReminderItems();
         _trayIcon?.SetRemindersChecked(_config.ShowDesktopReminders && reminders.Count > 0);
@@ -206,7 +214,117 @@ public partial class MainWindow : Window
         _midnightTimer?.Stop();
         ComputeTodaysFilms();
         _filmWidget?.ShowPicks(_todaysFilmPick, ResolveCover(_todaysFilmPick), _todaysAnimPick, ResolveCover(_todaysAnimPick));
+        // A Monday midnight starts a new week of recipes; any other night keeps the same picks.
+        ComputeWeekRecipes();
+        if (_recipeWidget?.IsVisible == true) ShowRecipeWidget();
         ScheduleMidnightRefresh();
+    }
+
+    // --- Plats de la semaine ---------------------------------------------------
+    // Same shape as the film widget, over the recipe journal: the picks hold from Monday to Sunday.
+
+    // Resolves this week's recipes and persists them when they change. Nothing is picked while the
+    // recipe journal is switched off on this device.
+    private void ComputeWeekRecipes()
+    {
+        if (!_config.IsEnabled("Journaux.Recipes"))
+        {
+            _weekRecipes = Array.Empty<AkashicRecords.Domain.Recipe>();
+            return;
+        }
+        StoreWeekRecipes(_recipeOfTheWeekService.PickForWeek(_config.RecipeOfTheWeekIds, _config.RecipeOfTheWeekStart));
+    }
+
+    private void StoreWeekRecipes(IReadOnlyList<AkashicRecords.Domain.Recipe> picks)
+    {
+        _weekRecipes = picks;
+        var ids = picks.Select(r => r.Id).ToList();
+        var weekStart = RecipeOfTheWeekService.WeekStart(DateTime.Today);
+        if (_config.RecipeOfTheWeekIds.SequenceEqual(ids) && _config.RecipeOfTheWeekStart?.Date == weekStart) return;
+
+        _config.RecipeOfTheWeekIds = ids;
+        _config.RecipeOfTheWeekStart = weekStart;
+        _configService.Save(_config);
+    }
+
+    private void ShowRecipeWidget()
+    {
+        if (_weekRecipes.Count == 0)
+        {
+            _recipeWidget?.Hide();
+            return;
+        }
+
+        var picks = _weekRecipes
+            .Select(r => (r, r.CoverImagePath is { } path ? MediaStorage.ResolveFullPath(path) : null))
+            .ToList();
+
+        if (_recipeWidget is null)
+        {
+            _recipeWidget = new RecipeOfTheWeekWidget();
+            _recipeWidget.HideRequested += OnRecipeWidgetHidden;
+            _recipeWidget.RerollRequested += OnRecipeRerollRequested;
+            _recipeWidget.RecipeClicked += OpenRecipeFromWidget;
+            _recipeWidget.PositionChanged += (l, t) => { _config.RecipeWidgetLeft = l; _config.RecipeWidgetTop = t; };
+            _recipeWidget.PositionCommitted += (l, t) => { _config.RecipeWidgetLeft = l; _config.RecipeWidgetTop = t; _configService.Save(_config); };
+            _recipeWidget.Loaded += (_, _) => PositionRecipeWidget();
+        }
+        _recipeWidget.ShowPicks(picks);
+        if (!_recipeWidget.IsVisible) _recipeWidget.Show();
+    }
+
+    private void PositionRecipeWidget()
+    {
+        if (_recipeWidget is null) return;
+        if (_config.RecipeWidgetLeft is { } left && _config.RecipeWidgetTop is { } top)
+        {
+            _recipeWidget.Left = left;
+            _recipeWidget.Top = top;
+        }
+        else
+        {
+            // Default bottom-left, raised above the music save pill; the right edge holds the other widgets.
+            _recipeWidget.Left = 24;
+            _recipeWidget.Top = SystemParameters.PrimaryScreenHeight - _recipeWidget.ActualHeight - 100;
+        }
+    }
+
+    private void OnRecipeWidgetHidden()
+    {
+        _config.ShowRecipeOfTheWeek = false;
+        _configService.Save(_config);
+        _trayIcon?.SetRecipeChecked(false);
+    }
+
+    private void OnRecipeWidgetToggled(bool on)
+    {
+        _config.ShowRecipeOfTheWeek = on;
+        _configService.Save(_config);
+
+        if (on)
+        {
+            ComputeWeekRecipes();
+            ShowRecipeWidget();
+        }
+        else
+        {
+            _recipeWidget?.Hide();
+        }
+    }
+
+    private void OnRecipeRerollRequested()
+    {
+        StoreWeekRecipes(_recipeOfTheWeekService.Reroll(_config.RecipeOfTheWeekIds));
+        ShowRecipeWidget();
+    }
+
+    // Opens the clicked recipe in the journal, bringing the main window back if it was hidden.
+    private void OpenRecipeFromWidget(int recipeId)
+    {
+        if (!_config.IsEnabled("Journaux.Recipes")) return;
+        if (!IsVisible) ToggleVisibility();
+        Activate();
+        NavigateToSearchResult(new SearchResult(SearchResultKind.Recipe, "Journaux", string.Empty, string.Empty, recipeId, null, null));
     }
 
     private void ShowFilmWidget()
@@ -670,6 +788,9 @@ public partial class MainWindow : Window
     private void OnModulesChanged()
     {
         ApplyModuleVisibility();
+        // The recipe widget follows the recipe journal: off with it, back with it.
+        ComputeWeekRecipes();
+        if (_config.ShowRecipeOfTheWeek) ShowRecipeWidget();
         if (_activeSection is null) return;
 
         if (!_config.IsEnabled(_activeSection))
@@ -1038,6 +1159,7 @@ public partial class MainWindow : Window
         _saveWidget?.ForceClose();
         _filmWidget?.ForceClose();
         _reminderWidget?.ForceClose();
+        _recipeWidget?.ForceClose();
         _downloaderWindow?.ForceClose();
         _settingsView?.ForceClose();
         _calendarToast?.ForceClose();
