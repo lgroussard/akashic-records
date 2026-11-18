@@ -22,6 +22,14 @@ public partial class OrganisationView : UserControl, ISearchNavigable, IRemember
     // Explicit ComboBox index <-> enum mapping so the Status dropdown never depends on enum declaration order.
     private static readonly ProjectStatus[] StatusOrder = { ProjectStatus.Active, ProjectStatus.Done, ProjectStatus.Archived };
 
+    // The badge of the list, in the words of the status picker (the enum names are English).
+    private static string StatusLabelOf(ProjectStatus status) => status switch
+    {
+        ProjectStatus.Done => "Terminé",
+        ProjectStatus.Archived => "Archivé",
+        _ => "Actif",
+    };
+
     private readonly PersonalProjectRepository _projectRepo = new(new SqliteConnectionFactory());
     private readonly ProjectTaskRepository _taskRepo = new(new SqliteConnectionFactory());
     private readonly TransitionRepository _transitionRepo = new(new SqliteConnectionFactory());
@@ -213,9 +221,9 @@ public partial class OrganisationView : UserControl, ISearchNavigable, IRemember
             var progress = tasks.Count == 0 ? "Aucune tâche" : $"{done}/{tasks.Count} tâches";
             var percent = tasks.Count == 0 ? 0 : 100.0 * done / tasks.Count;
             var subText = project.Deadline is { } deadline
-                ? $"Échéance : {deadline:yyyy-MM-dd} · {progress}"
+                ? $"Échéance : {deadline:dd/MM/yyyy} · {progress}"
                 : progress;
-            return new ProjectListItem(project.Id, project.Title, project.Status.ToString(), subText, percent);
+            return new ProjectListItem(project.Id, project.Title, StatusLabelOf(project.Status), subText, percent);
         }).ToList();
 
         ProjectList.ItemsSource = items;
@@ -418,6 +426,21 @@ public partial class OrganisationView : UserControl, ISearchNavigable, IRemember
     {
         if (_selectedProject is null) return;
         TaskList.ItemsSource = _taskRepo.GetByProject(_selectedProject.Id);
+    }
+
+    // Enter in the field adds, like the button next to it: a list is typed one line after the other.
+    private void NewTaskInput_OnKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != System.Windows.Input.Key.Enter) return;
+        AddTaskButton_OnClick(sender, e);
+        e.Handled = true;
+    }
+
+    private void NewStepInput_OnKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != System.Windows.Input.Key.Enter) return;
+        AddStepButton_OnClick(sender, e);
+        e.Handled = true;
     }
 
     private void AddTaskButton_OnClick(object sender, RoutedEventArgs e)

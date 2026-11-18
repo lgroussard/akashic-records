@@ -73,7 +73,7 @@
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="0" Text="Période" Foreground="{StaticResource TextBrush}" FontSize="13"
                               FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                    <ComboBox x:Name="MonthPicker" Grid.Column="1" Style="{StaticResource DarkComboBoxStyle}"
+                    <ComboBox x:Name="MonthPicker" Grid.Column="1" Style="{StaticResource DarkComboBoxStyle}" Width="220" HorizontalAlignment="Left"
                               SelectionChanged="MonthPicker_OnSelectionChanged"/>
                     <Button x:Name="RefreshOverviewButton" Grid.Column="2" Content="⟳" Width="30" Height="28" Padding="0"
                             Style="{StaticResource SecondaryButtonStyle}" Margin="8,0,0,0" Click="RefreshOverviewButton_OnClick"/>

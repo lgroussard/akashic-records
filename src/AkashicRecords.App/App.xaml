@@ -74,13 +74,14 @@
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Bg" Property="Background" Value="{StaticResource AccentSoftBrush}"/>
-                                <Setter Property="Foreground" Value="White"/>
-                            </Trigger>
+                            <!-- Hover first, checked last: the open section keeps its accent under the mouse. -->
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Bg" Property="Background" Value="{StaticResource Surface3Brush}"/>
                                 <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="{StaticResource AccentSoftBrush}"/>
+                                <Setter Property="Foreground" Value="White"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -104,13 +105,14 @@
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Bg" Property="Background" Value="{StaticResource Surface2Brush}"/>
-                                <Setter Property="Foreground" Value="White"/>
-                            </Trigger>
+                            <!-- Hover first, checked last: the selected tab keeps its look under the mouse. -->
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Bg" Property="Background" Value="{StaticResource Surface3Brush}"/>
                                 <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="{StaticResource Surface2Brush}"/>
+                                <Setter Property="Foreground" Value="White"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -395,6 +397,45 @@
             </Setter>
         </Style>
 
+        <!-- Every scrollbar of the app (lists, text areas, popups): the thin dark one of its orientation,
+             instead of the white Windows bar. Views that already name one of the two keep doing so. -->
+        <Style TargetType="ScrollBar" BasedOn="{StaticResource ThinVerticalScrollBarStyle}">
+            <Style.Triggers>
+                <Trigger Property="Orientation" Value="Horizontal">
+                    <Setter Property="Width" Value="Auto"/>
+                    <Setter Property="MinWidth" Value="0"/>
+                    <Setter Property="Height" Value="10"/>
+                    <Setter Property="MinHeight" Value="10"/>
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <!-- Same as ThinHorizontalScrollBarStyle's. -->
+                            <ControlTemplate TargetType="ScrollBar">
+                                <Grid Background="Transparent">
+                                    <Track x:Name="PART_Track">
+                                        <Track.DecreaseRepeatButton>
+                                            <RepeatButton Command="ScrollBar.PageLeftCommand" Opacity="0" Background="Transparent" BorderThickness="0" Focusable="False"/>
+                                        </Track.DecreaseRepeatButton>
+                                        <Track.IncreaseRepeatButton>
+                                            <RepeatButton Command="ScrollBar.PageRightCommand" Opacity="0" Background="Transparent" BorderThickness="0" Focusable="False"/>
+                                        </Track.IncreaseRepeatButton>
+                                        <Track.Thumb>
+                                            <Thumb>
+                                                <Thumb.Template>
+                                                    <ControlTemplate TargetType="Thumb">
+                                                        <Border CornerRadius="4" Background="{StaticResource BorderStrongBrush}" Margin="0,3"/>
+                                                    </ControlTemplate>
+                                                </Thumb.Template>
+                                            </Thumb>
+                                        </Track.Thumb>
+                                    </Track>
+                                </Grid>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
         <!-- Secondary action button (neutral surface, e.g. "Annuler") -->
         <Style x:Key="SecondaryButtonStyle" TargetType="Button">
             <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
@@ -607,7 +648,17 @@
                                                        Background="Transparent"
                                                        BorderThickness="0"
                                                        Padding="9,6"
-                                                       VerticalAlignment="Center"/>
+                                                       CaretBrush="{StaticResource TextBrush}"
+                                                       VerticalAlignment="Center">
+                                        <!-- Its default template carries a watermark of its own (the same words in a
+                                             white frame), which showed under ours: only the text host is kept. -->
+                                        <DatePickerTextBox.Template>
+                                            <ControlTemplate TargetType="DatePickerTextBox">
+                                                <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"
+                                                              VerticalAlignment="Center"/>
+                                            </ControlTemplate>
+                                        </DatePickerTextBox.Template>
+                                    </DatePickerTextBox>
                                     <TextBlock Text="Sélectionner une date" Foreground="#888888" IsHitTestVisible="False"
                                                Padding="9,6" VerticalAlignment="Center">
                                         <TextBlock.Style>

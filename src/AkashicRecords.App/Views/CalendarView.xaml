@@ -213,7 +213,7 @@
 
                 <!-- Event / birthday form pane (over the agenda) -->
                 <Border x:Name="FormRoot" Style="{StaticResource CardBorderStyle}" Padding="22" Visibility="Collapsed"
-                        HorizontalAlignment="Stretch" VerticalAlignment="Top">
+                        HorizontalAlignment="Left" VerticalAlignment="Top" Width="720">
                     <StackPanel>
                         <TextBlock x:Name="FormTitle" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextBrush}"
                                    Margin="0,0,0,14"/>

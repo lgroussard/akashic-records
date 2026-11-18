@@ -752,6 +752,9 @@ public partial class MainWindow : Window
             Show();
             Activate();
             DockHeaderToScreenEdge();
+            // Nothing open: the shortcut that brings the app back leaves the caret in the search box,
+            // ready to type. With a section open, the focus stays where it was in it.
+            if (_activeSection is null) SearchBox.Focus();
         }
     }
 
@@ -1101,8 +1104,35 @@ public partial class MainWindow : Window
     // own state right after, so this snapshot never outlives the screen it describes.
     private void MainWindow_OnEscapeSnapshot(object sender, KeyEventArgs e)
     {
+        if (HandleShortcut(e)) return;
         if (e.Key != Key.Escape || _activeSection is null || _screenshotMode) return;
         if (SectionContent.Content is IRemembersViewState view) view.CaptureViewState();
+    }
+
+    // Ctrl+K: the search box. Ctrl+1 … Ctrl+6: the sections, in the order of the header and counting
+    // only those this device shows (a module switched off takes no number).
+    private bool HandleShortcut(KeyEventArgs e)
+    {
+        if (Keyboard.Modifiers != ModifierKeys.Control) return false;
+
+        if (e.Key == Key.K)
+        {
+            SearchBox.Focus();
+            SearchBox.SelectAll();
+            e.Handled = true;
+            return true;
+        }
+
+        var number = e.Key is >= Key.D1 and <= Key.D6 ? e.Key - Key.D1
+            : e.Key is >= Key.NumPad1 and <= Key.NumPad6 ? e.Key - Key.NumPad1
+            : -1;
+        if (number < 0) return false;
+
+        var shown = NavButtons.Where(button => button.Visibility == Visibility.Visible).ToList();
+        if (number >= shown.Count || shown[number].Tag is not string section) return false;
+        OpenSection(section);
+        e.Handled = true;
+        return true;
     }
 
     // Common "reopen where I left off" rule (see IRemembersViewState): the outgoing view records the

@@ -64,7 +64,7 @@
                 </Border>
 
                 <!-- Entry page: title (underline) · date · body · tags (chips) · photos -->
-                <Border Grid.Column="1" Style="{StaticResource CardBorderStyle}" Padding="28" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                <Border Grid.Column="1" Style="{StaticResource CardBorderStyle}" Padding="28" HorizontalAlignment="Left" VerticalAlignment="Top" Width="920" MaxHeight="780">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
@@ -96,7 +96,7 @@
 
                         <TextBox Grid.Row="2" x:Name="EntryTextInput" TextWrapping="Wrap" AcceptsReturn="True"
                                  Background="{StaticResource Surface2Brush}" BorderThickness="0" Foreground="{StaticResource TextBrush}" FontSize="14.5"
-                                 VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" Padding="12,10" Margin="0,0,0,14" LostFocus="EntryTextInput_OnLostFocus"/>
+                                 VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" Padding="12,10" Margin="0,0,0,14" MinHeight="380" LostFocus="EntryTextInput_OnLostFocus"/>
 
                         <StackPanel Grid.Row="3" Margin="0,0,0,12">
                             <TextBlock Text="Tags" Style="{StaticResource PanelSectionHeaderStyle}" Margin="0,0,0,8"/>
@@ -159,7 +159,7 @@
                         <WrapPanel DockPanel.Dock="Top" x:Name="RecipeCategoryFilterPanel" Margin="0,12,0,10"/>
 
                         <!-- Recipe list -->
-                        <ListBox DockPanel.Dock="Top" x:Name="RecipeTitleList"
+                        <ListBox DockPanel.Dock="Top" x:Name="RecipeTitleList" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                  Background="Transparent" Foreground="{StaticResource TextBrush}" BorderThickness="0"
                                  SelectionChanged="RecipeTitleList_OnSelectionChanged">
                             <ListBox.ItemContainerStyle>

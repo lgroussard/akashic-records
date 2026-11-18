@@ -181,19 +181,25 @@
                                             </StackPanel>
                                         </StackPanel>
 
+                                        <!-- Shared with every other item page: add / edit / delete, and link to artistic projects.
+                                             Right under the tier, above the cover and the evaluations: what the work meant is
+                                             what the fiche is opened for, and it used to sit at the very bottom of the scroll. -->
+                                        <views:ObservationsPanel x:Name="ObservationsPanel" Changed="ObservationsPanel_OnChanged" Margin="0,0,0,20"/>
+
                                         <StackPanel Margin="0,0,0,20">
                                             <TextBlock Text="COUVERTURE" Style="{StaticResource PanelSectionHeaderStyle}"/>
                                             <Image x:Name="FicheCoverImage" Height="140" Margin="0,10,0,8"
                                                    Stretch="Uniform" HorizontalAlignment="Center" Visibility="Collapsed"/>
-                                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                            <!-- Wraps: the three buttons are wider than the fiche, and « Retirer » was cut off. -->
+                                            <WrapPanel Margin="0,4,0,0">
                                                 <Button Content="Choisir une couverture…" Click="SetCoverImageButton_OnClick"
-                                                        Style="{StaticResource SecondaryButtonStyle}"/>
+                                                        Margin="0,0,8,6" Style="{StaticResource SecondaryButtonStyle}"/>
                                                 <Button x:Name="FetchCoverWebButton" Content="Chercher en ligne"
                                                         Click="FetchCoverWebButton_OnClick"
-                                                        Margin="8,0,0,0" Style="{StaticResource SecondaryButtonStyle}"/>
+                                                        Margin="0,0,8,6" Style="{StaticResource SecondaryButtonStyle}"/>
                                                 <Button x:Name="RemoveCoverButton" Content="Retirer" Click="RemoveCoverImageButton_OnClick"
-                                                        Margin="8,0,0,0" Visibility="Collapsed" Style="{StaticResource SecondaryButtonStyle}"/>
-                                            </StackPanel>
+                                                        Margin="0,0,8,6" Visibility="Collapsed" Style="{StaticResource SecondaryButtonStyle}"/>
+                                            </WrapPanel>
                                         </StackPanel>
 
                                         <StackPanel Margin="0,0,0,20">
@@ -244,8 +250,6 @@
                                             </Grid>
                                         </StackPanel>
 
-                                        <!-- Shared with every other item page: add / edit / delete, and link to artistic projects. -->
-                                        <views:ObservationsPanel x:Name="ObservationsPanel" Changed="ObservationsPanel_OnChanged"/>
 
                                     </StackPanel>
                                 </ScrollViewer>

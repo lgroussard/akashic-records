@@ -1738,7 +1738,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
         _selectedRecipe = recipe;
         SaveActiveItem();
 
-        RecipePageTitleText.Text = recipe?.Title ?? "No recipe";
+        RecipePageTitleText.Text = recipe?.Title ?? "Aucune recette";
         RefreshObservationButtons();
         RecipeTitleInput.Text = recipe?.Title ?? string.Empty;
         RecipeIngredientsInput.Text = recipe?.Ingredients ?? string.Empty;
@@ -2563,7 +2563,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
                 ? _recueilRepository.GetAll().FirstOrDefault(r => r.Id == rid)?.Title ?? "Sans recueil"
                 : "Sans recueil",
             p.Text.Length > 160 ? p.Text[..160].Trim() + "…" : p.Text)).ToList();
-        BookTitle.Text = search.Length == 0 ? CurrentBookTitle() : $"Search: \"{search}\"";
+        BookTitle.Text = search.Length == 0 ? CurrentBookTitle() : $"Recherche : « {search} »";
         BookRenameInput.IsEnabled = false;
         BookDeleteButton.IsEnabled = false;
         BookSummaryInput.Text = string.Empty;
