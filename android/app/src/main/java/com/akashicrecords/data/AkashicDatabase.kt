@@ -53,7 +53,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         Ticket::class,
         ShoppingItem::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -110,7 +110,7 @@ abstract class AkashicDatabase : RoomDatabase() {
                 context.applicationContext,
                 AkashicDatabase::class.java,
                 "akashic.db",
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9).build().also { instance = it }
 
         // v2: phone-only poem formatting next to the PC columns (the desktop schema has the same
         // columns, so imports and the future sync carry both layouts).
@@ -199,6 +199,14 @@ abstract class AkashicDatabase : RoomDatabase() {
                         "`Name` TEXT NOT NULL, `Quantity` REAL, `Unit` TEXT NOT NULL, `IsDone` INTEGER NOT NULL, " +
                         "`Source` TEXT NOT NULL, `CreatedAt` TEXT NOT NULL)",
                 )
+            }
+        }
+
+        // v9: the time a ticket's transport leaves. Same two columns in the desktop SchemaInitializer.
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `Ticket` ADD COLUMN `Hour` INTEGER")
+                db.execSQL("ALTER TABLE `Ticket` ADD COLUMN `Minute` INTEGER")
             }
         }
     }

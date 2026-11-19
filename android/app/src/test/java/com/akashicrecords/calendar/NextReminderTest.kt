@@ -59,6 +59,23 @@ class NextReminderTest {
         assertNotEquals(before.notifiedKey(before.reminderTime()!!), after.notifiedKey(after.reminderTime()!!))
     }
 
+    @Test
+    fun aTimedEventAnnouncedDaysAheadRingsAgainAnHourBefore() {
+        val trip = event(EventKind.Voyage, day.plusDays(2), 14, 30) // a week before, then 13:30 on the day
+        assertEquals(listOf(day.minusDays(5).atTime(14, 30), day.plusDays(2).atTime(13, 30)), trip.reminderTimes())
+        assertEquals(day.plusDays(2).atTime(13, 30), nextReminderAt(listOf(trip), now))
+        // Already reminded close to its hour, or no hour at all: one reminder only.
+        assertEquals(1, event(EventKind.Sortie, day, 20, 0).reminderTimes().size)
+        assertEquals(1, event(EventKind.Voyage, day.plusDays(2)).reminderTimes().size)
+    }
+
+    @Test
+    fun aTicketWithATimeRingsAnHourBeforeItLeaves() {
+        val ticket = AgendaItem(day, "Aller", "Lyon", AgendaSource.Ticket, 7, hour = 14, minute = 32)
+        assertEquals(listOf(day.atTime(13, 32)), ticket.reminderTimes())
+        assertEquals(day.atTime(13, 32), nextReminderAt(listOf(ticket), now))
+    }
+
     // Reminders prunes the notified set on the date that ends each key.
     @Test
     fun theNotifiedKeyEndsWithTheDate() {

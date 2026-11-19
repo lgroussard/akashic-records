@@ -2,6 +2,8 @@ package com.akashicrecords.tickets
 
 import android.app.Activity
 import android.app.DatePickerDialog
+import android.app.TimePickerDialog
+import android.content.DialogInterface
 import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.Bitmap
@@ -76,6 +78,15 @@ internal fun ticketDay(d: LocalDate): String {
     }
 }
 
+// Clock for a ticket's time (when the train leaves, when the doors open); « Sans heure » takes it off again.
+internal fun pickTicketTime(context: Context, current: Pair<Int, Int>?, onPicked: (Pair<Int, Int>?) -> Unit) {
+    TimePickerDialog(context, { _, h, m -> onPicked(h to m) }, current?.first ?: 12, current?.second ?: 0, true).apply {
+        if (current != null) setButton(DialogInterface.BUTTON_NEUTRAL, "Sans heure") { _, _ -> onPicked(null) }
+    }.show()
+}
+
+internal fun timeLabel(time: Pair<Int, Int>) = "%02d:%02d".format(time.first, time.second)
+
 // Picker for PDFs and pictures, several at once (from the calendar or the Billets list).
 @Composable
 fun rememberTicketPicker(onPicked: (List<TicketStore.Incoming>) -> Unit): () -> Unit {
@@ -113,6 +124,8 @@ fun AttachTicketsSheet(
             }
         }.toTypedArray())
     }
+    // The time each one leaves at, when given.
+    val times = remember { mutableStateListOf<Pair<Int, Int>?>(*arrayOfNulls<Pair<Int, Int>>(items.size)) }
     var saving by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -130,13 +143,22 @@ fun AttachTicketsSheet(
             Text(if (items.size == 1) "Ajouter un billet" else "Ajouter ${items.size} billets", fontSize = 18.sp)
             Spacer(Modifier.height(8.dp))
             items.forEachIndexed { i, it ->
-                OutlinedTextField(
-                    names[i], { v -> names[i] = v },
-                    label = { Text(if (it.mime == "application/pdf") "Nom du billet (PDF)" else "Nom du billet (image)") },
-                    placeholder = { Text("Billet ${i + 1}") },
-                    singleLine = true, modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
-                )
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 4.dp)) {
+                    OutlinedTextField(
+                        names[i], { v -> names[i] = v },
+                        label = { Text(if (it.mime == "application/pdf") "Nom du billet (PDF)" else "Nom du billet (image)") },
+                        placeholder = { Text("Billet ${i + 1}") },
+                        singleLine = true, modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { pickTicketTime(context, times[i]) { t -> times[i] = t } }) {
+                        Text(times[i]?.let { t -> "🕒 " + timeLabel(t) } ?: "🕒 Heure")
+                    }
+                }
             }
+            Text(
+                "Avec l'heure de départ, le billet apparaît dans la journée et un rappel arrive une heure avant.",
+                fontSize = 12.sp, color = Palette.TextFaint, modifier = Modifier.padding(start = 4.dp),
+            )
 
             Text("RATTACHER À", fontSize = 11.sp, color = Palette.TextFaint, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
             ChoiceRow(selected = event == null, title = "Un jour seulement", sub = null) { event = null }
@@ -164,7 +186,7 @@ fun AttachTicketsSheet(
                         val r = runCatching {
                             withContext(Dispatchers.IO) {
                                 items.forEachIndexed { i, it ->
-                                    TicketStore.add(context, db, it, names[i].ifBlank { if (items.size == 1) "Billet" else "Billet ${i + 1}" }, date, event)
+                                    TicketStore.add(context, db, it, names[i].ifBlank { if (items.size == 1) "Billet" else "Billet ${i + 1}" }, date, event, times[i])
                                 }
                             }
                         }
@@ -235,11 +257,22 @@ fun TicketViewer(db: AkashicDatabase, tickets: List<Ticket>, start: Int, onClose
                     Text(current.Title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     val day = runCatching { LocalDate.parse(current.Date) }.getOrNull()
                     Text(
-                        listOfNotNull(day?.let(::ticketDay), current.EventTitle.takeIf { it.isNotBlank() }).joinToString(" · "),
+                        listOfNotNull(day?.let(::ticketDay), current.timeText.takeIf { it.isNotEmpty() }, current.EventTitle.takeIf { it.isNotBlank() }).joinToString(" · "),
                         fontSize = 12.sp, color = Palette.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                 }
                 if (list.size > 1) Text("${page + 1} / ${list.size}", fontSize = 12.sp, color = Palette.TextMuted)
+                // The time it leaves at: set, changed or taken off from here.
+                TextButton(onClick = {
+                    val t = current
+                    pickTicketTime(context, t.Hour?.let { it to (t.Minute ?: 0) }) { time ->
+                        scope.launch {
+                            val saved = withContext(Dispatchers.IO) { TicketStore.setTime(context, db, t, time) }
+                            list = list.map { if (it.Id == saved.Id) saved else it }
+                            onChanged()
+                        }
+                    }
+                }) { Text("🕒") }
                 TextButton(onClick = { confirm = true }) { Text("🗑") }
             }
             SwipePages(
@@ -369,7 +402,7 @@ fun TicketsHub(db: AkashicDatabase, onClose: () -> Unit, openCurrent: Boolean = 
     LaunchedEffect(openCurrent) {
         if (!openCurrent) return@LaunchedEffect
         val now = withContext(Dispatchers.IO) { TicketStore.current(db) }
-        if (now.isNotEmpty()) viewing = now to 0
+        if (now.isNotEmpty()) viewing = now to TicketStore.currentIndex(now)
     }
 
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -434,6 +467,7 @@ private fun TicketRow(t: Ticket, onClick: () -> Unit) {
                 fontSize = 12.sp, color = Palette.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
+        if (t.timeText.isNotEmpty()) Text(t.timeText, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 8.dp))
     }
 }
 

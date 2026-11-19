@@ -12,7 +12,9 @@ import androidx.room.Update
 // A train ticket, boarding pass, concert ticket… kept as its file (PDF or image) in media\tickets, attached to a day and,
 // optionally, to a calendar event. Date is always set (the event's first day when attached to one), so a ticket whose
 // event disappears — a PC import replaces the events — still shows on its day. EventTitle is the event's name at the
-// time, for the same reason. Phone-owned: DesktopImport leaves the table alone.
+// time, for the same reason. Hour / Minute = when the transport leaves (or the doors open), null when not given: a
+// ticket with a time shows in the day's agenda and gets a reminder before it. Phone-owned: DesktopImport leaves the
+// table alone.
 @Entity(tableName = "Ticket")
 data class Ticket(
     @PrimaryKey(autoGenerate = true) val Id: Int = 0,
@@ -23,8 +25,11 @@ data class Ticket(
     val EventId: Int?,
     val EventTitle: String,
     val CreatedAt: String,
+    val Hour: Int? = null,
+    val Minute: Int? = null,
 ) {
     val isPdf: Boolean get() = MimeType == "application/pdf"
+    val timeText: String get() = Hour?.let { "%02d:%02d".format(it, Minute ?: 0) } ?: ""
 }
 
 @Dao
@@ -35,13 +40,13 @@ interface TicketDao {
     @Update
     suspend fun update(t: Ticket)
 
-    @Query("SELECT * FROM Ticket ORDER BY Date, CreatedAt")
+    @Query("SELECT * FROM Ticket ORDER BY Date, Hour IS NULL, Hour, Minute, CreatedAt")
     suspend fun getAll(): List<Ticket>
 
-    @Query("SELECT * FROM Ticket WHERE Date >= :from ORDER BY Date, CreatedAt")
+    @Query("SELECT * FROM Ticket WHERE Date >= :from ORDER BY Date, Hour IS NULL, Hour, Minute, CreatedAt")
     suspend fun from(from: String): List<Ticket>
 
-    @Query("SELECT * FROM Ticket WHERE Date < :before ORDER BY Date DESC, CreatedAt")
+    @Query("SELECT * FROM Ticket WHERE Date < :before ORDER BY Date DESC, Hour IS NULL, Hour, Minute, CreatedAt")
     suspend fun before(before: String): List<Ticket>
 
     @Query("DELETE FROM Ticket WHERE Id = :id")

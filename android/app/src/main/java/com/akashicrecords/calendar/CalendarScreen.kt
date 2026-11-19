@@ -103,7 +103,7 @@ fun CalendarSection(
         if (list.isNotEmpty()) viewingTickets = list to list.indexOfFirst { it.Date == day.toString() }.coerceAtLeast(0)
     }
 
-    LaunchedEffect(month, version) {
+    LaunchedEffect(month, version, TicketStore.changes) {
         monthItems = withContext(Dispatchers.IO) { Agenda.month(db, month) }
         val today = LocalDate.now()
         upcoming = withContext(Dispatchers.IO) { Agenda.range(db, today, today.plusDays(30)) }
@@ -112,16 +112,22 @@ fun CalendarSection(
     fun linksOf(item: AgendaItem) = when (item.source) {
         AgendaSource.Event -> links["Event:${item.refId}"]
         AgendaSource.Birthday -> links["Birthday:${item.refId}"]
-        AgendaSource.Deadline -> null
+        AgendaSource.Deadline, AgendaSource.Ticket -> null
     }.orEmpty()
 
     fun open(item: AgendaItem) {
+        // A ticket's row shows the ticket, among the others of its day.
+        if (item.source == AgendaSource.Ticket) {
+            val ofDay = tickets.filter { it.Date == item.date.toString() }
+            if (ofDay.isNotEmpty()) viewingTickets = ofDay to ofDay.indexOfFirst { it.Id == item.refId }.coerceAtLeast(0)
+            return
+        }
         scope.launch {
             editing = withContext(Dispatchers.IO) {
                 when (item.source) {
                     AgendaSource.Event -> db.calendarEventDao().getAll().firstOrNull { it.Id == item.refId }?.let { Editing.Event(it, item.date) }
                     AgendaSource.Birthday -> db.birthdayDao().getAll().firstOrNull { it.Id == item.refId }?.let { Editing.Bday(it, item.date) }
-                    AgendaSource.Deadline -> null
+                    AgendaSource.Deadline, AgendaSource.Ticket -> null
                 }
             }
         }
@@ -145,7 +151,7 @@ fun CalendarSection(
                 ) { p ->
                     val shown = origin.plusMonths((p - MONTH_PAGES / 2).toLong())
                     // Each month loads its own dots, so the neighbour already has them when it slides in.
-                    val items by produceState(emptyList<AgendaItem>(), shown, version) {
+                    val items by produceState(emptyList<AgendaItem>(), shown, version, TicketStore.changes) {
                         value = withContext(Dispatchers.IO) { Agenda.month(db, shown) }
                     }
                     MonthGrid(shown, selected, items) { selected = it }
@@ -159,8 +165,8 @@ fun CalendarSection(
                     // All the tickets, coming up and past.
                     TextButton(onClick = onOpenTickets) { Text("🎫 Billets", fontSize = 13.sp) }
                 }
-                // Tickets of this day that belong to no (remaining) event.
-                val dayTickets = tickets.filter { it.Date == selected.toString() && (it.EventId == null || it.EventId !in eventIds) }
+                // Tickets of this day that belong to no (remaining) event and have no time (those are rows below).
+                val dayTickets = tickets.filter { it.Date == selected.toString() && it.Hour == null && (it.EventId == null || it.EventId !in eventIds) }
                 if (dayTickets.isNotEmpty()) {
                     TicketChip(dayTickets.size, Modifier.padding(start = 16.dp, bottom = 4.dp)) { showTickets(dayTickets, selected) }
                 }
@@ -293,6 +299,7 @@ private fun AgendaRow(
                 AgendaSource.Birthday -> "Anniversaire"
                 AgendaSource.Deadline -> "Échéance"
                 AgendaSource.Event -> item.kind?.label ?: ""
+                AgendaSource.Ticket -> "🎫 Billet"
             }
             val sub = listOf(label, item.subtitle).filter { it.isNotBlank() }.joinToString(" · ")
             Text(sub, fontSize = 11.sp, color = Palette.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)

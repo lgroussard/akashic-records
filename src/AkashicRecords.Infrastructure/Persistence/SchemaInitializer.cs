@@ -415,6 +415,9 @@ public sealed class SchemaInitializer
         AddColumnIfMissing(connection, "CanvasElement", "Height", "REAL");
         AddColumnIfMissing(connection, "Recipe", "Category", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing(connection, "Recipe", "Servings", "INTEGER NOT NULL DEFAULT 0");
+        // Room v9 (phone): the time a ticket's transport leaves.
+        AddColumnIfMissing(connection, "Ticket", "Hour", "INTEGER");
+        AddColumnIfMissing(connection, "Ticket", "Minute", "INTEGER");
         AddColumnIfMissing(connection, "Recueil", "Summary", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing(connection, "Poem", "TextAlignment", "TEXT NOT NULL DEFAULT 'Left'");
         AddColumnIfMissing(connection, "Poem", "Margin", "REAL NOT NULL DEFAULT 0");
