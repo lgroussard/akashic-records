@@ -1738,6 +1738,13 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
             {
                 ReloadRecipesAfterSync();
             }
+            else if (focused is null && Keyboard.FocusedElement is not System.Windows.Controls.Primitives.TextBoxBase)
+            {
+                // Poetry, artistic archive: no "save what is typed" hook there, so they reload only when
+                // no text field has the keyboard.
+                if (_activeTab == "Poetry") RefreshPoetry();
+                else if (_activeTab == "Artistic") RefreshProjectsList();
+            }
         }
         finally
         {

@@ -81,10 +81,10 @@ internal object SyncValues {
      *  - [ancestor] is the version both started from (null when unknown);
      *  - a field only they changed is taken ([Merge.take] = what to write into the local row);
      *  - a field only we changed is kept;
-     *  - with no ancestor, something beats nothing, and the [matchColumn] the rows were joined on just follows theirs;
+     *  - with no ancestor, something beats nothing, and the [matchColumns] the rows were joined on just follow theirs;
      *  - a field both changed differently keeps ours and reports theirs in [Merge.setAside].
      */
-    fun merge(local: Map<String, Any?>, payload: Map<String, Any?>, ancestor: Map<String, Any?>?, matchColumn: String? = null): Merge {
+    fun merge(local: Map<String, Any?>, payload: Map<String, Any?>, ancestor: Map<String, Any?>?, matchColumns: Collection<String> = emptyList()): Merge {
         val take = TreeMap<String, Any?>()
         val aside = mutableListOf<SetAside>()
         for ((field, theirs) in payload) {
@@ -95,7 +95,7 @@ internal object SyncValues {
             when {
                 known && ours == common -> take[field] = theirs
                 known && theirs == common -> Unit
-                !known && field == matchColumn -> take[field] = theirs
+                !known && field in matchColumns -> take[field] = theirs
                 !known && isEmpty(ours) -> take[field] = theirs
                 !known && isEmpty(theirs) -> Unit
                 // Both wrote something different. With a common ancestor, ours stays (we are the one syncing

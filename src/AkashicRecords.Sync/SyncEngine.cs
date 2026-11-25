@@ -34,6 +34,11 @@ public sealed record SyncTable(string EntityType, string Table, params string[] 
     /// (Observation.OwnerId means an Artwork, a Poem... according to OwnerKind).</summary>
     public IReadOnlyList<KindRef> KindRefs { get; init; } = [];
 
+    /// <summary>Text columns holding a decimal number (budget amounts). They are always written with a
+    /// point; an older row written "-9,12" by a French machine is rewritten before comparing, or the
+    /// same amount would look different on two devices.</summary>
+    public string[] DecimalTextColumns { get; init; } = [];
+
     internal IReadOnlyList<string> AllMatchColumns => MatchColumn is not null ? [MatchColumn] : MatchColumns;
 
     /// <summary>The entity type `column` points at for this row, or null when it is not a reference
@@ -126,6 +131,7 @@ public sealed class SyncEngine
         db.Open();
         EnsureSchema(db);
         var tables = _tables.Select(t => TableInfo.Load(db, t)).Where(t => t is not null).Select(t => t!).ToList();
+        foreach (var t in tables) t.NormalizeDecimalText(db);
         foreach (var t in tables) BackfillAncestors(db, t);
 
         await PullAsync(db, tables, report, ct);
@@ -321,7 +327,10 @@ public sealed class SyncEngine
             var target = t.Def.TargetOf(column, values);
             if (target is null) continue;
             using var cmd = Cmd(db, tx, "SELECT sync_id FROM sync_map WHERE entity_type = $t AND local_id = $l AND deleted = 0", ("$t", target), ("$l", id));
-            wire[column] = cmd.ExecuteScalar() as string;
+            // A link to something that does not exist here says the same as no link: null, or 0 where
+            // the column cannot be empty (what the receiving side would store for null anyway).
+            object? syncId = cmd.ExecuteScalar() as string;
+            wire[column] = syncId ?? (t.IsRequired(column) ? 0L : null);
         }
         return TableInfo.Canonical(wire);
     }
@@ -654,6 +663,15 @@ public sealed class SyncEngine
         }
 
         private static bool IsReal(Column c) => c.Type.Contains("REAL") || c.Type.Contains("FLOA") || c.Type.Contains("DOUB");
+
+        public bool IsRequired(string column) => _columns.FirstOrDefault(c => c.Name == column) is { NotNull: true };
+
+        /// <summary>See SyncTable.DecimalTextColumns.</summary>
+        public void NormalizeDecimalText(SqliteConnection db)
+        {
+            foreach (var column in Def.DecimalTextColumns.Where(name => _columns.Any(c => c.Name == name)))
+                Exec(db, null, $"UPDATE \"{Def.Table}\" SET \"{column}\" = REPLACE(\"{column}\", ',', '.') WHERE \"{column}\" LIKE '%,%'");
+        }
 
         private string ColumnList =>string.Join(", ", _columns.Select(c => $"\"{c.Name}\""));
 

@@ -85,11 +85,11 @@ public static class AkashicCatalog
         new("Ticket", "Ticket") { Refs = R(("EventId", "CalendarEvent")), MatchColumns = ["CreatedAt"] },
 
         // ---- Budget
-        new("BudgetCategory", "BudgetCategory") { MatchColumns = ["Name"] },
+        new("BudgetCategory", "BudgetCategory") { MatchColumns = ["Name"], DecimalTextColumns = ["MonthlyCap"] },
         new("BudgetPlan", "BudgetPlan") { MatchColumns = ["CreatedAt"] },
-        new("BudgetPlanLine", "BudgetPlanLine") { Refs = R(("PlanId", "BudgetPlan"), ("CategoryId", "BudgetCategory")), MatchColumns = ["PlanId", "CategoryId"] },
+        new("BudgetPlanLine", "BudgetPlanLine") { Refs = R(("PlanId", "BudgetPlan"), ("CategoryId", "BudgetCategory")), MatchColumns = ["PlanId", "CategoryId"], DecimalTextColumns = ["MonthlyAmount"] },
         new("BudgetRule", "BudgetRule") { Refs = R(("CategoryId", "BudgetCategory")), MatchColumns = ["Keyword"] },
-        new("BudgetTransaction", "BudgetTransaction") { Refs = R(("CategoryId", "BudgetCategory")), MatchColumns = ["Date", "Label", "Amount"] },
+        new("BudgetTransaction", "BudgetTransaction") { Refs = R(("CategoryId", "BudgetCategory")), MatchColumns = ["ExternalId"], DecimalTextColumns = ["Amount"] }, // the bank line's own id
 
         // ---- Written on the phone
         new("CrosswordGame", "CrosswordGame") { MatchColumns = ["CreatedAt"] },
