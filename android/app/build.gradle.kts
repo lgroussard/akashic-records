@@ -75,4 +75,6 @@ dependencies {
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
     testImplementation("junit:junit:4.13.2")
+    // The real org.json for JVM tests (the Android jar only has stubs of it).
+    testImplementation("org.json:json:20240303")
 }

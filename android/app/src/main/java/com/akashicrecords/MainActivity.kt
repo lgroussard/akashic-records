@@ -73,6 +73,9 @@ class MainActivity : ComponentActivity() {
         val db = AkashicDatabase.get(applicationContext)
         val config = ConfigStore(applicationContext)
         Reminders.schedule(applicationContext)
+        // Sync with the hub, when this phone is paired (settings): steady background pace from here on.
+        com.akashicrecords.sync.SyncService.init(applicationContext)
+        if (com.akashicrecords.sync.SyncService.state.value.paired) com.akashicrecords.sync.SyncService.schedule(applicationContext)
         launch = Launch.from(intent)
         ticketShare = sharedTickets(intent)
         share = if (!isTicketShare(intent)) SharedRef.from(intent) else null
@@ -99,10 +102,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // Leaving the app: the widgets reflect what was just written (journal, agenda).
+    // Coming to the front: fetch what the other devices wrote meanwhile.
+    override fun onStart() {
+        super.onStart()
+        com.akashicrecords.sync.SyncService.requestSoon(applicationContext)
+    }
+
+    // Leaving the app: the widgets reflect what was just written (journal, agenda), and it goes to the hub
+    // (a few seconds later, once the last auto-save has landed).
     override fun onStop() {
         super.onStop()
         lifecycleScope.launch { Widgets.refreshAll(applicationContext) }
+        com.akashicrecords.sync.SyncService.requestSoon(applicationContext, delaySeconds = 5)
     }
 
     override fun onNewIntent(intent: Intent) {
