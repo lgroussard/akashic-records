@@ -70,6 +70,41 @@ internal object SyncValues {
         return out
     }
 
+    /** One field both sides changed differently: [ours] stays in the row, [theirs] is set aside for the user. */
+    data class SetAside(val field: String, val ours: Any?, val theirs: Any?)
+
+    class Merge(val take: SortedMap<String, Any?>, val setAside: List<SetAside>)
+
+    /**
+     * Field-by-field merge of a row changed on both sides (same rules as the desktop engine):
+     *  - [ancestor] is the version both started from (null when unknown);
+     *  - a field only they changed is taken ([Merge.take] = what to write into the local row);
+     *  - a field only we changed is kept;
+     *  - with no ancestor, something beats nothing, and the [matchColumn] the rows were joined on just follows theirs;
+     *  - a field both changed differently keeps ours and reports theirs in [Merge.setAside].
+     */
+    fun merge(local: Map<String, Any?>, payload: Map<String, Any?>, ancestor: Map<String, Any?>?, matchColumn: String? = null): Merge {
+        val take = TreeMap<String, Any?>()
+        val aside = mutableListOf<SetAside>()
+        for ((field, theirs) in payload) {
+            val ours = local[field]
+            if (ours == theirs) continue
+            val known = ancestor != null && ancestor.containsKey(field)
+            val common = ancestor?.get(field)
+            when {
+                known && ours == common -> take[field] = theirs
+                known && theirs == common -> Unit
+                !known && field == matchColumn -> take[field] = theirs
+                !known && isEmpty(ours) -> take[field] = theirs
+                !known && isEmpty(theirs) -> Unit
+                else -> aside += SetAside(field, ours, theirs)
+            }
+        }
+        return Merge(take, aside)
+    }
+
+    private fun isEmpty(v: Any?) = v == null || v == "" || v == 0L || v == 0.0
+
     /** True when the local row holds exactly what the payload says, for every field the payload carries. */
     fun matches(local: Map<String, Any?>, payload: Map<String, Any?>): Boolean =
         payload.isNotEmpty() && payload.all { (k, v) -> local.containsKey(k) && local[k] == v }

@@ -10,7 +10,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,6 +49,24 @@ fun SyncSettingsBlock() {
     Spacer(Modifier.height(6.dp))
     Text(message ?: state.text, fontSize = 12.sp, color = if (message == null && !state.isError) Palette.Text else Palette.TextMuted)
     Spacer(Modifier.height(6.dp))
+
+    // Versions set aside by a conflict (same field changed here and on another device): readable, selectable to
+    // copy back by hand, and forgotten once read.
+    val aside by SyncService.conflicts.collectAsState()
+    LaunchedEffect(Unit) { SyncService.refreshConflicts(context) }
+    aside.take(20).forEach { c ->
+        val kind = when (c.entityType) { "Recipe" -> "Recette"; "JournalEntry" -> "Journal"; else -> c.entityType }
+        val field = when (c.field) {
+            "Text" -> "texte"; "Title" -> "titre"; "Notes" -> "notes"; "Ingredients" -> "ingrédients"
+            "Instructions" -> "étapes"; "Tags" -> "étiquettes"; "Category" -> "catégorie"; "Servings" -> "portions"
+            else -> c.field
+        }
+        val label = if (c.label.length > 10 && c.label[4] == '-' && c.label[7] == '-') c.label.take(10) else c.label // a journal day
+        Text("$kind « $label », $field : version d'un autre appareil non retenue (${c.createdAt})", fontSize = 12.sp, color = Palette.TextMuted)
+        SelectionContainer { Text(c.lostValue.orEmpty(), fontSize = 12.sp, maxLines = 8) }
+        TextButton(onClick = { scope.launch { SyncService.dismissConflict(context, c.id) } }) { Text("Lu, effacer") }
+    }
+
     OutlinedTextField(
         url, { url = it },
         label = { Text("Adresse du hub") },

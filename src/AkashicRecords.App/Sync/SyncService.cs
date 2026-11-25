@@ -14,7 +14,12 @@ public sealed class SyncService
     public static SyncService Instance { get; } = new();
 
     // What is synchronised. A recipe's cover is a file path on this machine: it stays here.
-    private static readonly SyncTable[] Tables = { new("Recipe", "Recipe", "CoverImagePath") };
+    private static readonly SyncTable[] Tables =
+    {
+        new("Recipe", "Recipe", "CoverImagePath"),
+        // One entry per day: two devices that each wrote "today" hold the same entry (joined on the date).
+        new("JournalEntry", "JournalEntry") { MatchColumn = "EntryDate", MatchPrefix = 10 },
+    };
 
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(30);
 
@@ -33,6 +38,10 @@ public sealed class SyncService
     /// <summary>Pairing, a finished run or an error: the settings pane redraws its status line.</summary>
     public event Action? StateChanged;
 
+    /// <summary>A sync is about to run (UI thread): open views save what is typed and not yet saved, so the
+    /// engine merges it instead of the view later writing an outdated copy over what arrived.</summary>
+    public event Action? BeforeSync;
+
     /// <summary>Rows were added, changed or removed here by a sync: open views should reload.</summary>
     public event Action<SyncReport>? DataChanged;
 
@@ -48,7 +57,9 @@ public sealed class SyncService
             var what = LastReport is null || LastReport.NothingToDo
                 ? "rien à échanger"
                 : $"{LastReport.Pushed} envoyé(s), {LastReport.Inserted + LastReport.Updated + LastReport.Deleted} reçu(s)";
-            return $"{head} Dernière synchro à {LastSuccess:HH:mm:ss} : {what}.";
+            var aside = SetAside().Count;
+            var note = aside == 0 ? "" : $" {aside} version(s) mise(s) de côté à relire ci-dessous.";
+            return $"{head} Dernière synchro à {LastSuccess:HH:mm:ss} : {what}.{note}";
         }
     }
 
@@ -70,6 +81,7 @@ public sealed class SyncService
         SyncReport? report = null;
         try
         {
+            try { BeforeSync?.Invoke(); } catch { /* a view that cannot save must not stop the sync */ }
             var settings = Settings;
             report = await Task.Run(async () =>
             {
@@ -96,6 +108,20 @@ public sealed class SyncService
         StateChanged?.Invoke();
         if (report is not null && report.Inserted + report.Updated + report.Deleted > 0) DataChanged?.Invoke(report);
         return report;
+    }
+
+    /// <summary>Versions that lost a field-level conflict (same field changed here and elsewhere): kept so the
+    /// user can read them and copy back what matters.</summary>
+    public List<SyncConflict> SetAside()
+    {
+        try { return File.Exists(_dbPath) ? SyncEngine.Conflicts(_dbPath) : new(); }
+        catch (Microsoft.Data.Sqlite.SqliteException) { return new(); }
+    }
+
+    public void Dismiss(long id)
+    {
+        SyncEngine.DismissConflict(_dbPath, id);
+        StateChanged?.Invoke();
     }
 
     /// <summary>Pairs this computer with a hub (one-time code shown on the hub), then syncs once.

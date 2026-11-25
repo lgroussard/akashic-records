@@ -26,6 +26,18 @@ internal val AppScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 private var lastFlush: kotlinx.coroutines.Job? = null
 internal suspend fun awaitPendingWrites() { lastFlush?.join() }
 
+// What is typed on the pages on screen and not saved yet (inside AutoSave's 600 ms). A sync flushes it first, so
+// the engine merges it with what the other devices wrote instead of the page later saving an outdated copy over theirs.
+internal object PendingEdits {
+    private val flushers = java.util.concurrent.CopyOnWriteArrayList<suspend () -> Unit>()
+    fun register(flush: suspend () -> Unit) { flushers += flush }
+    fun unregister(flush: suspend () -> Unit) { flushers -= flush }
+    suspend fun flushAll() {
+        flushers.forEach { runCatching { it() } }
+        awaitPendingWrites()
+    }
+}
+
 // The desktop writes DateTime.ToString("O") ("2026-09-12T00:00:00.0000000"); same shape here
 // so DateTime.Parse on the PC reads phone-written rows unchanged once data flows back.
 private val DESKTOP_O = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSSS")
@@ -51,8 +63,18 @@ internal fun <T> AutoSave(value: T, save: suspend (T) -> Unit) {
         save(value)
         saved = value
     }
+    val latestSave by rememberUpdatedState(save)
     DisposableEffect(Unit) {
+        val flush: suspend () -> Unit = {
+            val pending = latest
+            if (pending != saved) {
+                latestSave(pending)
+                saved = pending
+            }
+        }
+        PendingEdits.register(flush)
         onDispose {
+            PendingEdits.unregister(flush)
             val pending = latest
             if (pending != saved) lastFlush = AppScope.launch { save(pending) }
         }

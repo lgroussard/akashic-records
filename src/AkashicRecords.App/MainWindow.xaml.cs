@@ -174,6 +174,10 @@ public partial class MainWindow : Window
 
         // Sync with the hub, when this computer is paired (settings pane). Rows that arrive from
         // another device are shown at once if their section is the one on screen.
+        Sync.SyncService.Instance.BeforeSync += () =>
+        {
+            if (SectionContent.Content is JournauxView journaux) journaux.OnBeforeSync();
+        };
         Sync.SyncService.Instance.DataChanged += _ =>
         {
             if (SectionContent.Content is JournauxView journaux) journaux.OnSyncedDataChanged();

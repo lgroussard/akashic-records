@@ -31,6 +31,8 @@
                            Text="Relie cet ordinateur au hub de la maison pour que les recettes suivent entre le PC et le téléphone. L'adresse et le code s'obtiennent sur le hub (commande « pair ») ; le code ne sert qu'une fois."/>
                 <TextBlock x:Name="SyncStatusText" TextWrapping="Wrap" Foreground="#CCCCCC" FontSize="12"
                            LineHeight="16" Margin="0,0,0,8"/>
+                <!-- Versions set aside by a conflict (same field changed here and on another device). -->
+                <StackPanel x:Name="SyncAsidePanel" Margin="0,0,0,8"/>
                 <Grid Margin="0,0,0,4">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
