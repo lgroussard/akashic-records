@@ -11,7 +11,15 @@ import java.util.TreeMap
 import java.util.UUID
 
 /** One synchronised table. [localOnly] columns never leave the device and are kept as they are on an update. */
-data class SyncTable(val entityType: String, val table: String, val localOnly: Set<String> = emptySet())
+/** [matchColumn]: a column that says "this is the same thing" even when two devices each created their own row
+ * (a journal entry's day, compared on its first [matchPrefix] characters): such rows are joined and merged. */
+data class SyncTable(
+    val entityType: String,
+    val table: String,
+    val localOnly: Set<String> = emptySet(),
+    val matchColumn: String? = null,
+    val matchPrefix: Int = Int.MAX_VALUE,
+)
 
 class SyncReport {
     var pulled = 0
@@ -21,13 +29,14 @@ class SyncReport {
     var adopted = 0
     var pushed = 0
     var pushedDeletes = 0
-    var conflicts = 0
+    var conflicts = 0   // entities changed on both sides since the last sync (merged field by field)
+    var setAside = 0    // fields both sides wrote differently: ours kept, theirs saved in sync_conflict
     var cursor = 0L
     val received get() = inserted + updated + deleted
     val nothingToDo get() = inserted + updated + deleted + adopted + pushed + pushedDeletes == 0
     override fun toString() =
         "recu $pulled (ajouts $inserted, modifs $updated, suppressions $deleted, reconnus $adopted) ; " +
-            "envoye $pushed (dont suppressions $pushedDeletes) ; conflits $conflicts ; curseur $cursor"
+            "envoye $pushed (dont suppressions $pushedDeletes) ; conflits $conflicts (versions mises de cote $setAside) ; curseur $cursor"
 }
 
 /** Raised instead of doing something that looks like a mistake (see [SyncEngine.maxDeleteShare]). */
@@ -41,8 +50,12 @@ class SyncSafetyException(message: String) : Exception(message)
  * synchronised (a hash kept in `sync_map`) and what to send is derived from that. A row is the durable truth,
  * the "outbox" is recomputed at every run, so a kill or a lost connection loses nothing and resending is harmless.
  *
- * Conflict policy: last writer wins, per entity. A row changed here AND on the hub since the last sync keeps
- * this device's version and is pushed over the hub's.
+ * Conflict policy, when a row changed here AND on the hub since the last sync:
+ *  - merged field by field against the last synchronised version (`sync_map.synced_values`): a field only one
+ *    side touched takes that side's value;
+ *  - a field both sides changed keeps this device's value, and the other one is written to `sync_conflict` so
+ *    the user can read it and take it back: nothing is lost silently;
+ *  - an edit beats a delete, whichever side did which.
  */
 class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClient, private val tables: List<SyncTable>) {
 
@@ -56,6 +69,7 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
         val report = SyncReport()
         ensureSchema()
         val infos = tables.mapNotNull { TableInfo.load(db, it) }
+        infos.forEach(::backfillAncestors)
 
         pull(infos, report)
         for (round in 0 until 4) {
@@ -78,6 +92,10 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
         )
         db.execSQL("CREATE INDEX IF NOT EXISTS sync_map_local ON sync_map(entity_type, local_id)")
         db.execSQL("CREATE TABLE IF NOT EXISTS sync_state(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        db.execSQL(SyncConflicts.CREATE)
+        // The row as last synchronised (canonical JSON): the common ancestor of a field-by-field merge.
+        val hasValues = db.query("SELECT COUNT(*) FROM pragma_table_info('sync_map') WHERE name = 'synced_values'").use { c -> c.moveToFirst() && c.getLong(0) > 0 }
+        if (!hasValues) db.execSQL("ALTER TABLE sync_map ADD COLUMN synced_values TEXT")
     }
 
     private fun cursor(): Long =
@@ -126,13 +144,17 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
         }
     }
 
-    private fun apply(t: TableInfo, row: JSONObject, report: SyncReport) {
+    private fun apply(t: TableInfo, row: JSONObject, report: SyncReport) =
+        applyRemote(
+            t, row.getString("entity_id"), row.getLong("rev"),
+            if (row.optBoolean("deleted") || row.isNull("payload")) null else t.project(row.getJSONObject("payload")),
+            row.optString("device_id", "?"), report,
+        )
+
+    /** Brings one entity's state on the hub ([payload] null = deleted there) into this database. */
+    private fun applyRemote(t: TableInfo, syncId: String, rev: Long, payload: SortedMap<String, Any?>?, device: String, report: SyncReport) {
         val type = t.def.entityType
-        val syncId = row.getString("entity_id")
-        val rev = row.getLong("rev")
-        val payload: SortedMap<String, Any?>? =
-            if (row.optBoolean("deleted") || row.isNull("payload")) null else t.project(row.getJSONObject("payload"))
-        val map = mapBySyncId(type, syncId)
+        var map = mapBySyncId(type, syncId)
 
         if (map == null) {
             if (payload == null) {
@@ -143,56 +165,112 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
             // devices started from the same data), recognise it instead of creating a twin.
             val twin = t.findUnmappedTwin(db, payload)
             if (twin != null) {
-                upsertMap(type, syncId, twin, rev, t.hashOfRow(db, twin), false)
+                upsertMap(type, syncId, twin, rev, t.jsonOfRow(db, twin), false)
                 report.adopted++
                 return
             }
-            val id = t.insert(db, payload)
-            upsertMap(type, syncId, id, rev, t.hashOfRow(db, id), false)
-            report.inserted++
+            val sameThing = t.findUnmappedByKey(db, payload)
+            if (sameThing == null) {
+                val id = t.insert(db, payload)
+                upsertMap(type, syncId, id, rev, t.jsonOfRow(db, id), false)
+                report.inserted++
+                return
+            }
+            // The same thing written on both devices (two entries for one day): joined into one row and
+            // merged below, with no common ancestor.
+            map = MapEntry(syncId, sameThing, 0, null, null, false)
+            report.adopted++
+        } else if (rev <= map.rev) {
+            return // already known (our own push coming back, or a replay)
+        }
+
+        val localId = map.localId
+        val local = localId?.let { t.readRow(db, it) }
+        val localJson = local?.let(SyncValues::canonical)
+        val locallyChanged = !map.deleted && (local == null || SyncValues.sha(localJson!!) != map.syncedHash)
+
+        if (!locallyChanged) {
+            // Only the hub moved: take its version.
+            if (payload == null) {
+                if (local != null) {
+                    t.delete(db, localId!!)
+                    report.deleted++
+                }
+                upsertMap(type, syncId, null, rev, null, true)
+            } else if (local == null) {
+                val id = t.insert(db, payload) // deleted here earlier, alive again on the hub
+                upsertMap(type, syncId, id, rev, t.jsonOfRow(db, id), false)
+                report.inserted++
+            } else {
+                t.update(db, localId!!, payload)
+                upsertMap(type, syncId, localId, rev, t.jsonOfRow(db, localId), false)
+                report.updated++
+            }
             return
         }
 
-        if (rev <= map.rev) return // already known (our own push coming back, or a replay)
+        // ---- Both sides changed since the last sync.
 
-        val localHash = map.localId?.let { t.hashOfRow(db, it) }
-        val locallyChanged = !map.deleted && (localHash == null || localHash != map.syncedHash)
-        if (locallyChanged && sameContent(t, map, localHash, payload)) {
-            // Both sides hold the same thing (typically our own push whose answer got lost).
-            upsertMap(type, syncId, if (payload == null) null else map.localId, rev, localHash, payload == null)
-            return
-        }
-        if (locallyChanged) {
-            // Both sides changed. Last writer wins per entity: keep ours, remember the hub's revision so the
-            // next push goes on top of it. (local_id is kept even if the row is gone: that is how the scan
-            // sees a pending delete.)
-            upsertMap(type, syncId, map.localId, rev, map.syncedHash, false)
+        if (payload == null) {
+            if (local == null) {
+                upsertMap(type, syncId, null, rev, null, true) // deleted on both sides
+                return
+            }
+            // Deleted there, edited here: the edit wins. "Never sent" at the hub's revision, so the scan
+            // pushes our row back on top of the delete.
+            upsertMap(type, syncId, localId, rev, null, false)
             report.conflicts++
             return
         }
-
-        if (payload == null) {
-            if (map.localId != null && localHash != null) {
-                t.delete(db, map.localId)
-                report.deleted++
-            }
-            upsertMap(type, syncId, null, rev, null, true)
-        } else if (map.deleted || map.localId == null) {
-            val id = t.insert(db, payload) // deleted here earlier, alive again on the hub
-            upsertMap(type, syncId, id, rev, t.hashOfRow(db, id), false)
+        if (local == null) {
+            // Deleted here, edited there: the edit wins, the row comes back.
+            val id = t.insert(db, payload)
+            upsertMap(type, syncId, id, rev, t.jsonOfRow(db, id), false)
             report.inserted++
-        } else {
-            t.update(db, map.localId, payload)
-            upsertMap(type, syncId, map.localId, rev, t.hashOfRow(db, map.localId), false)
+            report.conflicts++
+            return
+        }
+        if (SyncValues.matches(local, payload)) {
+            // Both sides hold the same thing (typically our own push whose answer got lost).
+            upsertMap(type, syncId, localId, rev, localJson, false)
+            return
+        }
+
+        // Field by field, against the version both sides started from.
+        val ancestor = map.syncedValues?.let { t.project(JSONObject(it)) }
+        val merge = SyncValues.merge(local, payload, ancestor, t.def.matchColumn)
+        for (c in merge.setAside) {
+            // Both wrote something different: ours stays, theirs is set aside for the user.
+            db.execSQL(
+                "INSERT INTO sync_conflict(entity_type, sync_id, local_id, label, field, kept_value, lost_value, lost_device, created_at) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                arrayOf<Any?>(
+                    type, syncId, localId, t.labelOf(local), c.field, c.kept?.toString(), c.lost?.toString(), if (c.lostIsOurs) "cet appareil" else device,
+                    java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date()),
+                ),
+            )
+            report.setAside++
+        }
+        if (merge.take.isNotEmpty()) {
+            t.update(db, localId!!, merge.take)
             report.updated++
         }
+
+        // What the hub holds, seen through this table's columns: the new common ancestor. Our row differs
+        // from it wherever we kept our own value, so the scan pushes the merged result.
+        val theirRow = TreeMap(local).apply { putAll(payload) }
+        upsertMap(type, syncId, localId, rev, SyncValues.canonical(theirRow), false)
+        report.conflicts++
     }
 
-    private fun sameContent(t: TableInfo, map: MapEntry, localHash: String?, payload: SortedMap<String, Any?>?): Boolean {
-        if (payload == null) return localHash == null // deleted on both sides
-        if (localHash == null || map.localId == null) return false
-        val local = t.readRow(db, map.localId) ?: return false
-        return SyncValues.matches(local, payload)
+    /** Rows linked before `synced_values` existed only have a hash. While such a row is untouched, its content
+     * IS the last synchronised version: write it down as the ancestor. */
+    private fun backfillAncestors(t: TableInfo) = transaction {
+        for (map in allMaps(t.def.entityType)) {
+            if (map.syncedValues != null || map.syncedHash == null || map.localId == null || map.deleted) continue
+            val json = t.jsonOfRow(db, map.localId) ?: continue
+            if (SyncValues.sha(json) == map.syncedHash) upsertMap(t.def.entityType, map.syncId, map.localId, map.rev, json, false)
+        }
     }
 
     // ------------------------------------------------------------------ scan & push
@@ -256,16 +334,25 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
                     val rev = res.getLong("rev")
                     when (res.getString("status")) {
                         "accepted", "duplicate" -> {
-                            upsertMap(type, p.syncId, if (p.isDelete) null else p.localId, rev, p.hash, p.isDelete)
+                            upsertMap(type, p.syncId, if (p.isDelete) null else p.localId, rev, p.values?.let(SyncValues::canonical), p.isDelete)
                             report.pushed++
                             if (p.isDelete) report.pushedDeletes++
                         }
                         else -> {
-                            // The hub moved since we last looked. Keep our version, take the hub's revision as
-                            // the new base: the next round sends it again on top (last writer wins).
+                            // The hub moved since we last looked: merge with what it holds now (same rules as a
+                            // pull); the next round sends the result on top of its revision.
                             val map = mapBySyncId(type, p.syncId)!!
-                            upsertMap(type, p.syncId, map.localId, rev, map.syncedHash, false)
-                            report.conflicts++
+                            val current = res.optJSONObject("current")
+                            if (current == null || current.getLong("rev") <= map.rev) {
+                                upsertMap(type, p.syncId, map.localId, rev, null, false) // unknown to this hub: send as it is
+                            } else {
+                                val gone = current.optBoolean("deleted") || current.isNull("payload")
+                                applyRemote(
+                                    p.table, p.syncId, current.getLong("rev"),
+                                    if (gone) null else p.table.project(current.getJSONObject("payload")),
+                                    current.optString("last_device", "?"), report,
+                                )
+                            }
                             conflicts++
                         }
                     }
@@ -277,25 +364,29 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
 
     // ------------------------------------------------------------------ sync_map rows
 
-    private class MapEntry(val syncId: String, val localId: Long?, val rev: Long, val syncedHash: String?, val deleted: Boolean)
+    private class MapEntry(val syncId: String, val localId: Long?, val rev: Long, val syncedHash: String?, val syncedValues: String?, val deleted: Boolean)
 
-    private fun readMap(c: Cursor) =
-        MapEntry(c.getString(0), if (c.isNull(1)) null else c.getLong(1), c.getLong(2), if (c.isNull(3)) null else c.getString(3), c.getLong(4) != 0L)
+    private fun readMap(c: Cursor) = MapEntry(
+        c.getString(0), if (c.isNull(1)) null else c.getLong(1), c.getLong(2), if (c.isNull(3)) null else c.getString(3),
+        if (c.isNull(4)) null else c.getString(4), c.getLong(5) != 0L,
+    )
 
     private fun mapBySyncId(type: String, syncId: String): MapEntry? =
-        db.query("SELECT sync_id, local_id, rev, synced_hash, deleted FROM sync_map WHERE entity_type = ? AND sync_id = ?", arrayOf<Any?>(type, syncId))
+        db.query("SELECT $MAP_COLUMNS FROM sync_map WHERE entity_type = ? AND sync_id = ?", arrayOf<Any?>(type, syncId))
             .use { c -> if (c.moveToFirst()) readMap(c) else null }
 
     private fun allMaps(type: String): List<MapEntry> =
-        db.query("SELECT sync_id, local_id, rev, synced_hash, deleted FROM sync_map WHERE entity_type = ?", arrayOf<Any?>(type))
+        db.query("SELECT $MAP_COLUMNS FROM sync_map WHERE entity_type = ?", arrayOf<Any?>(type))
             .use { c -> buildList { while (c.moveToNext()) add(readMap(c)) } }
 
-    private fun upsertMap(type: String, syncId: String, localId: Long?, rev: Long, hash: String?, deleted: Boolean) =
+    /** [values]: the row as synchronised (canonical JSON), or null for "never sent" / deleted. The hash the
+     * scan compares with is derived from it. */
+    private fun upsertMap(type: String, syncId: String, localId: Long?, rev: Long, values: String?, deleted: Boolean) =
         db.execSQL(
-            "INSERT INTO sync_map(entity_type, sync_id, local_id, rev, synced_hash, deleted) VALUES (?, ?, ?, ?, ?, ?) " +
+            "INSERT INTO sync_map(entity_type, sync_id, local_id, rev, synced_hash, synced_values, deleted) VALUES (?, ?, ?, ?, ?, ?, ?) " +
                 "ON CONFLICT(entity_type, sync_id) DO UPDATE SET local_id = excluded.local_id, rev = excluded.rev, " +
-                "synced_hash = excluded.synced_hash, deleted = excluded.deleted",
-            arrayOf<Any?>(type, syncId, localId, rev, hash, if (deleted) 1 else 0),
+                "synced_hash = excluded.synced_hash, synced_values = excluded.synced_values, deleted = excluded.deleted",
+            arrayOf<Any?>(type, syncId, localId, rev, values?.let(SyncValues::sha), values, if (deleted) 1 else 0),
         )
 
     // ------------------------------------------------------------------ one local table
@@ -332,7 +423,30 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
             db.query("SELECT `$pk`, $columnList FROM `${def.table}` WHERE `$pk` = ?", arrayOf<Any?>(id))
                 .use { c -> if (c.moveToFirst()) values(c) else null }
 
-        fun hashOfRow(db: SupportSQLiteDatabase, id: Long): String? = readRow(db, id)?.let { SyncValues.sha(SyncValues.canonical(it)) }
+        /** The row's content as canonical JSON, or null when the row is gone. */
+        fun jsonOfRow(db: SupportSQLiteDatabase, id: Long): String? = readRow(db, id)?.let(SyncValues::canonical)
+
+        /** What to call the row when showing a conflict to the user. */
+        fun labelOf(row: Map<String, Any?>): String =
+            listOf("Title", "Name", "EntryDate", "Date").firstNotNullOfOrNull { c -> row[c]?.toString()?.takeIf { it.isNotBlank() } } ?: def.entityType
+
+        /** A local row not yet linked that is "the same thing" by the table's match column (see
+         * [SyncTable.matchColumn]). Null when the table has none or nothing matches. */
+        fun findUnmappedByKey(db: SupportSQLiteDatabase, payload: Map<String, Any?>): Long? {
+            val column = def.matchColumn ?: return null
+            val wanted = (payload[column] as? String)?.takeIf { it.isNotEmpty() } ?: return null
+            if (columns.none { it.name == column }) return null
+            db.query(
+                "SELECT `$pk`, `$column` FROM `${def.table}` WHERE `$pk` NOT IN " +
+                    "(SELECT local_id FROM sync_map WHERE entity_type = ? AND local_id IS NOT NULL) ORDER BY `$pk`",
+                arrayOf<Any?>(def.entityType),
+            ).use { c ->
+                while (c.moveToNext()) {
+                    if (!c.isNull(1) && c.getString(1).take(def.matchPrefix) == wanted.take(def.matchPrefix)) return c.getLong(0)
+                }
+            }
+            return null
+        }
 
         fun findUnmappedTwin(db: SupportSQLiteDatabase, payload: SortedMap<String, Any?>): Long? {
             if (payload.isEmpty()) return null
@@ -400,6 +514,7 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
 
     private companion object {
         const val PULL_PAGE = 500
+        const val MAP_COLUMNS = "sync_id, local_id, rev, synced_hash, synced_values, deleted"
         const val PUSH_BATCH = 200
     }
 }

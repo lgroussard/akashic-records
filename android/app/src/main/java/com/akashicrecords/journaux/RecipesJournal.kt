@@ -47,10 +47,9 @@ internal fun RecipesJournal(db: AkashicDatabase, initialOpen: Int? = null) {
         recipes = withContext(Dispatchers.IO) { db.recipeDao().getAll() }
     }
     LaunchedEffect(Unit) { reload() }
-    // A sync wrote recipes coming from another device: the list follows. An open page is left alone (it is
-    // being read or typed in) and the list reloads when it closes anyway.
+    // A sync wrote recipes coming from another device: the list follows (and the open page, see RecipeLoader).
     val synced by com.akashicrecords.sync.SyncService.dataVersion.collectAsState()
-    LaunchedEffect(synced) { if (synced > 0 && openId == null) reload() }
+    LaunchedEffect(synced) { if (synced > 0) reload() }
 
     val categories = recipes.map { it.Category.trim() }.filter { it.isNotEmpty() }.distinct().sorted()
     fun inCategory(r: Recipe, c: String?) =
@@ -166,8 +165,11 @@ internal fun RecipesJournal(db: AkashicDatabase, initialOpen: Int? = null) {
 @Composable
 private fun RecipeLoader(db: AkashicDatabase, id: Int, onDeleted: () -> Unit, onSaved: () -> Unit) {
     var recipe by remember { mutableStateOf<Recipe?>(null) }
-    LaunchedEffect(id) { awaitPendingWrites(); recipe = withContext(Dispatchers.IO) { db.recipeDao().getById(id) } }
-    recipe?.let { RecipePage(db, it, onDeleted, onSaved) }
+    // Read again after a sync that received something: what was typed here was saved just before it ran
+    // (PendingEdits), so the row holds the merged result and the page restarts from it.
+    val synced by com.akashicrecords.sync.SyncService.dataVersion.collectAsState()
+    LaunchedEffect(id, synced) { awaitPendingWrites(); recipe = withContext(Dispatchers.IO) { db.recipeDao().getById(id) } }
+    recipe?.let { key(it) { RecipePage(db, it, onDeleted, onSaved) } }
 }
 
 @Composable

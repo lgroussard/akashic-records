@@ -1723,14 +1723,39 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
     // being typed must not be replaced under the cursor, and leaving the field saves and reloads anyway.
     public void OnSyncedDataChanged()
     {
-        if (_activeTab != "Recipes") return;
-        var typing = new Control[]
+        // The page was saved just before the sync (OnBeforeSync), so the database holds everything typed:
+        // reloading shows the merged result and loses nothing. The caret stays where it was.
+        var focused = Keyboard.FocusedElement as TextBox;
+        var caret = focused?.CaretIndex ?? 0;
+        try
         {
-            RecipeTitleInput, RecipeCategoryInput, RecipeIngredientsInput,
-            RecipeInstructionsInput, RecipeNotesInput, RecipeTagsInput, RecipeServingsInput
-        }.Any(input => input.IsKeyboardFocusWithin);
-        if (typing) return;
+            if (_activeTab == "Personal")
+            {
+                NavigateToDate(_currentPageDate);
+                RefreshCalendarChips();
+            }
+            else if (_activeTab == "Recipes")
+            {
+                ReloadRecipesAfterSync();
+            }
+        }
+        finally
+        {
+            if (focused is not null) focused.CaretIndex = Math.Min(caret, focused.Text.Length);
+        }
+    }
 
+    // A sync is about to run: what is typed on the open page and not saved yet (the focused field has had no
+    // LostFocus) goes to the database first. The engine then sees it as this computer's change and merges it
+    // with what the other devices wrote, instead of the page later saving an outdated copy over theirs.
+    public void OnBeforeSync()
+    {
+        if (_activeTab == "Personal") FlushEntryEdits();
+        else if (_activeTab == "Recipes" && _selectedRecipe is not null) SaveRecipeFields();
+    }
+
+    private void ReloadRecipesAfterSync()
+    {
         var openId = _selectedRecipe?.Id;
         _selectedRecipe = null; // so the refresh below reopens the page with the fresh content
         RefreshRecipesList();

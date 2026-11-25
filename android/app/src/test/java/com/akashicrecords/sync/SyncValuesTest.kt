@@ -70,6 +70,49 @@ class SyncValuesTest {
     }
 
     @Test
+    fun merge_keeps_both_sides_when_they_touched_different_fields() {
+        val ancestor = row("Title" to "Houmous", "Notes" to "", "Servings" to 4L)
+        val local = row("Title" to "Houmous", "Notes" to "servir tiede", "Servings" to 4L) // we changed Notes
+        val theirs = row("Title" to "Houmous", "Notes" to "", "Servings" to 6L)            // they changed Servings
+        val m = SyncValues.merge(local, theirs, ancestor)
+        assertEquals(row("Servings" to 6L), m.take)
+        assertTrue(m.setAside.isEmpty())
+    }
+
+    @Test
+    fun merge_sets_their_text_aside_when_both_changed_the_same_field() {
+        val ancestor = row("Notes" to "", "Tags" to "")
+        val local = row("Notes" to "version telephone", "Tags" to "")
+        val theirs = row("Notes" to "version PC", "Tags" to "vegan")
+        val m = SyncValues.merge(local, theirs, ancestor)
+        assertEquals(row("Tags" to "vegan"), m.take)
+        assertEquals(listOf(SyncValues.SetAside("Notes", "version telephone", "version PC")), m.setAside)
+    }
+
+    @Test
+    fun merge_without_ancestor_prefers_something_over_nothing_and_follows_the_match_column() {
+        // Two journal entries for the same day, never synced: ours is the empty one the app created on opening the day.
+        val local = row("Title" to "", "Text" to "", "EntryDate" to "2026-11-25T21:14:03", "Tags" to "")
+        val theirs = row("Title" to "Mercredi", "Text" to "Mini-PC installe.", "EntryDate" to "2026-11-25T00:00:00", "Tags" to "")
+        val m = SyncValues.merge(local, theirs, null, matchColumn = "EntryDate")
+        assertEquals(row("Title" to "Mercredi", "Text" to "Mini-PC installe.", "EntryDate" to "2026-11-25T00:00:00"), m.take)
+        assertTrue(m.setAside.isEmpty())
+
+        // Both wrote the day and nobody knows which is newer: the fuller text stays, the other one is set aside
+        // (never dropped); nothing of ours is overwritten by their empty title.
+        val mine = row("Title" to "Soir", "Text" to "Ecrit ici, longuement.", "EntryDate" to "2026-11-25T21:14:03", "Tags" to "")
+        val other = row("Title" to "", "Text" to "Ecrit la-bas.", "EntryDate" to "2026-11-25T00:00:00", "Tags" to "")
+        val m2 = SyncValues.merge(mine, other, null, matchColumn = "EntryDate")
+        assertEquals(row("EntryDate" to "2026-11-25T00:00:00"), m2.take)
+        assertEquals(listOf(SyncValues.SetAside("Text", "Ecrit ici, longuement.", "Ecrit la-bas.")), m2.setAside)
+
+        // The other way round: theirs is the fuller one, it comes in and ours is what gets set aside.
+        val m3 = SyncValues.merge(other, mine, null, matchColumn = "EntryDate")
+        assertEquals("Ecrit ici, longuement.", m3.take["Text"])
+        assertEquals(listOf(SyncValues.SetAside("Text", "Ecrit ici, longuement.", "Ecrit la-bas.", lostIsOurs = true)), m3.setAside)
+    }
+
+    @Test
     fun matches_compares_only_what_the_payload_carries() {
         val local = row("Title" to "Houmous", "Notes" to "citron", "Servings" to 4L)
         assertTrue(SyncValues.matches(local, row("Title" to "Houmous", "Servings" to 4L)))

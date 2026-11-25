@@ -34,13 +34,35 @@ import java.util.concurrent.TimeUnit
 object SyncService {
 
     // What is synchronised. A recipe's cover is a file of this phone: its path stays here.
-    private val TABLES = listOf(SyncTable("Recipe", "Recipe", setOf("CoverImagePath")))
+    private val TABLES = listOf(
+        // Same title = the same recipe, when two devices each already had it in slightly different versions.
+        SyncTable("Recipe", "Recipe", setOf("CoverImagePath"), matchColumn = "Title"),
+        // One entry per day: two devices that each wrote "today" hold the same entry (joined on the date).
+        SyncTable("JournalEntry", "JournalEntry", matchColumn = "EntryDate", matchPrefix = 10),
+    )
 
     data class State(val paired: Boolean, val hubUrl: String, val busy: Boolean, val text: String, val isError: Boolean)
 
     private val mutex = Mutex()
     private val _state = MutableStateFlow(State(false, "", false, "", false))
     private val _dataVersion = MutableStateFlow(0)
+    private val _conflicts = MutableStateFlow<List<SyncConflict>>(emptyList())
+
+    /** Versions set aside by field-level conflicts, for the settings block. */
+    val conflicts: StateFlow<List<SyncConflict>> get() = _conflicts
+
+    /** Reloads [conflicts] from the database. */
+    suspend fun refreshConflicts(context: Context) {
+        _conflicts.value = withContext(Dispatchers.IO) {
+            runCatching { SyncConflicts.list(AkashicDatabase.get(context.applicationContext).openHelper.writableDatabase) }.getOrDefault(emptyList())
+        }
+    }
+
+    /** The user has read a set-aside version: forget it. */
+    suspend fun dismissConflict(context: Context, id: Long) {
+        withContext(Dispatchers.IO) { SyncConflicts.dismiss(AkashicDatabase.get(context.applicationContext).openHelper.writableDatabase, id) }
+        refreshConflicts(context)
+    }
 
     /** For the settings block. */
     val state: StateFlow<State> get() = _state
@@ -82,6 +104,8 @@ object SyncService {
         var report: SyncReport? = null
         try {
             publish(app, busy = true)
+            // What is typed on the open page and not saved yet goes to the database first.
+            withContext(Dispatchers.Main) { com.akashicrecords.journaux.PendingEdits.flushAll() }
             report = withContext(Dispatchers.IO) {
                 val db = AkashicDatabase.get(app).openHelper.writableDatabase
                 SyncEngine(db, HubClient(url, token), TABLES).run()
@@ -100,6 +124,7 @@ object SyncService {
             publish(app, busy = false)
         }
         if (report != null && report.received > 0) _dataVersion.value++
+        if (report != null && report.setAside > 0) refreshConflicts(app)
         return report
     }
 

@@ -8,17 +8,35 @@ namespace AkashicRecords.Sync;
 
 /// <summary>One synchronised table. `LocalOnlyColumns` never leave the device (file paths, for
 /// instance, mean nothing on another machine) and are kept as they are when a row is updated.</summary>
-public sealed record SyncTable(string EntityType, string Table, params string[] LocalOnlyColumns);
+public sealed record SyncTable(string EntityType, string Table, params string[] LocalOnlyColumns)
+{
+    /// <summary>
+    /// A column that says "this is the same thing" even when two devices each created their own row
+    /// (a journal entry's day). When an entity arrives for the first time and a local row not yet
+    /// linked has the same value there (its first `MatchPrefix` characters), the two are joined and
+    /// merged field by field instead of becoming two rows for the same day.
+    /// </summary>
+    public string? MatchColumn { get; init; }
+    public int MatchPrefix { get; init; } = int.MaxValue;
+}
 
 public sealed class SyncReport
 {
-    public int Pulled, Inserted, Updated, Deleted, Adopted, Pushed, PushedDeletes, Conflicts;
+    public int Pulled, Inserted, Updated, Deleted, Adopted, Pushed, PushedDeletes;
+    /// <summary>Entities changed on both sides since the last sync (merged field by field).</summary>
+    public int Conflicts;
+    /// <summary>Fields where both sides wrote something different: this device's text was kept,
+    /// the other one was saved in `sync_conflict` for the user to read.</summary>
+    public int SetAside;
     public long Cursor;
     public bool NothingToDo => Inserted + Updated + Deleted + Adopted + Pushed + PushedDeletes == 0;
     public override string ToString() =>
         $"recu {Pulled} (ajouts {Inserted}, modifs {Updated}, suppressions {Deleted}, reconnus {Adopted}) ; " +
-        $"envoye {Pushed} (dont suppressions {PushedDeletes}) ; conflits {Conflicts} ; curseur {Cursor}";
+        $"envoye {Pushed} (dont suppressions {PushedDeletes}) ; conflits {Conflicts} (versions mises de cote {SetAside}) ; curseur {Cursor}";
 }
+
+/// <summary>A version that lost a field-level conflict, kept so nothing is lost silently.</summary>
+public sealed record SyncConflict(long Id, string EntityType, long? LocalId, string Label, string Field, string? KeptValue, string? LostValue, string LostDevice, string CreatedAt);
 
 /// <summary>Raised instead of doing something that looks like a mistake (see MaxDeleteShare).</summary>
 public sealed class SyncSafetyException(string message) : Exception(message);
@@ -32,8 +50,13 @@ public sealed class SyncSafetyException(string message) : Exception(message);
 /// cut connection loses nothing and resending is harmless (the mutation id is derived from the
 /// content).
 ///
-/// Conflict policy: last writer wins, per entity. A row changed here AND on the hub since the last
-/// sync keeps this device's version and is pushed over the hub's.
+/// Conflict policy, when a row changed here AND on the hub since the last sync:
+///  - merged field by field against the last synchronised version (kept in `sync_map.synced_values`):
+///    a field only one side touched takes that side's value;
+///  - a field both sides changed keeps this device's value, and the other one is written to
+///    `sync_conflict` so the user can read it and take it back: nothing is lost silently;
+///  - an edit beats a delete, whichever side did which.
+/// The Kotlin engine (android/.../sync/SyncEngine.kt) follows the same rules: change both together.
 /// </summary>
 public sealed class SyncEngine
 {
@@ -64,6 +87,7 @@ public sealed class SyncEngine
         db.Open();
         EnsureSchema(db);
         var tables = _tables.Select(t => TableInfo.Load(db, t)).Where(t => t is not null).Select(t => t!).ToList();
+        foreach (var t in tables) BackfillAncestors(db, t);
 
         await PullAsync(db, tables, report, ct);
         for (var round = 0; round < 4; round++)
@@ -94,7 +118,46 @@ public sealed class SyncEngine
             );
             CREATE INDEX IF NOT EXISTS sync_map_local ON sync_map(entity_type, local_id);
             CREATE TABLE IF NOT EXISTS sync_state(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS sync_conflict(
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                entity_type TEXT NOT NULL,
+                sync_id     TEXT NOT NULL,
+                local_id    INTEGER,
+                label       TEXT NOT NULL,      -- the row's title at the time, to recognise it
+                field       TEXT NOT NULL,
+                kept_value  TEXT,               -- what this device kept
+                lost_value  TEXT,               -- what the other device had written
+                lost_device TEXT NOT NULL,
+                created_at  TEXT NOT NULL
+            );
             """);
+        // The row as last synchronised (canonical JSON): the common ancestor of a field-by-field merge.
+        using var cmd = Cmd(db, null, "SELECT COUNT(*) FROM pragma_table_info('sync_map') WHERE name = 'synced_values'");
+        if ((long)cmd.ExecuteScalar()! == 0) Exec(db, null, "ALTER TABLE sync_map ADD COLUMN synced_values TEXT");
+    }
+
+    /// <summary>The versions set aside by field-level conflicts, newest first.</summary>
+    public static List<SyncConflict> Conflicts(string dbPath)
+    {
+        using var db = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath }.ToString());
+        db.Open();
+        var list = new List<SyncConflict>();
+        using var exists = Cmd(db, null, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'sync_conflict'");
+        if ((long)exists.ExecuteScalar()! == 0) return list;
+        using var cmd = Cmd(db, null, "SELECT id, entity_type, local_id, label, field, kept_value, lost_value, lost_device, created_at FROM sync_conflict ORDER BY id DESC");
+        using var r = cmd.ExecuteReader();
+        while (r.Read())
+            list.Add(new SyncConflict(r.GetInt64(0), r.GetString(1), r.IsDBNull(2) ? null : r.GetInt64(2), r.GetString(3), r.GetString(4),
+                r.IsDBNull(5) ? null : r.GetString(5), r.IsDBNull(6) ? null : r.GetString(6), r.GetString(7), r.GetString(8)));
+        return list;
+    }
+
+    /// <summary>Forgets one set-aside version (the user has read it, or taken it back by hand).</summary>
+    public static void DismissConflict(string dbPath, long id)
+    {
+        using var db = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath }.ToString());
+        db.Open();
+        Exec(db, null, "DELETE FROM sync_conflict WHERE id = $id", ("$id", id));
     }
 
     private static long GetCursor(SqliteConnection db, SqliteTransaction? tx = null)
@@ -136,75 +199,160 @@ public sealed class SyncEngine
         }
     }
 
-    private static void Apply(SqliteConnection db, SqliteTransaction tx, TableInfo t, HubLogRow row, SyncReport report)
+    private static void Apply(SqliteConnection db, SqliteTransaction tx, TableInfo t, HubLogRow row, SyncReport report) =>
+        ApplyRemote(db, tx, t, row.EntityId, row.Rev,
+            row.Deleted || row.Payload is null ? null : t.Project(row.Payload.Value), row.DeviceId, report);
+
+    /// <summary>Brings one entity's state on the hub (`payload` null = deleted there) into this database.</summary>
+    private static void ApplyRemote(SqliteConnection db, SqliteTransaction tx, TableInfo t, string syncId, long rev,
+        SortedDictionary<string, object?>? payload, string device, SyncReport report)
     {
-        var map = MapEntry.BySyncId(db, tx, t.Def.EntityType, row.EntityId);
-        var payload = row.Deleted || row.Payload is null ? null : t.Project(row.Payload.Value);
+        var type = t.Def.EntityType;
+        var map = MapEntry.BySyncId(db, tx, type, syncId);
 
         if (map is null)
         {
-            if (payload is null) { MapEntry.Upsert(db, tx, t.Def.EntityType, row.EntityId, null, row.Rev, null, true); return; }
+            if (payload is null) { MapEntry.Upsert(db, tx, type, syncId, null, rev, null, true); return; }
 
             // First contact with this entity. If an identical row is already here and not yet linked
             // (both devices started from the same data), recognise it instead of creating a twin.
             var twin = t.FindUnmappedTwin(db, tx, payload);
             if (twin is not null)
             {
-                MapEntry.Upsert(db, tx, t.Def.EntityType, row.EntityId, twin, row.Rev, t.HashOfRow(db, tx, twin.Value), false);
+                MapEntry.Upsert(db, tx, type, syncId, twin, rev, t.JsonOfRow(db, tx, twin.Value), false);
                 report.Adopted++;
                 return;
             }
-            var id = t.Insert(db, tx, payload);
-            MapEntry.Upsert(db, tx, t.Def.EntityType, row.EntityId, id, row.Rev, t.HashOfRow(db, tx, id), false);
-            report.Inserted++;
+
+            var sameThing = t.FindUnmappedByKey(db, tx, payload);
+            if (sameThing is null)
+            {
+                var id = t.Insert(db, tx, payload);
+                MapEntry.Upsert(db, tx, type, syncId, id, rev, t.JsonOfRow(db, tx, id), false);
+                report.Inserted++;
+                return;
+            }
+            // The same thing written on both devices (two entries for one day): joined into one row
+            // and merged below, with no common ancestor.
+            map = new MapEntry(syncId, sameThing, 0, null, null, false);
+            report.Adopted++;
+        }
+        else if (rev <= map.Rev)
+        {
+            return; // already known (our own push coming back, or a replay)
+        }
+
+        var local = map.LocalId is null ? null : t.ReadRow(db, tx, map.LocalId.Value);
+        var localJson = local is null ? null : TableInfo.Canonical(local);
+        var locallyChanged = !map.Deleted && (local is null || Sha(localJson!) != map.SyncedHash);
+
+        if (!locallyChanged)
+        {
+            // Only the hub moved: take its version.
+            if (payload is null)
+            {
+                if (local is not null) { t.Delete(db, tx, map.LocalId!.Value); report.Deleted++; }
+                MapEntry.Upsert(db, tx, type, syncId, null, rev, null, true);
+            }
+            else if (local is null)
+            {
+                var id = t.Insert(db, tx, payload); // deleted here earlier, alive again on the hub
+                MapEntry.Upsert(db, tx, type, syncId, id, rev, t.JsonOfRow(db, tx, id), false);
+                report.Inserted++;
+            }
+            else
+            {
+                t.Update(db, tx, map.LocalId!.Value, payload);
+                MapEntry.Upsert(db, tx, type, syncId, map.LocalId, rev, t.JsonOfRow(db, tx, map.LocalId.Value), false);
+                report.Updated++;
+            }
             return;
         }
 
-        if (row.Rev <= map.Rev) return; // already known (our own push coming back, or a replay)
-
-        var localHash = map.LocalId is null ? null : t.HashOfRow(db, tx, map.LocalId.Value);
-        var locallyChanged = !map.Deleted && (localHash is null || localHash != map.SyncedHash);
-        if (locallyChanged && SameContent(db, tx, t, map, localHash, payload))
-        {
-            // Both sides hold the same thing (typically our own push whose answer got lost):
-            // nothing to resolve, just take note of the revision.
-            MapEntry.Upsert(db, tx, t.Def.EntityType, row.EntityId, payload is null ? null : map.LocalId, row.Rev, localHash, payload is null);
-            return;
-        }
-        if (locallyChanged)
-        {
-            // Both sides changed. Last writer wins per entity: keep ours, remember the hub's
-            // revision so the next push goes on top of it.
-            // (local_id is kept even if the row is gone: that is how the scan sees a pending delete.)
-            MapEntry.Upsert(db, tx, t.Def.EntityType, row.EntityId, map.LocalId, row.Rev, map.SyncedHash, false);
-            report.Conflicts++;
-            return;
-        }
+        // ---- Both sides changed since the last sync.
 
         if (payload is null)
         {
-            if (map.LocalId is not null && localHash is not null) { t.Delete(db, tx, map.LocalId.Value); report.Deleted++; }
-            MapEntry.Upsert(db, tx, t.Def.EntityType, row.EntityId, null, row.Rev, null, true);
+            if (local is null) { MapEntry.Upsert(db, tx, type, syncId, null, rev, null, true); return; } // deleted on both sides
+            // Deleted there, edited here: the edit wins. "Never sent" at the hub's revision, so the
+            // scan pushes our row back on top of the delete.
+            MapEntry.Upsert(db, tx, type, syncId, map.LocalId, rev, null, false);
+            report.Conflicts++;
+            return;
         }
-        else if (map.Deleted || map.LocalId is null)
+        if (local is null)
         {
-            var id = t.Insert(db, tx, payload); // deleted here earlier, alive again on the hub
-            MapEntry.Upsert(db, tx, t.Def.EntityType, row.EntityId, id, row.Rev, t.HashOfRow(db, tx, id), false);
+            // Deleted here, edited there: the edit wins, the row comes back.
+            var id = t.Insert(db, tx, payload);
+            MapEntry.Upsert(db, tx, type, syncId, id, rev, t.JsonOfRow(db, tx, id), false);
             report.Inserted++;
+            report.Conflicts++;
+            return;
         }
-        else
+        if (payload.All(kv => Equals(local[kv.Key], kv.Value)))
         {
-            t.Update(db, tx, map.LocalId.Value, payload);
-            MapEntry.Upsert(db, tx, t.Def.EntityType, row.EntityId, map.LocalId, row.Rev, t.HashOfRow(db, tx, map.LocalId.Value), false);
-            report.Updated++;
+            // Both sides hold the same thing (typically our own push whose answer got lost).
+            MapEntry.Upsert(db, tx, type, syncId, map.LocalId, rev, localJson, false);
+            return;
         }
+
+        // Field by field, against the version both sides started from.
+        var ancestor = map.SyncedValues is null ? null : t.Project(Parse(map.SyncedValues));
+        var take = new SortedDictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var (field, theirs) in payload)
+        {
+            var ours = local[field];
+            if (Equals(ours, theirs)) continue;
+            object? common = null;
+            var known = ancestor is not null && ancestor.TryGetValue(field, out common);
+            if (known && Equals(ours, common)) take[field] = theirs;       // only they changed it
+            else if (known && Equals(theirs, common)) { }                  // only we changed it
+            else if (!known && field == t.Def.MatchColumn) take[field] = theirs; // joined on it: same day, another hour — not a conflict
+            else if (!known && IsEmpty(ours)) take[field] = theirs;        // no ancestor: something beats nothing
+            else if (!known && IsEmpty(theirs)) { }
+            else
+            {
+                // Both wrote something different: one stays, the other is set aside for the user.
+                // With a common ancestor, ours stays (we are the one syncing last). Without one (two
+                // devices linking rows they each already had), nobody knows which is newer: the
+                // longer text stays - the fuller version of a journal day - whichever side holds it.
+                var theirsWins = !known && theirs is string theirText && ours is string ourText && theirText.Length > ourText.Length;
+                if (theirsWins) take[field] = theirs;
+                var (kept, lost) = theirsWins ? (theirs, ours) : (ours, theirs);
+                Exec(db, tx, """
+                    INSERT INTO sync_conflict(entity_type, sync_id, local_id, label, field, kept_value, lost_value, lost_device, created_at)
+                    VALUES ($t, $s, $l, $label, $f, $kept, $lost, $dev, $at)
+                    """, ("$t", type), ("$s", syncId), ("$l", map.LocalId), ("$label", t.LabelOf(local)), ("$f", field),
+                    ("$kept", Text(kept)), ("$lost", Text(lost)), ("$dev", theirsWins ? "cet appareil" : device), ("$at", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")));
+                report.SetAside++;
+            }
+        }
+        if (take.Count > 0) { t.Update(db, tx, map.LocalId!.Value, take); report.Updated++; }
+
+        // What the hub holds, seen through this table's columns: the new common ancestor. Our row
+        // differs from it wherever we kept our own value, so the scan pushes the merged result.
+        var theirRow = new SortedDictionary<string, object?>(local, StringComparer.Ordinal);
+        foreach (var (field, theirs) in payload) theirRow[field] = theirs;
+        MapEntry.Upsert(db, tx, type, syncId, map.LocalId, rev, TableInfo.Canonical(theirRow), false);
+        report.Conflicts++;
     }
 
-    private static bool SameContent(SqliteConnection db, SqliteTransaction tx, TableInfo t, MapEntry map, string? localHash, SortedDictionary<string, object?>? payload)
+    private static bool IsEmpty(object? v) => v is null or "" or 0L or 0.0;
+
+    private static string? Text(object? v) => v is null ? null : Convert.ToString(v, CultureInfo.InvariantCulture);
+
+    /// <summary>Rows linked before `synced_values` existed only have a hash. While such a row is
+    /// untouched, its content IS the last synchronised version: write it down as the ancestor.</summary>
+    private static void BackfillAncestors(SqliteConnection db, TableInfo t)
     {
-        if (payload is null) return localHash is null;          // deleted on both sides
-        if (localHash is null || map.LocalId is null) return false;
-        return t.RowMatches(db, tx, map.LocalId.Value, payload);
+        using var tx = db.BeginTransaction();
+        foreach (var map in MapEntry.All(db, tx, t.Def.EntityType).Where(m => m is { SyncedValues: null, SyncedHash: not null, LocalId: not null, Deleted: false }))
+        {
+            var json = t.JsonOfRow(db, tx, map.LocalId!.Value);
+            if (json is not null && Sha(json) == map.SyncedHash)
+                MapEntry.Upsert(db, tx, t.Def.EntityType, map.SyncId, map.LocalId, map.Rev, json, false);
+        }
+        tx.Commit();
     }
 
     // ------------------------------------------------------------------ scan & push
@@ -269,17 +417,21 @@ public sealed class SyncEngine
                 var type = p.Table.Def.EntityType;
                 if (res.Status is "accepted" or "duplicate")
                 {
-                    MapEntry.Upsert(db, tx, type, p.SyncId, p.IsDelete ? null : p.LocalId, res.Rev, p.Hash, p.IsDelete);
+                    MapEntry.Upsert(db, tx, type, p.SyncId, p.IsDelete ? null : p.LocalId, res.Rev, p.PayloadJson, p.IsDelete);
                     report.Pushed++;
                     if (p.IsDelete) report.PushedDeletes++;
                 }
                 else
                 {
-                    // The hub moved since we last looked. Keep our version, take the hub's revision
-                    // as the new base: the next round sends it again on top (last writer wins).
+                    // The hub moved since we last looked: merge with what it holds now (same rules
+                    // as a pull); the next round sends the result on top of its revision.
                     var map = MapEntry.BySyncId(db, tx, type, p.SyncId)!;
-                    MapEntry.Upsert(db, tx, type, p.SyncId, map.LocalId, res.Rev, map.SyncedHash, false);
-                    report.Conflicts++;
+                    if (res.Current is null || res.Current.Rev <= map.Rev)
+                        MapEntry.Upsert(db, tx, type, p.SyncId, map.LocalId, res.Rev, null, false); // unknown to this hub: send as it is
+                    else
+                        ApplyRemote(db, tx, p.Table, p.SyncId, res.Current.Rev,
+                            res.Current.Deleted || res.Current.Payload is null ? null : p.Table.Project(res.Current.Payload.Value),
+                            res.Current.LastDevice, report);
                     conflicts++;
                 }
             }
@@ -290,34 +442,39 @@ public sealed class SyncEngine
 
     // ------------------------------------------------------------------ sync_map rows
 
-    private sealed record MapEntry(string SyncId, long? LocalId, long Rev, string? SyncedHash, bool Deleted)
+    private sealed record MapEntry(string SyncId, long? LocalId, long Rev, string? SyncedHash, string? SyncedValues, bool Deleted)
     {
+        private const string Columns = "sync_id, local_id, rev, synced_hash, synced_values, deleted";
+
         public static MapEntry? BySyncId(SqliteConnection db, SqliteTransaction tx, string type, string syncId)
         {
-            using var cmd = Cmd(db, tx, "SELECT sync_id, local_id, rev, synced_hash, deleted FROM sync_map WHERE entity_type = $t AND sync_id = $s",
-                ("$t", type), ("$s", syncId));
+            using var cmd = Cmd(db, tx, $"SELECT {Columns} FROM sync_map WHERE entity_type = $t AND sync_id = $s", ("$t", type), ("$s", syncId));
             using var r = cmd.ExecuteReader();
             return r.Read() ? Read(r) : null;
         }
 
         public static List<MapEntry> All(SqliteConnection db, SqliteTransaction tx, string type)
         {
-            using var cmd = Cmd(db, tx, "SELECT sync_id, local_id, rev, synced_hash, deleted FROM sync_map WHERE entity_type = $t", ("$t", type));
+            using var cmd = Cmd(db, tx, $"SELECT {Columns} FROM sync_map WHERE entity_type = $t", ("$t", type));
             using var r = cmd.ExecuteReader();
             var list = new List<MapEntry>();
             while (r.Read()) list.Add(Read(r));
             return list;
         }
 
-        public static void Upsert(SqliteConnection db, SqliteTransaction tx, string type, string syncId, long? localId, long rev, string? hash, bool deleted) =>
+        /// <summary>`values`: the row as synchronised (canonical JSON), or null for "never sent" /
+        /// deleted. The hash the scan compares with is derived from it.</summary>
+        public static void Upsert(SqliteConnection db, SqliteTransaction tx, string type, string syncId, long? localId, long rev, string? values, bool deleted) =>
             Exec(db, tx, """
-                INSERT INTO sync_map(entity_type, sync_id, local_id, rev, synced_hash, deleted) VALUES ($t, $s, $l, $r, $h, $d)
+                INSERT INTO sync_map(entity_type, sync_id, local_id, rev, synced_hash, synced_values, deleted) VALUES ($t, $s, $l, $r, $h, $v, $d)
                 ON CONFLICT(entity_type, sync_id) DO UPDATE SET
-                    local_id = excluded.local_id, rev = excluded.rev, synced_hash = excluded.synced_hash, deleted = excluded.deleted
-                """, ("$t", type), ("$s", syncId), ("$l", localId), ("$r", rev), ("$h", hash), ("$d", deleted ? 1 : 0));
+                    local_id = excluded.local_id, rev = excluded.rev, synced_hash = excluded.synced_hash,
+                    synced_values = excluded.synced_values, deleted = excluded.deleted
+                """, ("$t", type), ("$s", syncId), ("$l", localId), ("$r", rev), ("$h", values is null ? null : Sha(values)), ("$v", values), ("$d", deleted ? 1 : 0));
 
         private static MapEntry Read(SqliteDataReader r) => new(
-            r.GetString(0), r.IsDBNull(1) ? null : r.GetInt64(1), r.GetInt64(2), r.IsDBNull(3) ? null : r.GetString(3), r.GetInt64(4) != 0);
+            r.GetString(0), r.IsDBNull(1) ? null : r.GetInt64(1), r.GetInt64(2), r.IsDBNull(3) ? null : r.GetString(3),
+            r.IsDBNull(4) ? null : r.GetString(4), r.GetInt64(5) != 0);
     }
 
     // ------------------------------------------------------------------ one local table
@@ -360,11 +517,39 @@ public sealed class SyncEngine
             while (r.Read()) yield return (r.GetInt64(0), ReadValues(r));
         }
 
-        public string? HashOfRow(SqliteConnection db, SqliteTransaction tx, long id)
+        public SortedDictionary<string, object?>? ReadRow(SqliteConnection db, SqliteTransaction tx, long id)
         {
             using var cmd = Cmd(db, tx, $"SELECT \"{_pk}\", {ColumnList} FROM \"{Def.Table}\" WHERE \"{_pk}\" = $id", ("$id", id));
             using var r = cmd.ExecuteReader();
-            return r.Read() ? Sha(Canonical(ReadValues(r))) : null;
+            return r.Read() ? ReadValues(r) : null;
+        }
+
+        /// <summary>The row's content as canonical JSON, or null when the row is gone.</summary>
+        public string? JsonOfRow(SqliteConnection db, SqliteTransaction tx, long id) =>
+            ReadRow(db, tx, id) is { } row ? Canonical(row) : null;
+
+        /// <summary>What to call the row when showing a conflict to the user.</summary>
+        public string LabelOf(SortedDictionary<string, object?> row) =>
+            new[] { "Title", "Name", "EntryDate", "Date" }
+                .Select(c => row.TryGetValue(c, out var v) ? Convert.ToString(v, CultureInfo.InvariantCulture) : null)
+                .FirstOrDefault(s => !string.IsNullOrWhiteSpace(s)) ?? Def.EntityType;
+
+        /// <summary>A local row not yet linked that is "the same thing" by the table's match column
+        /// (see SyncTable.MatchColumn). Null when the table has none or nothing matches.</summary>
+        public long? FindUnmappedByKey(SqliteConnection db, SqliteTransaction tx, SortedDictionary<string, object?> payload)
+        {
+            var column = Def.MatchColumn;
+            if (column is null || !payload.TryGetValue(column, out var value) || value is not string wanted || wanted.Length == 0) return null;
+            if (_columns.All(c => c.Name != column)) return null;
+            static string Key(string s, int n) => s.Length > n ? s[..n] : s;
+            using var cmd = Cmd(db, tx,
+                $"SELECT \"{_pk}\", \"{column}\" FROM \"{Def.Table}\" " +
+                $"WHERE \"{_pk}\" NOT IN (SELECT local_id FROM sync_map WHERE entity_type = $t AND local_id IS NOT NULL) ORDER BY \"{_pk}\"",
+                ("$t", Def.EntityType));
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                if (!r.IsDBNull(1) && Key(r.GetString(1), Def.MatchPrefix) == Key(wanted, Def.MatchPrefix)) return r.GetInt64(0);
+            return null;
         }
 
         private SortedDictionary<string, object?> ReadValues(SqliteDataReader r)

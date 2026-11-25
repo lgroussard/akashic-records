@@ -33,7 +33,7 @@ public static class Rehearsal
             var before = Fingerprint(pcDb);
             Console.WriteLine($"Recettes dans la base : {before.Count}");
 
-            var options = new HubOptions { DataDir = Path.Combine(dir, "hub"), Url = "http://127.0.0.1:0", EntityTypes = new() { "Recipe" } };
+            var options = new HubOptions { DataDir = Path.Combine(dir, "hub"), Url = "http://127.0.0.1:0", EntityTypes = new() { "Recipe", "JournalEntry" } };
             app = HubApp.Build(new[] { "--Logging:LogLevel:Default=Warning" }, options);
             await app.StartAsync();
             var url = app.Urls.First();

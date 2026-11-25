@@ -47,6 +47,46 @@ public partial class SettingsView : Window
         SyncPairButton.Content = paired ? "Appairer à nouveau" : "Appairer";
         SyncNowButton.Visibility = paired ? Visibility.Visible : Visibility.Collapsed;
         SyncUnpairButton.Visibility = paired ? Visibility.Visible : Visibility.Collapsed;
+        RefreshSetAside();
+    }
+
+    // One card per version that lost a conflict: which item and field, the text that was not kept (selectable,
+    // to copy back by hand), and a button to forget it once read.
+    private void RefreshSetAside()
+    {
+        SyncAsidePanel.Children.Clear();
+        foreach (var c in Sync.SyncService.Instance.SetAside().Take(20))
+        {
+            var kind = c.EntityType switch { "Recipe" => "Recette", "JournalEntry" => "Journal", _ => c.EntityType };
+            var field = c.Field switch
+            {
+                "Text" => "texte", "Title" => "titre", "Notes" => "notes", "Ingredients" => "ingrédients",
+                "Instructions" => "étapes", "Tags" => "étiquettes", "Category" => "catégorie", "Servings" => "portions",
+                _ => c.Field,
+            };
+            var label = c.Label.Length > 10 && c.Label[4] == '-' && c.Label[7] == '-' ? c.Label[..10] : c.Label; // a journal day
+            var card = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
+            card.Children.Add(new TextBlock
+            {
+                Text = $"{kind} « {label} », {field} : version d'un autre appareil non retenue ({c.CreatedAt})",
+                Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xFF, 0xB0, 0x7F)),
+                FontSize = 12, TextWrapping = TextWrapping.Wrap,
+            });
+            card.Children.Add(new TextBox
+            {
+                Text = c.LostValue ?? string.Empty, IsReadOnly = true, TextWrapping = TextWrapping.Wrap, AcceptsReturn = true,
+                MaxHeight = 110, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 4, 0, 4),
+                Padding = new Thickness(8, 6, 8, 6), FontSize = 12, BorderThickness = new Thickness(1),
+                Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x2A, 0x2A, 0x45)),
+                Foreground = System.Windows.Media.Brushes.White,
+                BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(0x55, 0x3B, 0x82, 0xF6)),
+            });
+            var dismiss = new Button { Content = "Lu, effacer", Style = (Style)FindResource("MiniButtonStyle"), HorizontalAlignment = HorizontalAlignment.Left };
+            var id = c.Id;
+            dismiss.Click += (_, _) => Sync.SyncService.Instance.Dismiss(id);
+            card.Children.Add(dismiss);
+            SyncAsidePanel.Children.Add(card);
+        }
     }
 
     private async void SyncPairButton_OnClick(object sender, RoutedEventArgs e)

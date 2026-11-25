@@ -59,7 +59,10 @@ internal fun PersonalJournal(db: AkashicDatabase) {
     // Re-read on every date change so a page reopened after editing never shows a stale copy
     // (the previous page flushes its last edit before leaving).
     var loadedFor by remember { mutableStateOf<LocalDate?>(null) }
-    LaunchedEffect(date) {
+    // Also after a sync that received something: the page was saved just before it ran (PendingEdits), so the
+    // row holds the merged result and the page restarts from it.
+    val synced by com.akashicrecords.sync.SyncService.dataVersion.collectAsState()
+    LaunchedEffect(date, synced) {
         awaitPendingWrites()
         reload()
         loadedFor = date
@@ -92,7 +95,7 @@ internal fun PersonalJournal(db: AkashicDatabase) {
             MonthCalendar(month, date, byDate.keys, onMonth = { month = it }) { go(it); showCalendar = false }
         }
 
-        if (loadedFor == date) key(date) {
+        if (loadedFor == date) key(date, synced) {
             EntryPage(db, date, byDate[date], onChanged = { scope.launch { reload() } }, context = context)
         }
     }
