@@ -117,6 +117,9 @@ public sealed class SyncEngine
     public double MaxDeleteShare { get; set; } = 0.90;
     public int MinDeletesForBrake { get; set; } = 5;
 
+    /// <summary>Receive only: nothing is sent to the hub (for checks on a copy of a real database).</summary>
+    public bool PullOnly { get; set; }
+
     public SyncEngine(string dbPath, HubClient hub, IReadOnlyList<SyncTable> tables)
     {
         _connectionString = new SqliteConnectionStringBuilder { DataSource = dbPath }.ToString();
@@ -135,7 +138,7 @@ public sealed class SyncEngine
         foreach (var t in tables) BackfillAncestors(db, t);
 
         await PullAsync(db, tables, report, ct);
-        for (var round = 0; round < 4; round++)
+        for (var round = 0; round < 4 && !PullOnly; round++)
         {
             var pending = tables.SelectMany(t => Scan(db, t)).ToList();
             if (pending.Count == 0) break;
@@ -187,6 +190,11 @@ public sealed class SyncEngine
         // The row as last synchronised (canonical JSON): the common ancestor of a field-by-field merge.
         using var cmd = Cmd(db, null, "SELECT COUNT(*) FROM pragma_table_info('sync_map') WHERE name = 'synced_values'");
         if ((long)cmd.ExecuteScalar()! == 0) Exec(db, null, "ALTER TABLE sync_map ADD COLUMN synced_values TEXT");
+        // An alias: a second hub entity for a row already linked here (two devices each created "the same" row
+        // before they knew of each other, e.g. the same music file). Changes to it are applied to that row;
+        // this device only ever sends under the row's own (non-alias) entity.
+        using var hasAlias = Cmd(db, null, "SELECT COUNT(*) FROM pragma_table_info('sync_map') WHERE name = 'alias'");
+        if ((long)hasAlias.ExecuteScalar()! == 0) Exec(db, null, "ALTER TABLE sync_map ADD COLUMN alias INTEGER NOT NULL DEFAULT 0");
     }
 
     /// <summary>
@@ -326,7 +334,7 @@ public sealed class SyncEngine
             if (value is not long id || id == 0) continue;
             var target = t.Def.TargetOf(column, values);
             if (target is null) continue;
-            using var cmd = Cmd(db, tx, "SELECT sync_id FROM sync_map WHERE entity_type = $t AND local_id = $l AND deleted = 0", ("$t", target), ("$l", id));
+            using var cmd = Cmd(db, tx, "SELECT sync_id FROM sync_map WHERE entity_type = $t AND local_id = $l AND deleted = 0 AND alias = 0", ("$t", target), ("$l", id));
             // A link to something that does not exist here says the same as no link: null, or 0 where
             // the column cannot be empty (what the receiving side would store for null anyway).
             object? syncId = cmd.ExecuteScalar() as string;
@@ -374,17 +382,29 @@ public sealed class SyncEngine
             }
 
             var sameThing = t.FindUnmappedByKey(db, tx, payload);
-            if (sameThing is null)
+            if (sameThing is null && t.FindByKey(db, tx, payload, mapped: true) is { } linked)
+            {
+                // Already linked here under another entity: this one becomes an alias of that row, merged
+                // below with no common ancestor (instead of a twin row the table may not even accept).
+                MapEntry.Upsert(db, tx, type, syncId, linked, 0, null, false);
+                Exec(db, tx, "UPDATE sync_map SET alias = 1 WHERE entity_type = $t AND sync_id = $s", ("$t", type), ("$s", syncId));
+                map = new MapEntry(syncId, linked, 0, null, null, false);
+                report.Adopted++;
+            }
+            else if (sameThing is null)
             {
                 var id = t.Insert(db, tx, payload);
                 MapEntry.Upsert(db, tx, type, syncId, id, rev, t.JsonOfRow(db, tx, id), false);
                 report.Inserted++;
                 return;
             }
-            // The same thing written on both devices (two entries for one day): joined into one row
-            // and merged below, with no common ancestor.
-            map = new MapEntry(syncId, sameThing, 0, null, null, false);
-            report.Adopted++;
+            else
+            {
+                // The same thing written on both devices (two entries for one day): joined into one row
+                // and merged below, with no common ancestor.
+                map = new MapEntry(syncId, sameThing, 0, null, null, false);
+                report.Adopted++;
+            }
         }
         else if (rev <= map.Rev)
         {
@@ -611,7 +631,7 @@ public sealed class SyncEngine
 
         public static List<MapEntry> All(SqliteConnection db, SqliteTransaction tx, string type)
         {
-            using var cmd = Cmd(db, tx, $"SELECT {Columns} FROM sync_map WHERE entity_type = $t", ("$t", type));
+            using var cmd = Cmd(db, tx, $"SELECT {Columns} FROM sync_map WHERE entity_type = $t AND alias = 0", ("$t", type));
             using var r = cmd.ExecuteReader();
             var list = new List<MapEntry>();
             while (r.Read()) list.Add(Read(r));
@@ -701,7 +721,11 @@ public sealed class SyncEngine
 
         /// <summary>A local row not yet linked that is "the same thing" by the table's match column
         /// (see SyncTable.MatchColumn). Null when the table has none or nothing matches.</summary>
-        public long? FindUnmappedByKey(SqliteConnection db, SqliteTransaction tx, SortedDictionary<string, object?> payload)
+        public long? FindUnmappedByKey(SqliteConnection db, SqliteTransaction tx, SortedDictionary<string, object?> payload) =>
+            FindByKey(db, tx, payload, mapped: false);
+
+        /// <summary>Same lookup among the rows already linked (`mapped`: to a live, non-alias entity) or not linked.</summary>
+        public long? FindByKey(SqliteConnection db, SqliteTransaction tx, SortedDictionary<string, object?> payload, bool mapped)
         {
             var keys = Def.AllMatchColumns;
             if (keys.Count == 0 || keys.Any(k => _columns.All(c => c.Name != k))) return null;
@@ -714,7 +738,10 @@ public sealed class SyncEngine
             var (filter, args) = KeyFilter(payload)!.Value;
             using var cmd = Cmd(db, tx,
                 $"SELECT \"{_pk}\", {ColumnList} FROM \"{Def.Table}\" " +
-                $"WHERE \"{_pk}\" NOT IN (SELECT local_id FROM sync_map WHERE entity_type = $t AND local_id IS NOT NULL){filter} ORDER BY \"{_pk}\"",
+                (mapped
+                    ? $"WHERE \"{_pk}\" IN (SELECT local_id FROM sync_map WHERE entity_type = $t AND local_id IS NOT NULL AND deleted = 0 AND alias = 0)"
+                    : $"WHERE \"{_pk}\" NOT IN (SELECT local_id FROM sync_map WHERE entity_type = $t AND local_id IS NOT NULL)") +
+                $"{filter} ORDER BY \"{_pk}\"",
                 [("$t", Def.EntityType), .. args]);
             using var r = cmd.ExecuteReader();
             while (r.Read())

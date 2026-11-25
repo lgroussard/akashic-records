@@ -109,7 +109,9 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
     }
 
     // Everything that can be played: the files on this phone, and the rest of the catalogue from the hub.
-    val everything = tracks.filter { library.uriFor(it) != null }
+    // Without network only what is kept here; the uri check below also reads it.
+    val online = rememberOnline()
+    val everything = tracks.filter { library.isLocal(it) || (online && library.uriFor(it) != null) }
     val playable = if (offlineOnly) everything.filter { library.isLocal(it) } else everything
     val filtered = playable
         .filter { selectedMood == null || it.Id in moodTrackIds }

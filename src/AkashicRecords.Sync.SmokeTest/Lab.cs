@@ -185,6 +185,9 @@ public sealed class Device : IDisposable
         if (_hasServings && servings != 0) Exec("UPDATE Recipe SET Servings = $s WHERE Title = $t", ("$s", servings), ("$t", title));
     }
 
+    /// <summary>As if this device had read the hub up to [seq] while not yet synchronising this table.</summary>
+    public void SkipTo(long seq) => Exec("INSERT INTO sync_state(key, value) VALUES ('cursor', $v) ON CONFLICT(key) DO UPDATE SET value = excluded.value", ("$v", seq.ToString()));
+
     public void Edit(string title, string notes) => Exec("UPDATE Recipe SET Notes = $n WHERE Title = $t", ("$n", notes), ("$t", title));
 
     /// <summary>Sets one column of a recipe (column name comes from the test itself).</summary>
@@ -201,6 +204,7 @@ public sealed class Device : IDisposable
     public List<SyncConflict> SetAside() => SyncEngine.Conflicts(DbPath);
 
     /// <summary>Puts the sync bookkeeping back to what the first version of the engine wrote (no ancestor kept).</summary>
+    public void ForgetLinks() => Exec("DELETE FROM sync_map");
     public void ForgetAncestors() => Exec("UPDATE sync_map SET synced_values = NULL");
     public void SetCover(string title, string path) => Exec("UPDATE Recipe SET CoverImagePath = $p WHERE Title = $t", ("$p", path), ("$t", title));
     public void DeleteByTitle(string title) => Exec("DELETE FROM Recipe WHERE Title = $t", ("$t", title));

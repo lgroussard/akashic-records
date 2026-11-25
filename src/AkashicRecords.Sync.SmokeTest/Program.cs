@@ -30,6 +30,13 @@ if (args.Length is 4 or 5 && args[0] == "device")
     Console.WriteLine($"{rows} ; {files}");
     return 0;
 }
+//   pull <db> <hubUrl> <token>     receive only (sends nothing): what a sync would bring into that database
+if (args.Length == 4 && args[0] == "pull")
+{
+    using var hub = new HubClient(args[2], args[3]);
+    Console.WriteLine(await new SyncEngine(args[1], hub, AkashicCatalog.AllTables) { PullOnly = true }.RunAsync());
+    return 0;
+}
 //   dump <db>                      the synchronised content as it travels: rows per table, and one fingerprint
 if (args.Length == 2 && args[0] == "dump")
 {
@@ -398,6 +405,30 @@ await Scenario("10. Mise a niveau depuis la premiere version du moteur", async l
     Check(pc.Field("Houmous", "Notes") == "servir tiede" && phone.Field("Houmous", "Ingredients") == "pois chiches, tahin, citron vert"
           && phone.SetAside().Count == 0 && pc.Dump() == phone.Dump(),
         "les recettes deja synchronisees profitent de la fusion champ par champ");
+});
+
+await Scenario("14. Un appareil qui avait saute une table renvoie les memes lignes sous d'autres identifiants", async lab =>
+{
+    var pc = await lab.Device("pc");
+    var phone = await lab.Device("phone");
+    pc.Add("Houmous"); pc.Add("Taboule");
+    await pc.Sync();
+    // The phone holds the same rows, but its cursor went past the PC's ones while it ignored the table.
+    phone.Add("Houmous"); phone.Add("Taboule");
+    await phone.Sync(); // (the twins are recognised: undo that by hand, as the old app version did)
+    phone.ForgetLinks();
+    phone.SkipTo(lab.HubRows());
+    var dup = await phone.Sync();
+    Check(dup.Pushed == 2 && lab.HubRows() == 4, $"le telephone renvoie ses 2 recettes comme nouvelles : le hub a des doublons [{dup}]");
+    var r = await pc.Sync();
+    Check(pc.Count() == 2 && r.Adopted == 2, $"le PC les reconnait au lieu de les ajouter ou de bloquer [{r}]");
+    pc.Edit("Houmous", "plus de cumin"); await pc.Sync(); await phone.Sync();
+    Check(phone.Field("Houmous", "Notes") == "plus de cumin", "une modif sur le PC arrive sur le telephone");
+    phone.Edit("Taboule", "persil plat"); await phone.Sync(); await pc.Sync();
+    Check(pc.Field("Taboule", "Notes") == "persil plat" && pc.Count() == 2 && phone.Count() == 2, "une modif sur le telephone arrive sur le PC, toujours 2 recettes de chaque cote");
+    phone.DeleteByTitle("Taboule"); await phone.Sync(); await pc.Sync(); await phone.Sync();
+    Check(pc.Get("Taboule") is null && phone.Get("Taboule") is null, "une suppression sur le telephone supprime aussi sur le PC");
+    Check(pc.Dump() == phone.Dump() && (await pc.Sync()).NothingToDo && (await phone.Sync()).NothingToDo, "contenus identiques, plus rien a echanger");
 });
 
 await Scenario("7. Usage melange (30 tirages aleatoires)", async lab =>

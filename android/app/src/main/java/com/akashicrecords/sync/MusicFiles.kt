@@ -23,9 +23,9 @@ class LocalMusic(val path: String, val size: Long, val modified: Long, val uri: 
 class MusicFiles(private val context: Context, folder: String) {
     private val root = folder.trim().trim('/')
 
-    /** Music is big: it only moves on a network that is not metered (Wi-Fi), never on mobile data. */
+    /** Music moves on any network, mobile data included (the user's choice, 2026-11-25). */
     val allowedNow: Boolean
-        get() = !(context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).isActiveNetworkMetered
+        get() = true
 
     fun local(): List<LocalMusic> {
         if (root.isEmpty()) return emptyList()

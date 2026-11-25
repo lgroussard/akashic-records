@@ -131,6 +131,9 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
         // The row as last synchronised (canonical JSON): the common ancestor of a field-by-field merge.
         val hasValues = db.query("SELECT COUNT(*) FROM pragma_table_info('sync_map') WHERE name = 'synced_values'").use { c -> c.moveToFirst() && c.getLong(0) > 0 }
         if (!hasValues) db.execSQL("ALTER TABLE sync_map ADD COLUMN synced_values TEXT")
+        // An alias: a second hub entity for a row already linked here (see the desktop engine).
+        val hasAlias = db.query("SELECT COUNT(*) FROM pragma_table_info('sync_map') WHERE name = 'alias'").use { c -> c.moveToFirst() && c.getLong(0) > 0 }
+        if (!hasAlias) db.execSQL("ALTER TABLE sync_map ADD COLUMN alias INTEGER NOT NULL DEFAULT 0")
     }
 
     private fun cursor(): Long =
@@ -233,7 +236,7 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
         for ((column, value) in values) {
             if (value !is Long || value == 0L) continue
             val target = t.def.targetOf(column, values) ?: continue
-            wire[column] = db.query("SELECT sync_id FROM sync_map WHERE entity_type = ? AND local_id = ? AND deleted = 0", arrayOf<Any?>(target, value))
+            wire[column] = db.query("SELECT sync_id FROM sync_map WHERE entity_type = ? AND local_id = ? AND deleted = 0 AND alias = 0", arrayOf<Any?>(target, value))
                 .use { c -> if (c.moveToFirst()) c.getString(0) else null }
                 // A link to something that does not exist here says the same as no link: null, or 0 where the
                 // column cannot be empty (what the receiving side would store for null anyway).
@@ -277,16 +280,25 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
                 return
             }
             val sameThing = t.findUnmappedByKey(db, payload)
-            if (sameThing == null) {
+            val linked = if (sameThing == null) t.findByKey(db, payload, mapped = true) else null
+            if (linked != null) {
+                // Already linked here under another entity: this one becomes an alias of that row, merged below
+                // with no common ancestor (instead of a twin row the table may not even accept).
+                upsertMap(type, syncId, linked, 0, null, false)
+                db.execSQL("UPDATE sync_map SET alias = 1 WHERE entity_type = ? AND sync_id = ?", arrayOf<Any?>(type, syncId))
+                map = MapEntry(syncId, linked, 0, null, null, false)
+                report.adopted++
+            } else if (sameThing == null) {
                 val id = t.insert(db, payload)
                 upsertMap(type, syncId, id, rev, t.jsonOfRow(db, id), false)
                 report.inserted++
                 return
+            } else {
+                // The same thing written on both devices (two entries for one day): joined into one row and
+                // merged below, with no common ancestor.
+                map = MapEntry(syncId, sameThing, 0, null, null, false)
+                report.adopted++
             }
-            // The same thing written on both devices (two entries for one day): joined into one row and
-            // merged below, with no common ancestor.
-            map = MapEntry(syncId, sameThing, 0, null, null, false)
-            report.adopted++
         } else if (rev <= map.rev) {
             return // already known (our own push coming back, or a replay)
         }
@@ -488,7 +500,7 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
             .use { c -> if (c.moveToFirst()) readMap(c) else null }
 
     private fun allMaps(type: String): List<MapEntry> =
-        db.query("SELECT $MAP_COLUMNS FROM sync_map WHERE entity_type = ?", arrayOf<Any?>(type))
+        db.query("SELECT $MAP_COLUMNS FROM sync_map WHERE entity_type = ? AND alias = 0", arrayOf<Any?>(type))
             .use { c -> buildList { while (c.moveToNext()) add(readMap(c)) } }
 
     /** [values]: the row as synchronised (canonical JSON), or null for "never sent" / deleted. The hash the
@@ -554,7 +566,10 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
 
         /** A local row not yet linked that is "the same thing" by the table's match column (see
          * [SyncTable.matchColumn]). Null when the table has none or nothing matches. */
-        fun findUnmappedByKey(db: SupportSQLiteDatabase, payload: Map<String, Any?>): Long? {
+        fun findUnmappedByKey(db: SupportSQLiteDatabase, payload: Map<String, Any?>): Long? = findByKey(db, payload, mapped = false)
+
+        /** Same lookup among the rows already linked ([mapped]: to a live, non-alias entity) or not linked. */
+        fun findByKey(db: SupportSQLiteDatabase, payload: Map<String, Any?>, mapped: Boolean): Long? {
             val keys = def.allMatchColumns
             if (keys.isEmpty() || keys.any { k -> columns.none { it.name == k } }) return null
             // Every key column must be carried and say something: an empty key identifies nothing.
@@ -565,8 +580,10 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
             var bestScore = -1
             val (filter, args) = keyFilter(payload)!!
             db.query(
-                "SELECT `$pk`, $columnList FROM `${def.table}` WHERE `$pk` NOT IN " +
-                    "(SELECT local_id FROM sync_map WHERE entity_type = ? AND local_id IS NOT NULL)$filter ORDER BY `$pk`",
+                "SELECT `$pk`, $columnList FROM `${def.table}` WHERE `$pk` " +
+                    (if (mapped) "IN (SELECT local_id FROM sync_map WHERE entity_type = ? AND local_id IS NOT NULL AND deleted = 0 AND alias = 0)"
+                    else "NOT IN (SELECT local_id FROM sync_map WHERE entity_type = ? AND local_id IS NOT NULL)") +
+                    "$filter ORDER BY `$pk`",
                 arrayOf<Any?>(def.entityType, *args.toTypedArray()),
             ).use { c ->
                 while (c.moveToNext()) {
