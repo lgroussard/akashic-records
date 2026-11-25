@@ -1,0 +1,23 @@
+[Unit]
+Description=Akashic sync hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=akashic
+Group=akashic
+WorkingDirectory=/opt/akashic-hub
+ExecStart=/opt/akashic-hub/AkashicRecords.Hub
+Restart=on-failure
+RestartSec=5
+
+# The hub only needs its program folder (read) and its data folder (write).
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/akashic-hub
+
+[Install]
+WantedBy=multi-user.target

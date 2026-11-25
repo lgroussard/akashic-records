@@ -171,6 +171,14 @@ public partial class MainWindow : Window
         Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
         Microsoft.Win32.SystemEvents.TimeChanged += OnSystemTimeChanged;
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+
+        // Sync with the hub, when this computer is paired (settings pane). Rows that arrive from
+        // another device are shown at once if their section is the one on screen.
+        Sync.SyncService.Instance.DataChanged += _ =>
+        {
+            if (SectionContent.Content is JournauxView journaux) journaux.OnSyncedDataChanged();
+        };
+        if (!App.Headless) Sync.SyncService.Instance.Start();
     }
 
     private void OnPowerModeChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs e)

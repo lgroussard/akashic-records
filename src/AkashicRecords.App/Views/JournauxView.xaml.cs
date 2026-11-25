@@ -1703,6 +1703,29 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
 
     private void RecipeSearchInput_OnTextChanged(object sender, TextChangedEventArgs e) => RefreshRecipesList();
 
+    // A sync just wrote recipes coming from another device (see SyncService). Reload the list and the
+    // open page from the database. While a recipe field has the keyboard, nothing is touched: what is
+    // being typed must not be replaced under the cursor, and leaving the field saves and reloads anyway.
+    public void OnSyncedDataChanged()
+    {
+        if (_activeTab != "Recipes") return;
+        var typing = new Control[]
+        {
+            RecipeTitleInput, RecipeCategoryInput, RecipeIngredientsInput,
+            RecipeInstructionsInput, RecipeNotesInput, RecipeTagsInput, RecipeServingsInput
+        }.Any(input => input.IsKeyboardFocusWithin);
+        if (typing) return;
+
+        var openId = _selectedRecipe?.Id;
+        _selectedRecipe = null; // so the refresh below reopens the page with the fresh content
+        RefreshRecipesList();
+        if (openId is not null && RecipeTitleList.Items.OfType<Recipe>().FirstOrDefault(r => r.Id == openId) is { } same)
+        {
+            RecipeTitleList.SelectedItem = same;
+            OpenRecipePage(same);
+        }
+    }
+
     private void RecipeTitleList_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (RecipeTitleList.SelectedItem is Recipe recipe) OpenRecipePage(recipe);

@@ -35,7 +35,23 @@ public partial class App : Application
         if (idx >= 0 && idx + 2 <= e.Args.Length - 1)
         {
             // Skip base.OnStartup so StartupUri (the normal window) is never navigated to.
+            Headless = true;
             RunScreenshot(e.Args[idx + 1], e.Args[idx + 2]);
+            return;
+        }
+
+        // Headless sync: `--sync-once <reportPath>` runs one synchronisation with the hub this computer
+        // is paired with, writes what happened to the given file and exits. For scripts and checks;
+        // like the captures above it runs beside the normal app.
+        var syncIdx = Array.IndexOf(e.Args, "--sync-once");
+        if (syncIdx >= 0 && syncIdx + 1 <= e.Args.Length - 1)
+        {
+            var sync = Sync.SyncService.Instance;
+            // Off the dispatcher thread: nothing here pumps messages for an awaited continuation.
+            var report = Task.Run(() => sync.RunAsync()).GetAwaiter().GetResult();
+            File.WriteAllText(e.Args[syncIdx + 1],
+                !sync.Settings.IsPaired ? "non appaire" : sync.LastError is not null ? "ERREUR: " + sync.LastError : "OK: " + report);
+            Shutdown(sync.LastError is null && sync.Settings.IsPaired ? 0 : 1);
             return;
         }
 
@@ -52,6 +68,9 @@ public partial class App : Application
 
         base.OnStartup(e);
     }
+
+    /// <summary>True for a capture run: background work that talks to the outside (the sync) stays off.</summary>
+    public static bool Headless { get; private set; }
 
     // Held for the life of the process (a collected Mutex would release the name).
     private static Mutex? _singleInstance;
@@ -70,7 +89,11 @@ public partial class App : Application
             settings.WindowStartupLocation = WindowStartupLocation.Manual;
             settings.Left = 0;
             settings.Top = 0;
+            // Sized to its card, or the capture frames the top-left of a much larger empty window.
+            settings.SizeToContent = SizeToContent.WidthAndHeight;
             settings.Show();
+            // `Settings:Sync` scrolls to the synchronisation block, which is below the fold.
+            if (string.Equals(subTab, "Sync", StringComparison.OrdinalIgnoreCase)) settings.ScrollToSyncForScreenshot();
             var settingsSettle = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(900) };
             settingsSettle.Tick += (_, _) =>
             {
