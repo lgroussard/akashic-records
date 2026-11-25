@@ -97,6 +97,8 @@ object Catalog {
                 .map { it.getString("*") }
                 .filter { '/' !in it && ',' !in it } // whole works; "Lettre…, dans Le Figaro" are articles
                 .distinct()
+                .take(100)
+                .let(::wikisourceBooks)
                 .map { book(it, name) }
         }
         val search = if (q.mode == SearchMode.TITLE) "intitle:${q.text}" else q.text
@@ -107,7 +109,68 @@ object Catalog {
             .map { it.substringBefore('/') }
             .distinct()
             .take(15)
+            .let(::wikisourceBooks)
             .map { book(it, "") }
+    }
+
+    // Many Wikisource titles are not a book but a page listing its editions ("Candide", "Les Fleurs du mal",
+    // "Le Cid"…): exported, such a page gives an EPUB holding only that list — a book with its text missing.
+    // Each title is checked (one request per 50): a list is replaced by the editions it links to, a redirect by
+    // its target, a page that does not exist is dropped. Order is kept.
+    private fun wikisourceBooks(titles: List<String>): List<String> {
+        val api = "https://fr.wikisource.org/w/api.php?format=json&formatversion=2&action=query&prop=pageprops%7Ccategories&ppprop=disambiguation" +
+            "&clcategories=${enc(NOT_TRANSCRIBED)}&cllimit=max"
+        val out = ArrayList<String>()
+        var expanded = 0
+        for (chunk in titles.chunked(50)) {
+            val q = get("$api&redirects=1&titles=${enc(chunk.joinToString("|"))}")
+                ?.let { runCatching { JSONObject(it).getJSONObject("query") }.getOrNull() }
+            if (q == null) { out += chunk; continue } // no answer: as before, the titles as found
+            val moved = HashMap<String, String>()
+            for (key in listOf("normalized", "redirects")) q.optJSONArray(key)?.let { a ->
+                (0 until a.length()).map { a.getJSONObject(it) }.forEach { moved[it.getString("from")] = it.getString("to") }
+            }
+            val pages = q.optJSONArray("pages")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } }.orEmpty().associateBy { it.optString("title") }
+            for (typed in chunk) {
+                val title = (moved[typed] ?: typed).let { moved[it] ?: it }
+                val page = pages[title]
+                when {
+                    page == null || page.optBoolean("missing") -> {}
+                    NOT_TRANSCRIBED in categories(page) -> {}
+                    page.optJSONObject("pageprops")?.has("disambiguation") != true -> out += title
+                    expanded++ < 10 -> out += editions(title) // bounded: one request per list
+                }
+            }
+        }
+        return out.distinct()
+    }
+
+    // The books an editions list links to. Kept: pages marked "Bon pour export" (complete, proofread books); when
+    // the list has none, the linked pages named after it ("Candide…/Garnier 1877"). Other lists are left out.
+    // A book whose scan is on Wikisource but whose text is not typed in yet (quality "0 %"): its export holds only
+    // links to the scan's pages ("Page:Éluard - L'Amour, la poésie.djvu/12"…), nothing to read. Left out.
+    private const val NOT_TRANSCRIBED = "Catégorie:0%"
+    private const val EXPORTABLE = "Catégorie:Bon pour export"
+
+    private fun categories(page: JSONObject): Set<String> =
+        page.optJSONArray("categories")?.let { a -> (0 until a.length()).map { a.getJSONObject(it).optString("title") }.toSet() }.orEmpty()
+
+    // A list of lists ("Phèdre" -> "Phèdre (Racine)" -> its editions) is followed one level down.
+    private fun editions(list: String, nested: Boolean = false): List<String> {
+        val json = get(
+            "https://fr.wikisource.org/w/api.php?format=json&formatversion=2&action=query&generator=links&gplnamespace=0&gpllimit=max" +
+                "&titles=${enc(list)}&prop=pageprops%7Ccategories&ppprop=disambiguation&clcategories=${enc("$EXPORTABLE|$NOT_TRANSCRIBED")}&cllimit=max",
+        ) ?: return emptyList()
+        val pages = runCatching { JSONObject(json).getJSONObject("query").getJSONArray("pages") }.getOrNull() ?: return emptyList()
+        val linked = (0 until pages.length()).map { pages.getJSONObject(it) }
+            .filter { !it.optBoolean("missing") && NOT_TRANSCRIBED !in categories(it) }
+        val (lists, books) = linked.partition { it.optJSONObject("pageprops")?.has("disambiguation") == true }
+        val base = list.substringBefore(" (")
+        val own = books.filter { it.optString("title").startsWith(base) }
+        val found = (own.filter { EXPORTABLE in categories(it) }.ifEmpty { books.filter { EXPORTABLE in categories(it) } }.ifEmpty { own })
+            .map { it.getString("title") }.take(8)
+        if (found.isNotEmpty() || nested) return found
+        return lists.map { it.getString("title") }.filter { it.startsWith(base) && it != list }.take(3).flatMap { editions(it, nested = true) }
     }
 
     // Texts that have an EPUB and are not restricted (loans under DRM are left out).
@@ -292,7 +355,25 @@ object Catalog {
             ?: error("Pas d'epub téléchargeable librement pour ce livre.")
         android.util.Log.d(LOG, "download ${book.source}: $url")
         downloadUrl(url, into)
+        if (book.source == WIKISOURCE) {
+            val missing = untranscribedPages(into)
+            android.util.Log.d(LOG, "  wikisource: $missing untranscribed pages")
+            if (missing >= 10) {
+                into.delete()
+                error("ce livre n'est pas encore transcrit sur Wikisource ($missing pages n'existent qu'en scan). Essaie une autre édition ou une autre source.")
+            }
+        }
     }
+
+    // In a Wikisource export, a page of the scan nobody typed in yet shows as its bare name
+    // ("Page:Éluard - L'Amour, la poésie.djvu/12") instead of its text. Counted over the whole book.
+    private fun untranscribedPages(epub: File): Int = runCatching {
+        val marker = Regex(""">\s*Page:[^<>]+\.(?:djvu|pdf)/\d+\s*<""")
+        java.util.zip.ZipFile(epub).use { zip ->
+            zip.entries().asSequence().filter { it.name.endsWith(".xhtml") }
+                .sumOf { e -> marker.findAll(zip.getInputStream(e).use { it.readBytes().decodeToString() }).count() }
+        }
+    }.getOrDefault(0)
 
     fun downloadUrl(start: String, into: File) {
         var url = start

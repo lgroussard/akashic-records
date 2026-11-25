@@ -22,6 +22,8 @@ class Epub private constructor(
     // Size of each chapter (bytes of its file): its share of the whole book in the progress bar, so a
     // two-line title page does not count as much as a 40-page chapter.
     private val weights: List<Long>,
+    // Declared type of each file (zip path -> "image/jpeg"…): some books name their files without an extension.
+    val mediaTypes: Map<String, String> = emptyMap(),
 ) {
     fun read(path: String): ByteArray? = ZipFile(file).use { zip -> zip.getEntry(path)?.let { e -> zip.getInputStream(e).use { it.readBytes() } } }
 
@@ -92,6 +94,7 @@ class Epub private constructor(
                 chapters,
                 toc.ifEmpty { chapters.indices.map { TocEntry("Chapitre ${it + 1}", it, 0) } },
                 chapters.map { path -> zip.getEntry(path).let { e -> if (e.size > 0) e.size else e.compressedSize.coerceAtLeast(1L) } },
+                items.values.filter { it.type.isNotBlank() }.associate { it.href to it.type },
             )
         }
 

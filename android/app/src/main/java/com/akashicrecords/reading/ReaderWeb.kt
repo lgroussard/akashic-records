@@ -71,7 +71,8 @@ class ReaderWeb(context: Context, private val epub: Epub, private val events: Re
                 val path = Epub.resolve("", url.encodedPath.orEmpty()).substringBefore('#')
                 val entry = zip.getEntry(path) ?: return WebResourceResponse("text/plain", "utf-8", 404, "Not found", emptyMap(), ByteArrayInputStream(ByteArray(0)))
                 val bytes = zip.getInputStream(entry).use { it.readBytes() }
-                val mime = mimeOf(path)
+                // Wikisource exports name their images without an extension: the book's own declaration decides then.
+                val mime = mimeOf(path).takeIf { it != "application/octet-stream" } ?: epub.mediaTypes[path] ?: "application/octet-stream"
                 val body = if (path in chapterPaths) inject(bytes.decodeToString()).encodeToByteArray() else bytes
                 return WebResourceResponse(mime, "utf-8", ByteArrayInputStream(body))
             }

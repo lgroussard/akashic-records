@@ -75,7 +75,13 @@ object ReadingStore {
             author = epub.author
             cover = epub.coverPath?.let { path ->
                 epub.read(path)?.let { bytes ->
-                    val ext = path.substringAfterLast('.', "jpg").lowercase().take(4)
+                    // From the content, not the name: Wikisource covers have no extension ("….djvu.org_utm_…").
+                    val ext = when {
+                        bytes.size > 3 && bytes[0] == 0x89.toByte() && bytes[1] == 'P'.code.toByte() -> "png"
+                        bytes.size > 3 && bytes[0] == 'G'.code.toByte() && bytes[1] == 'I'.code.toByte() -> "gif"
+                        bytes.size > 11 && bytes[8] == 'W'.code.toByte() && bytes[9] == 'E'.code.toByte() -> "webp"
+                        else -> "jpg"
+                    }
                     File(coversDir, "$name.$ext").writeBytes(bytes)
                     "books\\covers\\$name.$ext"
                 }
