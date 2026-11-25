@@ -115,6 +115,8 @@ fun SettingsDialog(
                 HorizontalDivider(color = Palette.BorderStrong, modifier = Modifier.padding(vertical = 12.dp))
                 WidgetSwitches()
                 HorizontalDivider(color = Palette.BorderStrong, modifier = Modifier.padding(vertical = 12.dp))
+                com.akashicrecords.sync.SyncSettingsBlock()
+                HorizontalDivider(color = Palette.BorderStrong, modifier = Modifier.padding(vertical = 12.dp))
                 Text("Importer les données du PC", fontSize = 15.sp)
                 Spacer(Modifier.height(4.dp))
                 Text(

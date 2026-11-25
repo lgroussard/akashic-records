@@ -47,6 +47,10 @@ internal fun RecipesJournal(db: AkashicDatabase, initialOpen: Int? = null) {
         recipes = withContext(Dispatchers.IO) { db.recipeDao().getAll() }
     }
     LaunchedEffect(Unit) { reload() }
+    // A sync wrote recipes coming from another device: the list follows. An open page is left alone (it is
+    // being read or typed in) and the list reloads when it closes anyway.
+    val synced by com.akashicrecords.sync.SyncService.dataVersion.collectAsState()
+    LaunchedEffect(synced) { if (synced > 0 && openId == null) reload() }
 
     val categories = recipes.map { it.Category.trim() }.filter { it.isNotEmpty() }.distinct().sorted()
     fun inCategory(r: Recipe, c: String?) =
