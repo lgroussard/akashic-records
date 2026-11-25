@@ -204,7 +204,7 @@ internal fun ServerCatalogPanel(db: AkashicDatabase, folder: String) {
         Text(
             when {
                 !sync.paired -> "Ce téléphone n'est pas relié au serveur (Plus → Réglages → Synchronisation)."
-                waiting > 0 && !wifi -> "$waiting titre(s) à récupérer : en attente du Wi-Fi (jamais sur les données mobiles)."
+                waiting > 0 && !wifi -> "$waiting titre(s) à récupérer : en attente d'une connexion."
                 waiting > 0 -> "$waiting titre(s) en cours de récupération…"
                 else -> "${items.count { it.onPhone }} titre(s) gardé(s) sur ce téléphone, ${items.size} au catalogue. Les autres se lisent depuis le serveur."
             },
