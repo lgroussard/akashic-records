@@ -179,6 +179,96 @@ await Scenario("6. Versions differentes de l'app", async lab =>
     Check(got?.Notes == "au four" && got.Servings == 4, "sa modification arrive sur le PC sans effacer le champ qu'il ne connait pas");
 });
 
+await Scenario("8. Fusion champ par champ", async lab =>
+{
+    var (pc, phone) = await lab.SeededPair("Houmous", "Falafels", "Taboule");
+
+    // Different fields of the same recipe, each device offline.
+    pc.Set("Houmous", "Ingredients", "pois chiches, tahin, CITRON");
+    phone.Set("Houmous", "Notes", "servir tiede");
+    await pc.Sync();
+    var r = await phone.Sync();
+    await pc.Sync();
+    Check(pc.Field("Houmous", "Ingredients") == "pois chiches, tahin, CITRON" && pc.Field("Houmous", "Notes") == "servir tiede"
+          && phone.Field("Houmous", "Ingredients") == "pois chiches, tahin, CITRON" && phone.Field("Houmous", "Notes") == "servir tiede",
+        "ingredients modifies sur le PC, notes sur le telephone : les deux modifications sont gardees partout");
+    Check(r.Conflicts == 1 && r.SetAside == 0 && phone.SetAside().Count == 0 && pc.SetAside().Count == 0,
+        "aucune version mise de cote : rien n'etait en concurrence");
+
+    // The same field on both sides.
+    pc.Set("Falafels", "Notes", "version PC");
+    phone.Set("Falafels", "Notes", "version telephone");
+    phone.Set("Falafels", "Tags", "street food");
+    await pc.Sync();
+    r = await phone.Sync();
+    await pc.Sync();
+    Check(pc.Field("Falafels", "Notes") == "version telephone" && phone.Field("Falafels", "Notes") == "version telephone"
+          && pc.Field("Falafels", "Tags") == "street food",
+        "meme champ modifie des deux cotes : le dernier a synchroniser garde le sien, le reste est fusionne");
+    var aside = phone.SetAside();
+    Check(r.SetAside == 1 && aside.Count == 1 && aside[0] is { Field: "Notes", LostValue: "version PC", KeptValue: "version telephone", Label: "Falafels" }
+          && aside[0].LostDevice.StartsWith("pc-"),
+        "la version ecartee (celle du PC) est conservee sur le telephone, avec la recette, le champ et l'appareil d'origine");
+    SyncEngine.DismissConflict(phone.DbPath, aside[0].Id);
+    Check(phone.SetAside().Count == 0, "une fois lue, elle peut etre effacee");
+
+    // Edit against delete, both ways: the edit wins.
+    pc.DeleteByTitle("Taboule");
+    phone.Set("Taboule", "Notes", "persil plat");
+    await pc.Sync(); await phone.Sync(); await pc.Sync();
+    phone.DeleteByTitle("Houmous");
+    pc.Set("Houmous", "Notes", "avec du cumin");
+    await pc.Sync(); await phone.Sync(); await pc.Sync();
+    Check(pc.Field("Taboule", "Notes") == "persil plat" && phone.Field("Houmous", "Notes") == "avec du cumin" && pc.Count() == 3 && phone.Count() == 3,
+        "modification contre suppression, dans les deux sens : la modification gagne, la recette revient");
+    Check(pc.Dump() == phone.Dump() && (await pc.Sync()).NothingToDo && (await phone.Sync()).NothingToDo, "contenus identiques, plus rien a echanger");
+});
+
+await Scenario("9. Journal : la meme journee ecrite sur deux appareils", async lab =>
+{
+    var pc = await lab.Device("pc");
+    var phone = await lab.Device("phone");
+
+    // The PC wrote the day; the phone only opened it (an empty entry, created at another time).
+    pc.WriteDay("2026-11-25", "Mini-PC installe, synchro en route.", "Mercredi");
+    phone.WriteDay("2026-11-25", "", time: "T21:14:03.1234567");
+    pc.WriteDay("2026-11-24", "Journee calme.");
+    await pc.Sync(); await phone.Sync(); await pc.Sync();
+    Check(phone.Day("2026-11-25").SequenceEqual(new[] { "Mini-PC installe, synchro en route." }) && pc.Day("2026-11-25").Count == 1,
+        "une entree vide d'un cote, ecrite de l'autre : une seule entree pour ce jour, avec le texte");
+    Check(phone.SetAside().Count == 0 && phone.Day("2026-11-24").Count == 1, "rien n'est mis de cote, et l'autre journee arrive normalement");
+
+    // Both wrote that same day, differently, before ever syncing.
+    pc.WriteDay("2026-11-26", "Texte ecrit sur le PC.");
+    phone.WriteDay("2026-11-26", "Texte ecrit sur le telephone.", time: "T08:30:00.0000000");
+    await pc.Sync();
+    var r = await phone.Sync();
+    await pc.Sync();
+    Check(pc.Day("2026-11-26").Count == 1 && phone.Day("2026-11-26").Count == 1 && pc.Day("2026-11-26")[0] == phone.Day("2026-11-26")[0],
+        "deux textes differents pour le meme jour : toujours une seule entree, identique des deux cotes");
+    Check(r.SetAside >= 1 && phone.SetAside().Any(c => c.Field == "Text" && c.LostValue == "Texte ecrit sur le PC."),
+        "le texte qui n'a pas ete retenu est mis de cote, pas perdu");
+
+    // From then on it is one entry: ordinary edits flow.
+    pc.RewriteDay("2026-11-24", "Journee calme. Promenade le soir.");
+    await pc.Sync(); await phone.Sync();
+    Check(phone.Day("2026-11-24")[0] == "Journee calme. Promenade le soir.", "ensuite, une modification du journal circule comme pour une recette");
+});
+
+await Scenario("10. Mise a niveau depuis la premiere version du moteur", async lab =>
+{
+    var (pc, phone) = await lab.SeededPair("Houmous", "Falafels");
+    pc.ForgetAncestors(); phone.ForgetAncestors(); // as written by the first engine: a hash, no ancestor
+
+    Check((await pc.Sync()).NothingToDo && (await phone.Sync()).NothingToDo, "premier passage du nouveau moteur : rien n'est renvoye");
+    pc.Set("Houmous", "Ingredients", "pois chiches, tahin, citron vert");
+    phone.Set("Houmous", "Notes", "servir tiede");
+    await pc.Sync(); await phone.Sync(); await pc.Sync();
+    Check(pc.Field("Houmous", "Notes") == "servir tiede" && phone.Field("Houmous", "Ingredients") == "pois chiches, tahin, citron vert"
+          && phone.SetAside().Count == 0 && pc.Dump() == phone.Dump(),
+        "les recettes deja synchronisees profitent de la fusion champ par champ");
+});
+
 await Scenario("7. Usage melange (30 tirages aleatoires)", async lab =>
 {
     var bad = 0;

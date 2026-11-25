@@ -11,7 +11,12 @@ namespace AkashicRecords.Sync.SmokeTest;
 /// <summary>A throw-away hub plus the devices created against it.</summary>
 public sealed class Lab : IAsyncDisposable
 {
-    public static readonly SyncTable[] Tables = { new("Recipe", "Recipe", "CoverImagePath") };
+    public static readonly SyncTable[] Tables =
+    {
+        new("Recipe", "Recipe", "CoverImagePath"),
+        // One entry per day: two devices that each wrote "today" hold the same entry.
+        new("JournalEntry", "JournalEntry") { MatchColumn = "EntryDate", MatchPrefix = 10 },
+    };
 
     private WebApplication? _app;
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "akashic-sync-smoke-" + Guid.NewGuid().ToString("N"));
@@ -22,7 +27,7 @@ public sealed class Lab : IAsyncDisposable
 
     public async Task StartAsync()
     {
-        var options = new HubOptions { DataDir = Path.Combine(_dir, "hub"), Url = "http://127.0.0.1:0", EntityTypes = new() { "Recipe" } };
+        var options = new HubOptions { DataDir = Path.Combine(_dir, "hub"), Url = "http://127.0.0.1:0", EntityTypes = new() { "Recipe", "JournalEntry" } };
         _app = HubApp.Build(new[] { "--Logging:LogLevel:Default=Warning" }, options);
         await _app.StartAsync();
         Address = new Uri(_app.Urls.First());
@@ -105,6 +110,15 @@ public sealed class Device : IDisposable
                 );
                 """);
             if (_hasServings) Exec("ALTER TABLE Recipe ADD COLUMN Servings INTEGER NOT NULL DEFAULT 0");
+            Exec("""
+                CREATE TABLE JournalEntry (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Title TEXT NOT NULL,
+                    Text TEXT NOT NULL,
+                    EntryDate TEXT NOT NULL,
+                    Tags TEXT NOT NULL
+                );
+                """);
         }
         _hub = new HubClient(hubUrl, token, _handler);
         _engine = new SyncEngine(dbPath, _hub, Lab.Tables);
@@ -121,6 +135,22 @@ public sealed class Device : IDisposable
     }
 
     public void Edit(string title, string notes) => Exec("UPDATE Recipe SET Notes = $n WHERE Title = $t", ("$n", notes), ("$t", title));
+
+    /// <summary>Sets one column of a recipe (column name comes from the test itself).</summary>
+    public void Set(string title, string column, string value) => Exec($"UPDATE Recipe SET {column} = $v WHERE Title = $t", ("$v", value), ("$t", title));
+    public string? Field(string title, string column) => Query($"SELECT {column} FROM Recipe WHERE Title = $t", r => r.IsDBNull(0) ? null : r.GetString(0), ("$t", title)).FirstOrDefault();
+
+    // The journal: one entry per day. `time` differs between devices, as it does for real.
+    public void WriteDay(string day, string text, string title = "", string time = "T00:00:00.0000000") =>
+        Exec("INSERT INTO JournalEntry (Title, Text, EntryDate, Tags) VALUES ($ti, $tx, $d, '')", ("$ti", title), ("$tx", text), ("$d", day + time));
+    public void RewriteDay(string day, string text) => Exec("UPDATE JournalEntry SET Text = $tx WHERE substr(EntryDate, 1, 10) = $d", ("$tx", text), ("$d", day));
+    public List<string> Day(string day) => Query("SELECT Text FROM JournalEntry WHERE substr(EntryDate, 1, 10) = $d ORDER BY Id", r => r.GetString(0), ("$d", day));
+
+    /// <summary>Versions set aside by field-level conflicts on this device.</summary>
+    public List<SyncConflict> SetAside() => SyncEngine.Conflicts(DbPath);
+
+    /// <summary>Puts the sync bookkeeping back to what the first version of the engine wrote (no ancestor kept).</summary>
+    public void ForgetAncestors() => Exec("UPDATE sync_map SET synced_values = NULL");
     public void SetCover(string title, string path) => Exec("UPDATE Recipe SET CoverImagePath = $p WHERE Title = $t", ("$p", path), ("$t", title));
     public void DeleteByTitle(string title) => Exec("DELETE FROM Recipe WHERE Title = $t", ("$t", title));
 
