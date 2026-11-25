@@ -36,7 +36,7 @@ object SyncService {
     // What is synchronised. A recipe's cover is a file of this phone: its path stays here.
     // What is synchronised: every table of the catalog. File paths travel as they are (same relative form on the
     // PC and the phone); the files themselves are another matter.
-    private val TABLES = AkashicCatalog.tables
+    private val TABLES = AkashicCatalog.tables + FileSync.indexTable
 
     data class State(val paired: Boolean, val hubUrl: String, val busy: Boolean, val text: String, val isError: Boolean)
 
@@ -72,6 +72,7 @@ object SyncService {
     private var lastSuccess: String? = null
     private var lastWhat: String? = null
     private var lastError: String? = null
+    private var lastFiles: FileSyncReport? = null
 
     /** Reads the saved pairing; called once at start so the settings show the right state. */
     fun init(context: Context) = publish(context, busy = false)
@@ -105,10 +106,20 @@ object SyncService {
             withContext(Dispatchers.Main) { com.akashicrecords.journaux.PendingEdits.flushAll() }
             report = withContext(Dispatchers.IO) {
                 val db = AkashicDatabase.get(app).openHelper.writableDatabase
-                SyncEngine(db, HubClient(url, token), TABLES).run()
+                val hub = HubClient(url, token)
+                // The files the rows point at: sent before the rows, fetched after (see FileSync).
+                FileSync.ensureSchema(db)
+                val fileSync = FileSync(db, app.filesDir, hub, AkashicCatalog.fileColumns)
+                val files = FileSyncReport()
+                fileSync.publish(files)
+                val rows = SyncEngine(db, hub, TABLES).run()
+                fileSync.fetch(files)
+                lastFiles = files
+                rows
             }
             lastSuccess = SimpleDateFormat("HH:mm:ss", Locale.FRANCE).format(Date())
-            lastWhat = if (report.nothingToDo) "rien à échanger" else "${report.pushed} envoyé(s), ${report.received} reçu(s)"
+            lastWhat = (if (report.nothingToDo) "rien à échanger" else "${report.pushed} envoyé(s), ${report.received} reçu(s)") +
+                (lastFiles?.takeIf { it.uploaded + it.downloaded > 0 }?.let { " ; fichiers : ${it.uploaded} envoyé(s), ${it.downloaded} reçu(s)" } ?: "")
             lastError = null
         } catch (e: HubException) {
             lastError = e.message
@@ -120,7 +131,7 @@ object SyncService {
             mutex.unlock()
             publish(app, busy = false)
         }
-        if (report != null && report.received > 0) _dataVersion.value++
+        if (report != null && report.received + (lastFiles?.downloaded ?: 0) > 0) _dataVersion.value++
         if (report != null && report.setAside > 0) refreshConflicts(app)
         return report
     }

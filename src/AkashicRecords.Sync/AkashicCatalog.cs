@@ -17,6 +17,17 @@ namespace AkashicRecords.Sync;
 /// </summary>
 public static class AkashicCatalog
 {
+    /// <summary>The columns holding the path of a file of the app folder (see FileSync).</summary>
+    public static readonly IReadOnlyList<(string Table, string Column)> FileColumns =
+    [
+        ("Recipe", "CoverImagePath"), ("Artwork", "CoverImagePath"), ("WatchlistItem", "CoverImagePath"),
+        ("Poem", "ImagePath"), ("JournalPhoto", "ImagePath"), ("Photo", "ImagePath"), ("CanvasElement", "ImagePath"),
+        ("RefImage", "ImagePath"), ("Book", "FilePath"), ("Book", "CoverPath"), ("Ticket", "FilePath"),
+    ];
+
+    /// <summary>Everything the engine synchronises: the tables below, plus the index of their files.</summary>
+    public static IReadOnlyList<SyncTable> AllTables => [.. Tables, FileSync.IndexTable];
+
     private static Dictionary<string, string> R(params (string Column, string Target)[] refs) => refs.ToDictionary(r => r.Column, r => r.Target);
 
     public static readonly IReadOnlyList<SyncTable> Tables =

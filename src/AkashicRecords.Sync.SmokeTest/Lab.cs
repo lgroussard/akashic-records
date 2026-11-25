@@ -17,6 +17,9 @@ public sealed class Lab : IAsyncDisposable
         new("Recipe", "Recipe", "CoverImagePath") { MatchColumn = "Title" },
         // One entry per day: two devices that each wrote "today" hold the same entry.
         new("JournalEntry", "JournalEntry") { MatchColumn = "EntryDate", MatchPrefix = 10 },
+        // A table whose rows point at a file, and the index of those files.
+        new("Photo", "Photo") { MatchColumns = ["ImagePath"] },
+        FileSync.IndexTable,
     };
 
     private WebApplication? _app;
@@ -28,7 +31,7 @@ public sealed class Lab : IAsyncDisposable
 
     public async Task StartAsync()
     {
-        var options = new HubOptions { DataDir = Path.Combine(_dir, "hub"), Url = "http://127.0.0.1:0", EntityTypes = new() { "Recipe", "JournalEntry" } };
+        var options = new HubOptions { DataDir = Path.Combine(_dir, "hub"), Url = "http://127.0.0.1:0", EntityTypes = new() { "*" } };
         _app = HubApp.Build(new[] { "--Logging:LogLevel:Default=Warning" }, options);
         await _app.StartAsync();
         Address = new Uri(_app.Urls.First());
@@ -121,11 +124,48 @@ public sealed class Device : IDisposable
                 );
                 """);
         }
+        if (create) Exec("CREATE TABLE Photo (Id INTEGER PRIMARY KEY AUTOINCREMENT, ImagePath TEXT NOT NULL, Title TEXT NOT NULL)");
+        BaseDir = dbPath + ".files";
+        Directory.CreateDirectory(BaseDir);
+        FileSync.EnsureSchema(dbPath);
         _hub = new HubClient(hubUrl, token, _handler);
         _engine = new SyncEngine(dbPath, _hub, Lab.Tables);
+        _files = new FileSync(dbPath, BaseDir, _hub, new[] { ("Photo", "ImagePath") });
     }
 
-    public Task<SyncReport> Sync() => _engine.RunAsync();
+    /// <summary>What the app does at each cycle: send the files, synchronise the rows, fetch the files.</summary>
+    public async Task<SyncReport> Sync()
+    {
+        LastFiles = new FileSyncReport();
+        await _files.PublishAsync(LastFiles);
+        var report = await _engine.RunAsync();
+        await _files.FetchAsync(LastFiles);
+        return report;
+    }
+
+    public string BaseDir { get; }
+    public FileSyncReport LastFiles { get; private set; } = new();
+    private readonly FileSync _files;
+
+    /// <summary>A photo as the app adds one: the file in the app folder, its path in the row.</summary>
+    public void AddPhoto(string relativePath, byte[] content, string title = "photo")
+    {
+        var full = Path.Combine(BaseDir, relativePath.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+        File.WriteAllBytes(full, content);
+        AddPhotoRow(relativePath, title);
+    }
+
+    public void AddPhotoRow(string relativePath, string title = "photo") =>
+        Exec("INSERT INTO Photo (ImagePath, Title) VALUES ($p, $t)", ("$p", relativePath), ("$t", title));
+
+    public byte[]? FileBytes(string relativePath)
+    {
+        var full = Path.Combine(BaseDir, relativePath.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar));
+        return File.Exists(full) ? File.ReadAllBytes(full) : null;
+    }
+
+    public long PhotoRows() => (long)Scalar("SELECT COUNT(*) FROM Photo")!;
 
     public void DropNextPushAnswer() => _handler.DropNextPushAnswer = true;
 

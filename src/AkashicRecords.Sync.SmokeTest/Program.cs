@@ -12,10 +12,22 @@ if (args.Length >= 2 && args[0] == "rehearse") return await Rehearsal.RunAsync(a
 // Hand tools for end-to-end checks against a hub that is already running:
 //   device <db> <hubUrl> <token>   one sync of that database, as a second device would do
 //   sql <db> "<statement>"         run a statement on a test database and print what it returns
-if (args.Length == 4 && args[0] == "device")
+//   device <db> <hubUrl> <token> <appFolder>   the same, with the files of that app folder (what the app does)
+if (args.Length is 4 or 5 && args[0] == "device")
 {
     using var hub = new HubClient(args[2], args[3]);
-    Console.WriteLine(await new SyncEngine(args[1], hub, AkashicCatalog.Tables).RunAsync());
+    if (args.Length == 4)
+    {
+        Console.WriteLine(await new SyncEngine(args[1], hub, AkashicCatalog.Tables).RunAsync());
+        return 0;
+    }
+    FileSync.EnsureSchema(args[1]);
+    var fileSync = new FileSync(args[1], args[4], hub, AkashicCatalog.FileColumns);
+    var files = new FileSyncReport();
+    await fileSync.PublishAsync(files);
+    var rows = await new SyncEngine(args[1], hub, AkashicCatalog.AllTables).RunAsync();
+    await fileSync.FetchAsync(files);
+    Console.WriteLine($"{rows} ; {files}");
     return 0;
 }
 //   dump <db>                      the synchronised content as it travels: rows per table, and one fingerprint
@@ -282,6 +294,48 @@ await Scenario("11. Premier rapprochement de deux appareils qui n'ont pas tout a
     Check(r.SetAside == 1 && phone.SetAside().Single() is { Field: "Instructions", LostValue: "etapes" },
         "l'ancienne version du champ est mise de cote sur le telephone, pas jetee");
     Check(pc.Dump() == phone.Dump() && (await pc.Sync()).NothingToDo && (await phone.Sync()).NothingToDo, "contenus identiques, plus rien a echanger");
+});
+
+await Scenario("12. Fichiers : photos, couvertures", async lab =>
+{
+    var pc = await lab.Device("pc");
+    var phone = await lab.Device("phone");
+    var cover = new byte[40_000]; new Random(1).NextBytes(cover);
+    var shot = new byte[25_000]; new Random(2).NextBytes(shot);
+
+    pc.AddPhoto(@"media\covers\aaa111.jpg", cover, "couverture");
+    await pc.Sync();
+    await phone.Sync();
+    Check(pc.LastFiles.Uploaded == 1 && phone.LastFiles.Downloaded == 1 && phone.FileBytes("media/covers/aaa111.jpg")?.SequenceEqual(cover) == true,
+        "une image ajoutee sur le PC arrive sur le telephone, identique au bit pres");
+
+    phone.AddPhoto("references/bbb222.jpg", shot, "capture");
+    await phone.Sync();
+    await pc.Sync();
+    Check(pc.FileBytes(@"references\bbb222.jpg")?.SequenceEqual(shot) == true && pc.PhotoRows() == 2 && phone.PhotoRows() == 2,
+        "une image ajoutee sur le telephone arrive sur le PC (chemin a barres obliques compris)");
+
+    await pc.Sync(); await phone.Sync();
+    Check(pc.LastFiles is { Uploaded: 0, Downloaded: 0 } && phone.LastFiles is { Uploaded: 0, Downloaded: 0 }, "ensuite, aucun fichier n'est renvoye ni retelecharge");
+
+    // The same picture under two names: its content is stored once on the hub.
+    pc.AddPhoto(@"media\covers\ccc333.jpg", cover, "meme image, autre nom");
+    await pc.Sync(); await phone.Sync();
+    Check(pc.LastFiles.Uploaded == 0 && phone.FileBytes("media/covers/ccc333.jpg")?.SequenceEqual(cover) == true,
+        "meme contenu sous un autre nom : rien n'est renvoye au hub, le telephone le recoit quand meme");
+
+    // A row pointing at a file that does not exist here (a photo deleted by hand): no crash, nothing invented.
+    pc.AddPhotoRow(@"media\photos\absente.jpg", "fichier manquant");
+    await pc.Sync(); await phone.Sync();
+    Check(phone.PhotoRows() == 4 && phone.FileBytes("media/photos/absente.jpg") is null, "une ligne dont le fichier manque circule quand meme, sans fichier");
+
+    // A path that tries to leave the app folder is never read nor written.
+    phone.AddPhotoRow(@"..\..\ailleurs.txt", "chemin douteux");
+    phone.AddPhotoRow(@"C:\Windows\win.ini", "chemin absolu");
+    await phone.Sync(); await pc.Sync();
+    Check(FileSync.Normalize(@"..\..\ailleurs.txt") is null && FileSync.Normalize(@"C:\Windows\win.ini") is null && FileSync.Normalize(@"media\..\..\x") is null
+          && FileSync.Normalize(@"media\covers\x.jpg") == "media/covers/x.jpg",
+        "un chemin qui sort du dossier de l'app est ignore");
 });
 
 await Scenario("10. Mise a niveau depuis la premiere version du moteur", async lab =>

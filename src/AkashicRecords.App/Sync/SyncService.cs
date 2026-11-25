@@ -15,7 +15,7 @@ public sealed class SyncService
 
     // What is synchronised: every table of the catalog. File paths travel as they are (same relative form on
     // the PC and the phone); the files themselves are another matter.
-    private static readonly IReadOnlyList<SyncTable> Tables = AkashicCatalog.Tables;
+    private static readonly IReadOnlyList<SyncTable> Tables = AkashicCatalog.AllTables;
 
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(30);
 
@@ -30,6 +30,7 @@ public sealed class SyncService
     public DateTime? LastSuccess { get; private set; }
     public string? LastError { get; private set; }
     public SyncReport? LastReport { get; private set; }
+    public FileSyncReport? LastFiles { get; private set; }
 
     /// <summary>Pairing, a finished run or an error: the settings pane redraws its status line.</summary>
     public event Action? StateChanged;
@@ -53,6 +54,7 @@ public sealed class SyncService
             var what = LastReport is null || LastReport.NothingToDo
                 ? "rien à échanger"
                 : $"{LastReport.Pushed} envoyé(s), {LastReport.Inserted + LastReport.Updated + LastReport.Deleted} reçu(s)";
+            if (LastFiles is { } f && f.Uploaded + f.Downloaded > 0) what += $" ; fichiers : {f.Uploaded} envoyé(s), {f.Downloaded} reçu(s)";
             var aside = SetAside().Count;
             var note = aside == 0 ? "" : $" {aside} version(s) mise(s) de côté à relire ci-dessous.";
             return $"{head} Dernière synchro à {LastSuccess:HH:mm:ss} : {what}.{note}";
@@ -79,11 +81,19 @@ public sealed class SyncService
         {
             try { BeforeSync?.Invoke(); } catch { /* a view that cannot save must not stop the sync */ }
             var settings = Settings;
+            var files = new FileSyncReport();
             report = await Task.Run(async () =>
             {
                 using var hub = new HubClient(settings.HubUrl, settings.Token);
-                return await new SyncEngine(_dbPath, hub, Tables).RunAsync();
+                // The files the rows point at: sent before the rows, fetched after (see FileSync).
+                FileSync.EnsureSchema(_dbPath);
+                var fileSync = new FileSync(_dbPath, AppContext.BaseDirectory, hub, AkashicCatalog.FileColumns);
+                await fileSync.PublishAsync(files);
+                var rows = await new SyncEngine(_dbPath, hub, Tables).RunAsync();
+                await fileSync.FetchAsync(files);
+                return rows;
             });
+            LastFiles = files;
             LastReport = report;
             LastSuccess = DateTime.Now;
             LastError = null;
@@ -102,7 +112,7 @@ public sealed class SyncService
         }
 
         StateChanged?.Invoke();
-        if (report is not null && report.Inserted + report.Updated + report.Deleted > 0) DataChanged?.Invoke(report);
+        if (report is not null && report.Inserted + report.Updated + report.Deleted + (LastFiles?.Downloaded ?? 0) > 0) DataChanged?.Invoke(report);
         return report;
     }
 

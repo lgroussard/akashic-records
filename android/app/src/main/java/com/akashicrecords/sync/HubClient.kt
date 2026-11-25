@@ -37,6 +37,88 @@ class HubClient(hubUrl: String, private val token: String? = null) {
 
     fun pull(since: Long, limit: Int): JSONObject = call("GET", "/sync/pull?since=$since&limit=$limit", null)
 
+    // ---- Files (blobs addressed by the SHA-256 of their content). They can be large and slow to move, so these
+    // calls stream and have a much longer time limit.
+
+    private fun open(method: String, path: String): HttpURLConnection =
+        (URL(base + path).openConnection() as HttpURLConnection).apply {
+            requestMethod = method
+            connectTimeout = 4_000
+            readTimeout = 120_000
+            token?.let { setRequestProperty("Authorization", "Bearer $it") }
+        }
+
+    private inline fun <T> transfer(block: () -> T): T =
+        try {
+            block()
+        } catch (e: IOException) {
+            throw HubException("Hub injoignable (${e.message ?: e.javaClass.simpleName}).")
+        }
+
+    /** Does the hub already hold this content? */
+    fun hasFile(hash: String): Boolean = transfer {
+        val conn = open("HEAD", "/media/$hash")
+        try {
+            when (val status = conn.responseCode) {
+                in 200..299 -> true
+                404 -> false
+                401 -> throw HubException("Le hub refuse ce jeton : appareil non appairé ou révoqué.", 401)
+                else -> throw HubException("Le hub a répondu $status.", status)
+            }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    fun uploadFile(file: java.io.File, hash: String) = transfer {
+        val conn = open("POST", "/media?hash=$hash")
+        try {
+            conn.doOutput = true
+            conn.setFixedLengthStreamingMode(file.length()) // streamed, never held in memory
+            conn.setRequestProperty("Content-Type", "application/octet-stream")
+            file.inputStream().use { input -> conn.outputStream.use { input.copyTo(it) } }
+            val status = conn.responseCode
+            if (status !in 200..299) throw HubException("Envoi d'un fichier refusé par le hub ($status).", status)
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /** Downloads a content to [target] (written beside it first, moved once complete and verified). False when
+     * the hub does not have it (yet). */
+    fun downloadFile(hash: String, target: java.io.File): Boolean = transfer {
+        val conn = open("GET", "/media/$hash")
+        try {
+            val status = conn.responseCode
+            if (status == 404) return@transfer false
+            if (status !in 200..299) throw HubException("Téléchargement d'un fichier refusé par le hub ($status).", status)
+            target.parentFile?.mkdirs()
+            val temp = java.io.File(target.path + ".part")
+            try {
+                val sha = java.security.MessageDigest.getInstance("SHA-256")
+                conn.inputStream.use { input ->
+                    temp.outputStream().use { out ->
+                        val buffer = ByteArray(81920)
+                        while (true) {
+                            val n = input.read(buffer)
+                            if (n < 0) break
+                            sha.update(buffer, 0, n)
+                            out.write(buffer, 0, n)
+                        }
+                    }
+                }
+                val actual = sha.digest().joinToString("") { "%02x".format(it) }
+                if (actual != hash) throw HubException("Fichier reçu différent de son empreinte : ignoré.")
+                if (!temp.renameTo(target)) throw IOException("impossible d'écrire ${target.name}")
+                true
+            } finally {
+                temp.delete()
+            }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
     private fun call(method: String, path: String, body: JSONObject?): JSONObject {
         val conn = try {
             (URL(base + path).openConnection() as HttpURLConnection).apply {
