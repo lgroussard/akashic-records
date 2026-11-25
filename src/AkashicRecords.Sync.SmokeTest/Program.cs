@@ -15,7 +15,15 @@ if (args.Length >= 2 && args[0] == "rehearse") return await Rehearsal.RunAsync(a
 if (args.Length == 4 && args[0] == "device")
 {
     using var hub = new HubClient(args[2], args[3]);
-    Console.WriteLine(await new SyncEngine(args[1], hub, Lab.Tables).RunAsync());
+    Console.WriteLine(await new SyncEngine(args[1], hub, AkashicCatalog.Tables).RunAsync());
+    return 0;
+}
+//   dump <db>                      the synchronised content as it travels: rows per table, and one fingerprint
+if (args.Length == 2 && args[0] == "dump")
+{
+    var lines = SyncEngine.WireDump(args[1], AkashicCatalog.Tables);
+    foreach (var g in lines.GroupBy(l => l[..l.IndexOf('|')]).OrderBy(g => g.Key))
+        Console.WriteLine($"{g.Key} {g.Count()} {Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(string.Join("\n", g))))[..12]}");
     return 0;
 }
 if (args.Length == 3 && args[0] == "sql")

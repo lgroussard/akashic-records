@@ -180,7 +180,17 @@ public partial class MainWindow : Window
         };
         Sync.SyncService.Instance.DataChanged += _ =>
         {
-            if (SectionContent.Content is JournauxView journaux) journaux.OnSyncedDataChanged();
+            if (SectionContent.Content is JournauxView journaux)
+            {
+                journaux.OnSyncedDataChanged();
+            }
+            else if (SectionContent.Content is not null && Keyboard.FocusedElement is not System.Windows.Controls.Primitives.TextBoxBase)
+            {
+                // The other sections have no "save what is typed" hook: they are simply rebuilt from the
+                // database, unless a text field has the keyboard (nothing is replaced under the cursor;
+                // the section shows the new data the next time it is opened).
+                UpdateSectionContent();
+            }
         };
         if (!App.Headless) Sync.SyncService.Instance.Start();
     }

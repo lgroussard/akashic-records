@@ -34,12 +34,9 @@ import java.util.concurrent.TimeUnit
 object SyncService {
 
     // What is synchronised. A recipe's cover is a file of this phone: its path stays here.
-    private val TABLES = listOf(
-        // Same title = the same recipe, when two devices each already had it in slightly different versions.
-        SyncTable("Recipe", "Recipe", setOf("CoverImagePath"), matchColumn = "Title"),
-        // One entry per day: two devices that each wrote "today" hold the same entry (joined on the date).
-        SyncTable("JournalEntry", "JournalEntry", matchColumn = "EntryDate", matchPrefix = 10),
-    )
+    // What is synchronised: every table of the catalog. File paths travel as they are (same relative form on the
+    // PC and the phone); the files themselves are another matter.
+    private val TABLES = AkashicCatalog.tables
 
     data class State(val paired: Boolean, val hubUrl: String, val busy: Boolean, val text: String, val isError: Boolean)
 

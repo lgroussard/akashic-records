@@ -13,14 +13,9 @@ public sealed class SyncService
 {
     public static SyncService Instance { get; } = new();
 
-    // What is synchronised. A recipe's cover is a file path on this machine: it stays here.
-    private static readonly SyncTable[] Tables =
-    {
-        // Same title = the same recipe, when two devices each already had it in slightly different versions.
-        new("Recipe", "Recipe", "CoverImagePath") { MatchColumn = "Title" },
-        // One entry per day: two devices that each wrote "today" hold the same entry (joined on the date).
-        new("JournalEntry", "JournalEntry") { MatchColumn = "EntryDate", MatchPrefix = 10 },
-    };
+    // What is synchronised: every table of the catalog. File paths travel as they are (same relative form on
+    // the PC and the phone); the files themselves are another matter.
+    private static readonly IReadOnlyList<SyncTable> Tables = AkashicCatalog.Tables;
 
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(30);
 

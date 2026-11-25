@@ -94,7 +94,7 @@ class SyncValuesTest {
         // Two journal entries for the same day, never synced: ours is the empty one the app created on opening the day.
         val local = row("Title" to "", "Text" to "", "EntryDate" to "2026-11-25T21:14:03", "Tags" to "")
         val theirs = row("Title" to "Mercredi", "Text" to "Mini-PC installe.", "EntryDate" to "2026-11-25T00:00:00", "Tags" to "")
-        val m = SyncValues.merge(local, theirs, null, matchColumn = "EntryDate")
+        val m = SyncValues.merge(local, theirs, null, matchColumns = listOf("EntryDate"))
         assertEquals(row("Title" to "Mercredi", "Text" to "Mini-PC installe.", "EntryDate" to "2026-11-25T00:00:00"), m.take)
         assertTrue(m.setAside.isEmpty())
 
@@ -102,12 +102,12 @@ class SyncValuesTest {
         // (never dropped); nothing of ours is overwritten by their empty title.
         val mine = row("Title" to "Soir", "Text" to "Ecrit ici, longuement.", "EntryDate" to "2026-11-25T21:14:03", "Tags" to "")
         val other = row("Title" to "", "Text" to "Ecrit la-bas.", "EntryDate" to "2026-11-25T00:00:00", "Tags" to "")
-        val m2 = SyncValues.merge(mine, other, null, matchColumn = "EntryDate")
+        val m2 = SyncValues.merge(mine, other, null, matchColumns = listOf("EntryDate"))
         assertEquals(row("EntryDate" to "2026-11-25T00:00:00"), m2.take)
         assertEquals(listOf(SyncValues.SetAside("Text", "Ecrit ici, longuement.", "Ecrit la-bas.")), m2.setAside)
 
         // The other way round: theirs is the fuller one, it comes in and ours is what gets set aside.
-        val m3 = SyncValues.merge(other, mine, null, matchColumn = "EntryDate")
+        val m3 = SyncValues.merge(other, mine, null, matchColumns = listOf("EntryDate"))
         assertEquals("Ecrit ici, longuement.", m3.take["Text"])
         assertEquals(listOf(SyncValues.SetAside("Text", "Ecrit ici, longuement.", "Ecrit la-bas.", lostIsOurs = true)), m3.setAside)
     }

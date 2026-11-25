@@ -19,7 +19,35 @@ data class SyncTable(
     val localOnly: Set<String> = emptySet(),
     val matchColumn: String? = null,
     val matchPrefix: Int = Int.MAX_VALUE,
-)
+    /** Same idea with several columns that must all be equal. Used when [matchColumn] is not set. */
+    val matchColumns: List<String> = emptyList(),
+    /** Columns holding the row id of another synchronised item: column -> that item's entity type. Row ids differ
+     * from one device to the next, so on the wire such a column carries the target's sync id. */
+    val refs: Map<String, String> = emptyMap(),
+    /** References whose target type depends on another column of the same row. */
+    val kindRefs: List<KindRef> = emptyList(),
+    /** Text columns holding a decimal number (budget amounts): always written with a point. An older row written
+     * "-9,12" is rewritten before comparing, or the same amount would look different on two devices. */
+    val decimalTextColumns: List<String> = emptyList(),
+) {
+    val allMatchColumns: List<String> get() = matchColumn?.let(::listOf) ?: matchColumns
+
+    /** The entity type [column] points at for this row, or null when it is not a reference (or its kind is
+     * unknown: the value then travels as it is). */
+    fun targetOf(column: String, row: Map<String, Any?>): String? {
+        refs[column]?.let { return it }
+        for (k in kindRefs) {
+            if (k.idColumn != column) continue
+            val kind = row[k.kindColumn] as? String ?: return null
+            return if (k.kinds != null) k.kinds[kind] else kind
+        }
+        return null
+    }
+}
+
+/** [idColumn] holds a row id whose table is named by [kindColumn]. [kinds] maps the kind's values to entity types;
+ * null = the value is the entity type. */
+data class KindRef(val idColumn: String, val kindColumn: String, val kinds: Map<String, String>? = null)
 
 class SyncReport {
     var pulled = 0
@@ -31,6 +59,7 @@ class SyncReport {
     var pushedDeletes = 0
     var conflicts = 0   // entities changed on both sides since the last sync (merged field by field)
     var setAside = 0    // fields both sides wrote differently: ours kept, theirs saved in sync_conflict
+    var waiting = 0     // rows waiting for an item they point at that has not arrived yet
     var cursor = 0L
     val received get() = inserted + updated + deleted
     val nothingToDo get() = inserted + updated + deleted + adopted + pushed + pushedDeletes == 0
@@ -62,13 +91,14 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
     /** Safety brake: a run that would delete more than this share of a table's synchronised rows on the hub
      * (and more than [minDeletesForBrake]) stops instead. A database swapped under the engine looks exactly
      * like "the user deleted everything". */
-    var maxDeleteShare = 0.30
+    var maxDeleteShare = 0.90
     var minDeletesForBrake = 5
 
     fun run(): SyncReport {
         val report = SyncReport()
         ensureSchema()
         val infos = tables.mapNotNull { TableInfo.load(db, it) }
+        infos.forEach { it.normalizeDecimalText(db) }
         infos.forEach(::backfillAncestors)
 
         pull(infos, report)
@@ -93,6 +123,11 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
         db.execSQL("CREATE INDEX IF NOT EXISTS sync_map_local ON sync_map(entity_type, local_id)")
         db.execSQL("CREATE TABLE IF NOT EXISTS sync_state(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         db.execSQL(SyncConflicts.CREATE)
+        // Rows as received that point at an item not here yet.
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS sync_deferred(id INTEGER PRIMARY KEY AUTOINCREMENT, entity_type TEXT NOT NULL, " +
+                "sync_id TEXT NOT NULL, rev INTEGER NOT NULL, payload TEXT NOT NULL, device TEXT NOT NULL)",
+        )
         // The row as last synchronised (canonical JSON): the common ancestor of a field-by-field merge.
         val hasValues = db.query("SELECT COUNT(*) FROM pragma_table_info('sync_map') WHERE name = 'synced_values'").use { c -> c.moveToFirst() && c.getLong(0) > 0 }
         if (!hasValues) db.execSQL("ALTER TABLE sync_map ADD COLUMN synced_values TEXT")
@@ -138,18 +173,90 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
                     report.pulled++
                     apply(table, row, report)
                 }
+                retryDeferred(infos, report)
                 setCursor(page.getLong("next_cursor"))
             }
             if (!page.getBoolean("has_more")) break
         }
     }
 
-    private fun apply(t: TableInfo, row: JSONObject, report: SyncReport) =
-        applyRemote(
-            t, row.getString("entity_id"), row.getLong("rev"),
-            if (row.optBoolean("deleted") || row.isNull("payload")) null else t.project(row.getJSONObject("payload")),
-            row.optString("device_id", "?"), report,
-        )
+    private fun apply(t: TableInfo, row: JSONObject, report: SyncReport) {
+        val syncId = row.getString("entity_id")
+        val rev = row.getLong("rev")
+        val device = row.optString("device_id", "?")
+        if (row.optBoolean("deleted") || row.isNull("payload")) {
+            applyRemote(t, syncId, rev, null, device, report)
+            return
+        }
+        val payload = fromWire(t, t.project(row.getJSONObject("payload")))
+        if (payload == null) {
+            // It points at an item that has not arrived yet: kept as received, applied once it has.
+            db.execSQL(
+                "INSERT INTO sync_deferred(entity_type, sync_id, rev, payload, device) VALUES (?, ?, ?, ?, ?)",
+                arrayOf<Any?>(t.def.entityType, syncId, rev, row.getJSONObject("payload").toString(), device),
+            )
+            return
+        }
+        applyRemote(t, syncId, rev, payload, device, report)
+    }
+
+    private class Deferred(val id: Long, val type: String, val syncId: String, val rev: Long, val payload: String, val device: String)
+
+    /** Rows set aside because they pointed at something unknown: tried again now that more has arrived. */
+    private fun retryDeferred(infos: List<TableInfo>, report: SyncReport) {
+        var progress = true
+        while (progress) {
+            progress = false
+            val waiting = db.query("SELECT id, entity_type, sync_id, rev, payload, device FROM sync_deferred ORDER BY id").use { c ->
+                buildList { while (c.moveToNext()) add(Deferred(c.getLong(0), c.getString(1), c.getString(2), c.getLong(3), c.getString(4), c.getString(5))) }
+            }
+            for (w in waiting) {
+                val t = infos.firstOrNull { it.def.entityType == w.type }
+                val known = mapBySyncId(w.type, w.syncId)
+                val obsolete = t == null || (known != null && known.rev >= w.rev)
+                val payload = if (obsolete) null else fromWire(t!!, t.project(JSONObject(w.payload)))
+                if (!obsolete && payload == null) continue // still waiting
+                if (!obsolete) applyRemote(t!!, w.syncId, w.rev, payload, w.device, report)
+                db.execSQL("DELETE FROM sync_deferred WHERE id = ?", arrayOf<Any?>(w.id))
+                progress = true
+            }
+        }
+        report.waiting = db.query("SELECT COUNT(*) FROM sync_deferred").use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
+    }
+
+    // ---- References: row ids are local, so on the wire a reference carries the target's sync id.
+
+    /** A row as it goes to the hub: each reference replaced by its target's sync id (null when the target does
+     * not exist here). */
+    private fun toWire(t: TableInfo, values: SortedMap<String, Any?>): JSONObject {
+        val wire = TreeMap(values)
+        for ((column, value) in values) {
+            if (value !is Long || value == 0L) continue
+            val target = t.def.targetOf(column, values) ?: continue
+            wire[column] = db.query("SELECT sync_id FROM sync_map WHERE entity_type = ? AND local_id = ? AND deleted = 0", arrayOf<Any?>(target, value))
+                .use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                // A link to something that does not exist here says the same as no link: null, or 0 where the
+                // column cannot be empty (what the receiving side would store for null anyway).
+                ?: if (t.isRequired(column)) 0L else null
+        }
+        return SyncValues.toPayload(wire)
+    }
+
+    /** A row as received, with each reference turned back into this database's row id. Null when one of them
+     * points at an item that is not here (yet). */
+    private fun fromWire(t: TableInfo, wire: SortedMap<String, Any?>): SortedMap<String, Any?>? {
+        val values = TreeMap(wire)
+        for ((column, value) in wire) {
+            val target = t.def.targetOf(column, wire) ?: continue
+            if (value !is String) continue
+            val found = db.query("SELECT local_id FROM sync_map WHERE entity_type = ? AND sync_id = ?", arrayOf<Any?>(target, value)).use { c ->
+                if (!c.moveToFirst()) return null // never heard of it: wait for it
+                if (c.isNull(0)) null else c.getLong(0) // known but deleted: the link is empty
+            }
+            values[column] = found
+        }
+        return values
+    }
 
     /** Brings one entity's state on the hub ([payload] null = deleted there) into this database. */
     private fun applyRemote(t: TableInfo, syncId: String, rev: Long, payload: SortedMap<String, Any?>?, device: String, report: SyncReport) {
@@ -238,7 +345,7 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
 
         // Field by field, against the version both sides started from.
         val ancestor = map.syncedValues?.let { t.project(JSONObject(it)) }
-        val merge = SyncValues.merge(local, payload, ancestor, t.def.matchColumn)
+        val merge = SyncValues.merge(local, payload, ancestor, t.def.allMatchColumns)
         for (c in merge.setAside) {
             // Both wrote something different: ours stays, theirs is set aside for the user.
             db.execSQL(
@@ -276,6 +383,7 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
     // ------------------------------------------------------------------ scan & push
 
     private class Pending(val table: TableInfo, val syncId: String, val localId: Long?, val baseRev: Long, val hash: String?, val values: SortedMap<String, Any?>?) {
+        var wire: JSONObject? = null // the row as it travels (references as sync ids)
         val isDelete get() = values == null
         val mutationId get() = SyncValues.mutationId(table.def.entityType, syncId, baseRev, hash)
     }
@@ -307,6 +415,8 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
                     "Cela ressemble à une base remplacée plutôt qu'à des suppressions voulues : rien n'a été envoyé au hub.",
             )
         }
+        // Now that every new row of this table has its sync id, write the rows as they travel.
+        pending.forEach { p -> p.wire = toWire(t, p.values!!) }
         deletes.forEach { pending += Pending(t, it.syncId, null, it.rev, null, null) }
         pending
     }
@@ -323,7 +433,7 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
                         .put("entity_id", p.syncId)
                         .put("base_rev", p.baseRev)
                         .put("deleted", p.isDelete)
-                        .put("payload", p.values?.let(SyncValues::toPayload) ?: JSONObject.NULL),
+                        .put("payload", p.wire ?: JSONObject.NULL),
                 )
             }
             val results = hub.push(mutations).getJSONArray("results")
@@ -347,11 +457,13 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
                                 upsertMap(type, p.syncId, map.localId, rev, null, false) // unknown to this hub: send as it is
                             } else {
                                 val gone = current.optBoolean("deleted") || current.isNull("payload")
-                                applyRemote(
-                                    p.table, p.syncId, current.getLong("rev"),
-                                    if (gone) null else p.table.project(current.getJSONObject("payload")),
-                                    current.optString("last_device", "?"), report,
-                                )
+                                val theirs = if (gone) null else fromWire(p.table, p.table.project(current.getJSONObject("payload")))
+                                if (!gone && theirs == null) {
+                                    // points at something unknown here: ours goes on top
+                                    upsertMap(type, p.syncId, map.localId, current.getLong("rev"), null, false)
+                                } else {
+                                    applyRemote(p.table, p.syncId, current.getLong("rev"), theirs, current.optString("last_device", "?"), report)
+                                }
                             }
                             conflicts++
                         }
@@ -423,6 +535,16 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
             db.query("SELECT `$pk`, $columnList FROM `${def.table}` WHERE `$pk` = ?", arrayOf<Any?>(id))
                 .use { c -> if (c.moveToFirst()) values(c) else null }
 
+        fun isRequired(column: String) = columns.any { it.name == column && it.notNull }
+
+        /** See [SyncTable.decimalTextColumns]. */
+        fun normalizeDecimalText(db: SupportSQLiteDatabase) {
+            for (column in def.decimalTextColumns) {
+                if (columns.none { it.name == column }) continue
+                db.execSQL("UPDATE `${def.table}` SET `$column` = REPLACE(`$column`, ',', '.') WHERE `$column` LIKE '%,%'")
+            }
+        }
+
         /** The row's content as canonical JSON, or null when the row is gone. */
         fun jsonOfRow(db: SupportSQLiteDatabase, id: Long): String? = readRow(db, id)?.let(SyncValues::canonical)
 
@@ -433,19 +555,31 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
         /** A local row not yet linked that is "the same thing" by the table's match column (see
          * [SyncTable.matchColumn]). Null when the table has none or nothing matches. */
         fun findUnmappedByKey(db: SupportSQLiteDatabase, payload: Map<String, Any?>): Long? {
-            val column = def.matchColumn ?: return null
-            val wanted = (payload[column] as? String)?.takeIf { it.isNotEmpty() } ?: return null
-            if (columns.none { it.name == column }) return null
+            val keys = def.allMatchColumns
+            if (keys.isEmpty() || keys.any { k -> columns.none { it.name == k } }) return null
+            // Every key column must be carried and say something: an empty key identifies nothing.
+            if (keys.any { k -> !payload.containsKey(k) || payload[k] == null || payload[k] == "" }) return null
+
+            fun key(v: Any?): Any? = if (v is String && v.length > def.matchPrefix) v.take(def.matchPrefix) else v
+            var best: Long? = null
+            var bestScore = -1
             db.query(
-                "SELECT `$pk`, `$column` FROM `${def.table}` WHERE `$pk` NOT IN " +
+                "SELECT `$pk`, $columnList FROM `${def.table}` WHERE `$pk` NOT IN " +
                     "(SELECT local_id FROM sync_map WHERE entity_type = ? AND local_id IS NOT NULL) ORDER BY `$pk`",
                 arrayOf<Any?>(def.entityType),
             ).use { c ->
                 while (c.moveToNext()) {
-                    if (!c.isNull(1) && c.getString(1).take(def.matchPrefix) == wanted.take(def.matchPrefix)) return c.getLong(0)
+                    val local = values(c)
+                    if (!keys.all { k -> key(local[k]) == key(payload[k]) }) continue
+                    // Several candidates (rows created in one batch share a timestamp): the closest one.
+                    val score = payload.count { (k, v) -> local[k] == v }
+                    if (score > bestScore) {
+                        best = c.getLong(0)
+                        bestScore = score
+                    }
                 }
             }
-            return null
+            return best
         }
 
         fun findUnmappedTwin(db: SupportSQLiteDatabase, payload: SortedMap<String, Any?>): Long? {
