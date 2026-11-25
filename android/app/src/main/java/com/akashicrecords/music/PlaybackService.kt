@@ -109,6 +109,8 @@ class PlaybackService : MediaSessionService() {
             // Suggestions can be network streams (30 s clips): keeps the CPU and the Wi-Fi awake while
             // playing with the screen off.
             .setWakeMode(C.WAKE_MODE_NETWORK)
+            // Tracks that are not on this phone are read from the hub (HubStream).
+            .setMediaSourceFactory(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(this).setDataSourceFactory(HubStream.factory(this)))
             .build()
         val chain = SuggestionChain(this, player).also { this.chain = it }
         // ⏭ is always offered, so the system player never drops it (and never slides ⤓ into its
@@ -339,6 +341,7 @@ internal object SavedQueue {
                 "content" -> uri in onPhone // a library track
                 "file" -> uri.path?.let { File(it).exists() } == true // a suggestion fetched whole
                 "http", "https" -> true // a 30 s clip, streamed
+                "akashic" -> true // a catalogue track played from the hub
                 else -> false
             }
             if (i == index) {

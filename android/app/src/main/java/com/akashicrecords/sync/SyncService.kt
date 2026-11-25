@@ -69,6 +69,14 @@ object SyncService {
 
     private fun prefs(context: Context) = context.applicationContext.getSharedPreferences("sync", Context.MODE_PRIVATE)
 
+    /** Hub address and this phone's token, or null when not paired. */
+    fun credentials(context: Context): Pair<String, String>? {
+        val p = prefs(context)
+        val url = p.getString("hubUrl", "").orEmpty()
+        val token = p.getString("token", "").orEmpty()
+        return if (url.isEmpty() || token.isEmpty()) null else url to token
+    }
+
     private var lastSuccess: String? = null
     private var lastWhat: String? = null
     private var lastError: String? = null

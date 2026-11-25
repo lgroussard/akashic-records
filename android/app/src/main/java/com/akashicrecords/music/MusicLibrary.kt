@@ -7,6 +7,8 @@ import android.os.Build
 import android.provider.MediaStore
 import com.akashicrecords.data.AkashicDatabase
 import com.akashicrecords.data.MusicTrack
+import com.akashicrecords.sync.FileSync
+import com.akashicrecords.sync.SyncService
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
@@ -19,8 +21,8 @@ import java.time.format.DateTimeFormatter
 // the path key stable for the future server sync.
 //
 // Difference with the desktop: rows whose file is not on the phone are NOT pruned. The phone
-// only holds a user-chosen subset of the library (MOBILITE-SYNC.md, D3), so rows imported from
-// the PC must survive; the UI simply lists the tracks that have a local file.
+// only holds a user-chosen subset of the files; the other tracks of the catalogue are played
+// from the hub (HubStream) when it holds them.
 class MusicLibrary(private val context: Context, private val db: AkashicDatabase) {
 
     data class LocalFile(val uri: Uri, val relativePath: String, val album: String, val title: String, val artist: String, val durationMs: Long)
@@ -57,10 +59,39 @@ class MusicLibrary(private val context: Context, private val db: AkashicDatabase
             }
         }
         available = files.associate { normalize(it.relativePath) to it.uri }
+        remote = loadRemote()
         return dao.getAll()
     }
 
-    fun uriFor(track: MusicTrack): Uri? = available[normalize(track.FilePath)]
+    // Catalogue key -> hash of the file on the hub, for the tracks the hub holds (empty when not paired).
+    @Volatile
+    private var remote: Map<String, String> = emptyMap()
+
+    private fun loadRemote(): Map<String, String> {
+        if (SyncService.credentials(context) == null) return emptyMap()
+        return runCatching {
+            val sql = db.openHelper.writableDatabase
+            FileSync.ensureSchema(sql)
+            sql.query("SELECT Path, Hash FROM sync_file").use { c ->
+                buildMap { while (c.moveToNext()) FileSync.normalize(c.getString(0))?.takeIf(FileSync::isMusic)?.let { put(normalize(it), c.getString(1).lowercase()) } }
+            }
+        }.getOrDefault(emptyMap())
+    }
+
+    /** The hub's file for a catalogue key, or null when the hub does not hold it. */
+    fun hashOf(key: String): String? {
+        if (remote.isEmpty()) remote = loadRemote()
+        return remote[key]?.takeIf { h -> h.length == 64 && h.all { it.isDigit() || it in 'a'..'f' } }
+    }
+
+    /** Whether the track's file is on this phone (playable without network). */
+    fun isLocal(track: MusicTrack) = normalize(track.FilePath) in available
+
+    /** What the player opens for a track: its file on this phone, else the hub's copy (streamed), else null. */
+    fun uriFor(track: MusicTrack): Uri? {
+        val key = normalize(track.FilePath)
+        return available[key] ?: if (key in remote) HubStream.uri(key) else null
+    }
 
     private fun queryFolder(folder: String): List<LocalFile> {
         val root = folder.trim().trim('/')

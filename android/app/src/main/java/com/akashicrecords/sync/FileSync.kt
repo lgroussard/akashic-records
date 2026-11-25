@@ -101,11 +101,17 @@ class FileSync(
         val start = SystemClock.elapsedRealtime()
         class Listed(val path: String, val hash: String, val wasHere: Boolean, val keep: Long?)
 
-        val listed = db.query(
-            "SELECT f.Path, f.Hash, l.path IS NOT NULL, k.keep FROM sync_file f " +
-                "LEFT JOIN sync_file_local l ON lower(l.path) = lower(f.Path) LEFT JOIN sync_keep k ON k.path = lower(f.Path) ORDER BY f.Path",
-        ).use { c ->
-            buildList { while (c.moveToNext()) add(Listed(c.getString(0), c.getString(1), c.getLong(2) != 0L, if (c.isNull(3)) null else c.getLong(3))) }
+        applyKeptLists(db)
+        // Paths are compared in Kotlin: SQLite's lower() only folds ASCII, "É" would never match its key.
+        val wasHere = db.query("SELECT path FROM sync_file_local").use { c -> buildSet { while (c.moveToNext()) add(MusicFiles.key(c.getString(0))) } }
+        val keeps = db.query("SELECT path, keep FROM sync_keep").use { c -> buildMap { while (c.moveToNext()) put(c.getString(0), c.getLong(1)) } }
+        val listed = db.query("SELECT Path, Hash FROM sync_file ORDER BY Path").use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    val key = MusicFiles.key(c.getString(0))
+                    add(Listed(c.getString(0), c.getString(1), key in wasHere, keeps[key]))
+                }
+            }
         }
         val musicHere = music?.local()?.map { MusicFiles.key(it.path) }?.toSet() ?: emptySet()
         val musicAllowed = music != null && music.allowedNow
@@ -209,6 +215,9 @@ class FileSync(
             )
             // This phone only: music wanted here (1) or not (0), by catalogue key (lower case, forward slashes).
             db.execSQL("CREATE TABLE IF NOT EXISTS sync_keep(path TEXT PRIMARY KEY, keep INTEGER NOT NULL)")
+            // This phone only: whole lists kept here (kind "album": name = the album; kind "mood": name = the
+            // ambiance's Id). Their tracks, present and future, are wanted here unless one was removed by hand.
+            db.execSQL("CREATE TABLE IF NOT EXISTS sync_keep_list(kind TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY(kind, name))")
         }
 
         /** "media\covers\x.jpg" -> "media/covers/x.jpg"; null for anything that is not a plain path under one of
@@ -221,6 +230,31 @@ class FileSync(
         }
 
         fun isMusic(normalized: String) = normalized.startsWith("music/", ignoreCase = true)
+
+        fun setKeepList(db: SupportSQLiteDatabase, kind: String, name: String, keep: Boolean) {
+            ensureSchema(db)
+            if (keep) db.execSQL("INSERT OR IGNORE INTO sync_keep_list(kind, name) VALUES (?, ?)", arrayOf<Any?>(kind, name))
+            else db.execSQL("DELETE FROM sync_keep_list WHERE kind = ? AND name = ?", arrayOf<Any?>(kind, name))
+        }
+
+        fun keptLists(db: SupportSQLiteDatabase, kind: String): Set<String> {
+            ensureSchema(db)
+            return db.query("SELECT name FROM sync_keep_list WHERE kind = ?", arrayOf<Any?>(kind)).use { c -> buildSet { while (c.moveToNext()) add(c.getString(0)) } }
+        }
+
+        /** The tracks of the kept lists that this phone has no choice for yet become wanted here: that is how a
+         * title added to a kept album or ambiance (on any device) arrives by itself. A track removed by hand
+         * (keep = 0) stays removed. */
+        fun applyKeptLists(db: SupportSQLiteDatabase) {
+            ensureSchema(db)
+            val paths = runCatching {
+                db.query(
+                    "SELECT FilePath FROM MusicTrack WHERE Album IN (SELECT name FROM sync_keep_list WHERE kind = 'album') " +
+                        "OR Id IN (SELECT TrackId FROM TrackMood WHERE CAST(MoodId AS TEXT) IN (SELECT name FROM sync_keep_list WHERE kind = 'mood'))",
+                ).use { c -> buildList { while (c.moveToNext()) add(c.getString(0)) } }
+            }.getOrDefault(emptyList())
+            for (p in paths) db.execSQL("INSERT OR IGNORE INTO sync_keep(path, keep) VALUES (?, 1)", arrayOf<Any?>(MusicFiles.key(p)))
+        }
 
         /** The phone's choice for a track: keep its file here, or not. */
         fun setKeep(db: SupportSQLiteDatabase, path: String, keep: Boolean) {
