@@ -109,7 +109,9 @@ object SyncService {
                 val hub = HubClient(url, token)
                 // The files the rows point at: sent before the rows, fetched after (see FileSync).
                 FileSync.ensureSchema(db)
-                val fileSync = FileSync(db, app.filesDir, hub, AkashicCatalog.fileColumns)
+                // Music lives in the phone's shared Music folder, and only the chosen tracks are fetched.
+                val music = MusicFiles(app, com.akashicrecords.data.ConfigStore(app).musicFolder())
+                val fileSync = FileSync(db, app.filesDir, app.cacheDir, hub, AkashicCatalog.fileColumns, music)
                 val files = FileSyncReport()
                 fileSync.publish(files)
                 val rows = SyncEngine(db, hub, TABLES).run()
@@ -133,6 +135,12 @@ object SyncService {
         }
         if (report != null && report.received + (lastFiles?.downloaded ?: 0) > 0) _dataVersion.value++
         if (report != null && report.setAside > 0) refreshConflicts(app)
+        lastFiles?.let { f ->
+            // A kept track has arrived: the music library rescans. And a run that stopped at its time budget
+            // after moving something goes on right away, so a batch of tracks does not wait for the next period.
+            if (f.downloadedMusic > 0) com.akashicrecords.music.Downloader.notifyLibraryChanged()
+            if (report != null && f.uploaded + f.downloaded > 0 && f.toSend + f.toFetch > 0) requestSoon(app, 1)
+        }
         return report
     }
 

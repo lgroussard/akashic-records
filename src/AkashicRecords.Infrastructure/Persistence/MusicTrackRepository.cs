@@ -118,6 +118,16 @@ public sealed class MusicTrackRepository
         command.ExecuteNonQuery();
     }
 
+    // True once this database takes part in the sync with the hub (its bookkeeping tables exist). The list of
+    // tracks is then a catalogue shared by every device, and a track's file may simply not be on this one.
+    public bool IsSynchronised()
+    {
+        using var connection = _connectionFactory.CreateOpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'sync_file';";
+        return (long)command.ExecuteScalar()! > 0;
+    }
+
     // Cascade isn't enforced at the DB level in this app, so clean up the join rows manually.
     public void Delete(int id)
     {

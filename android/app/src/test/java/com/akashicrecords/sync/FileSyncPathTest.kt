@@ -11,6 +11,7 @@ class FileSyncPathTest {
         assertEquals("books/covers/x.jpg", FileSync.normalize("books\\covers\\x.jpg"))
         assertEquals("references/x.jpg", FileSync.normalize("references/x.jpg"))
         assertEquals("media/tickets/x.pdf", FileSync.normalize("/media/tickets/x.pdf"))
+        assertEquals("music/Album/titre.mp3", FileSync.normalize("music\\Album\\titre.mp3"))
     }
 
     @Test
@@ -22,6 +23,6 @@ class FileSyncPathTest {
         assertNull(FileSync.normalize("media//x.jpg"))
         assertNull(FileSync.normalize("databases/akashic.db"))
         assertNull(FileSync.normalize("C:\\Windows\\win.ini"))
-        assertNull(FileSync.normalize("music\\titre.mp3")) // music is handled apart
+        assertNull(FileSync.normalize("musique\\titre.mp3"))
     }
 }

@@ -11,9 +11,12 @@ namespace AkashicRecords.Sync;
 ///    travel as they are; the files themselves are a separate matter.
 /// The phone has the same list in android/.../sync/AkashicCatalog.kt: change both together.
 ///
-/// Not here on purpose: MusicTrack, TrackMood, Playlist, PlaylistTrack (a track is a file of one
-/// device's own music folder: handled with the music itself), DownloadItem / DownloadFolder (each
-/// device's own download queue), SchemaFlag (internal).
+/// Music: the rows (tracks, moods, playlists) are a catalogue shared by every device; a track is
+/// identified by its path under the music folder, the same on the PC and the phone. Whether a
+/// track's FILE is on a device is that device's own choice (see FileSync).
+///
+/// Not here on purpose: DownloadItem / DownloadFolder (each device's own download queue),
+/// SchemaFlag (internal).
 /// </summary>
 public static class AkashicCatalog
 {
@@ -23,6 +26,7 @@ public static class AkashicCatalog
         ("Recipe", "CoverImagePath"), ("Artwork", "CoverImagePath"), ("WatchlistItem", "CoverImagePath"),
         ("Poem", "ImagePath"), ("JournalPhoto", "ImagePath"), ("Photo", "ImagePath"), ("CanvasElement", "ImagePath"),
         ("RefImage", "ImagePath"), ("Book", "FilePath"), ("Book", "CoverPath"), ("Ticket", "FilePath"),
+        ("MusicTrack", "FilePath"), ("MusicTrack", "CoverImagePath"),
     ];
 
     /// <summary>Everything the engine synchronises: the tables below, plus the index of their files.</summary>
@@ -73,6 +77,12 @@ public static class AkashicCatalog
         new("Transition", "Transition") { MatchColumns = ["CreatedAt"] },
         new("TransitionStep", "TransitionStep") { Refs = R(("TransitionId", "Transition")), MatchColumns = ["TransitionId", "Text"] },
         new("Mood", "Mood") { MatchColumns = ["Name"] },
+
+        // ---- Musique (the catalogue; the audio files follow each device's own choice)
+        new("MusicTrack", "MusicTrack") { MatchColumns = ["FilePath"] },
+        new("TrackMood", "TrackMood") { Refs = R(("TrackId", "MusicTrack"), ("MoodId", "Mood")), MatchColumns = ["TrackId", "MoodId"] },
+        new("Playlist", "Playlist") { MatchColumns = ["CreatedAt"] },
+        new("PlaylistTrack", "PlaylistTrack") { Refs = R(("PlaylistId", "Playlist"), ("TrackId", "MusicTrack")), MatchColumns = ["PlaylistId", "TrackId"] },
 
         // ---- Calendrier
         new("Birthday", "Birthday") { MatchColumns = ["Name"] },

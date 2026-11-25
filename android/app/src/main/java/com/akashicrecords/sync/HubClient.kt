@@ -70,13 +70,16 @@ class HubClient(hubUrl: String, private val token: String? = null) {
         }
     }
 
-    fun uploadFile(file: java.io.File, hash: String) = transfer {
+    fun uploadFile(file: java.io.File, hash: String) = uploadStream(file.length(), hash) { file.inputStream() }
+
+    /** Sends [length] bytes read from [open] (a file, or a content of the shared storage). */
+    fun uploadStream(length: Long, hash: String, open: () -> java.io.InputStream) = transfer {
         val conn = open("POST", "/media?hash=$hash")
         try {
             conn.doOutput = true
-            conn.setFixedLengthStreamingMode(file.length()) // streamed, never held in memory
+            conn.setFixedLengthStreamingMode(length) // streamed, never held in memory
             conn.setRequestProperty("Content-Type", "application/octet-stream")
-            file.inputStream().use { input -> conn.outputStream.use { input.copyTo(it) } }
+            open().use { input -> conn.outputStream.use { input.copyTo(it) } }
             val status = conn.responseCode
             if (status !in 200..299) throw HubException("Envoi d'un fichier refusé par le hub ($status).", status)
         } finally {

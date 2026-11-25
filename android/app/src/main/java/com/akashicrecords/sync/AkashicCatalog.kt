@@ -69,6 +69,12 @@ object AkashicCatalog {
         t("TransitionStep", listOf("TransitionId", "Text"), refs = mapOf("TransitionId" to "Transition")),
         t("Mood", listOf("Name")),
 
+        // ---- Musique (the catalogue; the audio files follow each device's own choice)
+        t("MusicTrack", listOf("FilePath")),
+        t("TrackMood", listOf("TrackId", "MoodId"), refs = mapOf("TrackId" to "MusicTrack", "MoodId" to "Mood")),
+        t("Playlist", created),
+        t("PlaylistTrack", listOf("PlaylistId", "TrackId"), refs = mapOf("PlaylistId" to "Playlist", "TrackId" to "MusicTrack")),
+
         // ---- Calendrier
         t("Birthday", listOf("Name")),
         t("CalendarEvent", created),

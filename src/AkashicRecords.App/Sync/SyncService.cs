@@ -55,6 +55,9 @@ public sealed class SyncService
                 ? "rien à échanger"
                 : $"{LastReport.Pushed} envoyé(s), {LastReport.Inserted + LastReport.Updated + LastReport.Deleted} reçu(s)";
             if (LastFiles is { } f && f.Uploaded + f.Downloaded > 0) what += $" ; fichiers : {f.Uploaded} envoyé(s), {f.Downloaded} reçu(s)";
+            // A music library goes up in slices, one per cycle: say how much is left rather than look stuck.
+            if (LastFiles is { ToSend: > 0 } or { ToFetch: > 0 })
+                what += $" ; en cours : encore {LastFiles.ToSend} fichier(s) à envoyer, {LastFiles.ToFetch} à recevoir";
             var aside = SetAside().Count;
             var note = aside == 0 ? "" : $" {aside} version(s) mise(s) de côté à relire ci-dessous.";
             return $"{head} Dernière synchro à {LastSuccess:HH:mm:ss} : {what}.{note}";
@@ -87,7 +90,8 @@ public sealed class SyncService
                 using var hub = new HubClient(settings.HubUrl, settings.Token);
                 // The files the rows point at: sent before the rows, fetched after (see FileSync).
                 FileSync.EnsureSchema(_dbPath);
-                var fileSync = new FileSync(_dbPath, AppContext.BaseDirectory, hub, AkashicCatalog.FileColumns);
+                // This computer holds the whole music library: every track of the catalogue is wanted here.
+                var fileSync = new FileSync(_dbPath, AppContext.BaseDirectory, hub, AkashicCatalog.FileColumns) { Music = MusicPolicy.All };
                 await fileSync.PublishAsync(files);
                 var rows = await new SyncEngine(_dbPath, hub, Tables).RunAsync();
                 await fileSync.FetchAsync(files);
