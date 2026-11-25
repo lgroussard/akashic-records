@@ -1286,7 +1286,13 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
     private void NavigateToDate(DateTime date)
     {
         _currentPageDate = date.Date;
-        _selectedEntry = _journalEntryRepository.GetAll().FirstOrDefault(entry => entry.EntryDate.Date == _currentPageDate);
+        // The phone can hold several entries for one day (an empty one left beside the written one): the page shows
+        // the one with the most text, the latest on a tie, so an empty row never hides the day's writing.
+        _selectedEntry = _journalEntryRepository.GetAll()
+            .Where(entry => entry.EntryDate.Date == _currentPageDate)
+            .OrderByDescending(entry => entry.Text.Length)
+            .ThenByDescending(entry => entry.Id)
+            .FirstOrDefault();
         SaveActiveItem();
 
         PageDateText.Text = _currentPageDate.ToString("dddd d MMMM yyyy", CultureInfo.CurrentCulture);
@@ -1560,14 +1566,23 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
         EntryPhotosPanel.Children.Clear();
         if (_selectedEntry is null) return;
 
-        foreach (var photo in _journalPhotoRepository.GetByEntry(_selectedEntry.Id))
+        var photos = _journalPhotoRepository.GetByEntry(_selectedEntry.Id);
+        foreach (var photo in photos)
         {
             var image = new Image
             {
                 Source = LoadImage(MediaStorage.ResolveFullPath(photo.ImagePath)),
                 Height = 90,
                 Stretch = Stretch.Uniform,
-                Margin = new Thickness(0, 0, 6, 6)
+                Margin = new Thickness(0, 0, 6, 6),
+                Cursor = Cursors.Hand,
+                ToolTip = "Ouvrir en grand"
+            };
+            // A click opens the photo large, with the entry's other photos to step through and a "save as".
+            image.MouseLeftButtonUp += (_, _) =>
+            {
+                var paths = photos.Select(p => MediaStorage.ResolveFullPath(p.ImagePath)).ToList();
+                new PhotoViewerWindow(paths, photos.ToList().IndexOf(photo)) { Owner = Window.GetWindow(this) }.ShowDialog();
             };
 
             var deleteButton = new Button

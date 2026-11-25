@@ -31,6 +31,7 @@ import com.akashicrecords.calendar.MONTH_TITLE
 import com.akashicrecords.media.LocalImage
 import com.akashicrecords.media.MediaFiles
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -113,6 +114,7 @@ private fun EntryPage(
     var photos by remember { mutableStateOf<List<JournalPhoto>>(emptyList()) }
     var confirmPhoto by remember { mutableStateOf<JournalPhoto?>(null) }
     var confirmEntry by remember { mutableStateOf(false) }
+    var viewing by remember { mutableStateOf<Int?>(null) } // index of the photo opened large
     val lock = remember { Mutex() }
 
     LaunchedEffect(entryId) {
@@ -120,9 +122,15 @@ private fun EntryPage(
     }
 
     // Creates the row on first need (typing or adding a photo), never just by browsing.
+    // One row per day. Not cancellable: the auto-save calling this is cancelled by the next keystroke, and a
+    // cancellation landing during the insert used to leave the row written but its Id unknown here, so the next
+    // save inserted a second row for the same day (seen: an entry holding only the title beside the real one).
+    // The day's row is also looked up first, so a row this page does not know about is reused, never doubled.
     suspend fun ensureEntry(t: String, x: String, g: String): Int = lock.withLock {
-        entryId ?: withContext(Dispatchers.IO) {
-            db.journalEntryDao().add(JournalEntry(Title = t, Text = x, EntryDate = dateIso(date), Tags = g)).toInt()
+        entryId ?: withContext(NonCancellable + Dispatchers.IO) {
+            val dao = db.journalEntryDao()
+            dao.getAll().lastOrNull { datePart(it.EntryDate) == date }?.Id
+                ?: dao.add(JournalEntry(Title = t, Text = x, EntryDate = dateIso(date), Tags = g)).toInt()
         }.also { entryId = it; onChanged() }
     }
 
@@ -162,9 +170,9 @@ private fun EntryPage(
         Field("Tags (séparés par des virgules)", tags, { tags = it })
 
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 6.dp)) {
-            photos.forEach { p ->
+            photos.forEachIndexed { i, p ->
                 Box(Modifier.padding(end = 6.dp)) {
-                    LocalImage(p.ImagePath, Modifier.size(110.dp).clip(RoundedCornerShape(8.dp)), maxSide = 400)
+                    LocalImage(p.ImagePath, Modifier.size(110.dp).clip(RoundedCornerShape(8.dp)).clickable { viewing = i }, maxSide = 400)
                     Text(
                         "✕",
                         fontSize = 12.sp,
@@ -186,6 +194,8 @@ private fun EntryPage(
         }
         Spacer(Modifier.height(24.dp))
     }
+
+    viewing?.let { i -> PhotoViewer(photos.map { it.ImagePath }, i, onDismiss = { viewing = null }) }
 
     confirmPhoto?.let { p ->
         ConfirmDelete("cette photo", onConfirm = {
