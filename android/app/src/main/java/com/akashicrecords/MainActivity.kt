@@ -113,7 +113,13 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         lifecycleScope.launch { Widgets.refreshAll(applicationContext) }
-        com.akashicrecords.sync.SyncService.requestSoon(applicationContext, delaySeconds = 5)
+        // What is typed and not auto-saved yet is written now, before Android may kill the process; then the
+        // sync is queued (WorkManager: it runs even once the app is closed).
+        val app = applicationContext
+        com.akashicrecords.journaux.AppScope.launch {
+            runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { com.akashicrecords.journaux.PendingEdits.flushAll() } }
+            com.akashicrecords.sync.SyncService.requestSoon(app, delaySeconds = 1)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
