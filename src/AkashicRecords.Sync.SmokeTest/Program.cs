@@ -255,6 +255,27 @@ await Scenario("9. Journal : la meme journee ecrite sur deux appareils", async l
     Check(phone.Day("2026-11-24")[0] == "Journee calme. Promenade le soir.", "ensuite, une modification du journal circule comme pour une recette");
 });
 
+await Scenario("11. Premier rapprochement de deux appareils qui n'ont pas tout a fait les memes donnees", async lab =>
+{
+    var pc = await lab.Device("pc");
+    var phone = await lab.Device("phone");
+    // The phone still has last week's copy of one recipe; the PC has edited it since.
+    pc.Add("Gaspacho"); phone.Add("Gaspacho");
+    pc.Add("Houmous"); phone.Add("Houmous");
+    pc.Set("Gaspacho", "Instructions", "1. Mixer. 2. Servir frais. 3. Ajouter des croutons.");
+    pc.Set("Gaspacho", "Notes", "meilleur le lendemain");
+    await pc.Sync();
+    var r = await phone.Sync();
+    await pc.Sync();
+    Check(pc.Count() == 2 && phone.Count() == 2, "meme titre des deux cotes : une seule recette, pas de doublon");
+    Check(phone.Field("Gaspacho", "Instructions") == "1. Mixer. 2. Servir frais. 3. Ajouter des croutons." && phone.Field("Gaspacho", "Notes") == "meilleur le lendemain"
+          && pc.Field("Gaspacho", "Instructions") == "1. Mixer. 2. Servir frais. 3. Ajouter des croutons.",
+        "la version la plus complete est gardee partout, quel que soit l'appareil qui synchronise en dernier");
+    Check(r.SetAside == 1 && phone.SetAside().Single() is { Field: "Instructions", LostValue: "etapes" },
+        "l'ancienne version du champ est mise de cote sur le telephone, pas jetee");
+    Check(pc.Dump() == phone.Dump() && (await pc.Sync()).NothingToDo && (await phone.Sync()).NothingToDo, "contenus identiques, plus rien a echanger");
+});
+
 await Scenario("10. Mise a niveau depuis la premiere version du moteur", async lab =>
 {
     var (pc, phone) = await lab.SeededPair("Houmous", "Falafels");

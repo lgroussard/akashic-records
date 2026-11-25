@@ -35,7 +35,8 @@ object SyncService {
 
     // What is synchronised. A recipe's cover is a file of this phone: its path stays here.
     private val TABLES = listOf(
-        SyncTable("Recipe", "Recipe", setOf("CoverImagePath")),
+        // Same title = the same recipe, when two devices each already had it in slightly different versions.
+        SyncTable("Recipe", "Recipe", setOf("CoverImagePath"), matchColumn = "Title"),
         // One entry per day: two devices that each wrote "today" hold the same entry (joined on the date).
         SyncTable("JournalEntry", "JournalEntry", matchColumn = "EntryDate", matchPrefix = 10),
     )

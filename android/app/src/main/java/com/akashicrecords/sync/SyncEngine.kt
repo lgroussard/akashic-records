@@ -245,7 +245,7 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
                 "INSERT INTO sync_conflict(entity_type, sync_id, local_id, label, field, kept_value, lost_value, lost_device, created_at) " +
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 arrayOf<Any?>(
-                    type, syncId, localId, t.labelOf(local), c.field, c.ours?.toString(), c.theirs?.toString(), device,
+                    type, syncId, localId, t.labelOf(local), c.field, c.kept?.toString(), c.lost?.toString(), if (c.lostIsOurs) "cet appareil" else device,
                     java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date()),
                 ),
             )

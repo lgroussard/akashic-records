@@ -13,7 +13,8 @@ public sealed class Lab : IAsyncDisposable
 {
     public static readonly SyncTable[] Tables =
     {
-        new("Recipe", "Recipe", "CoverImagePath"),
+        // Same title = the same recipe, when two devices each already had it in slightly different versions.
+        new("Recipe", "Recipe", "CoverImagePath") { MatchColumn = "Title" },
         // One entry per day: two devices that each wrote "today" hold the same entry.
         new("JournalEntry", "JournalEntry") { MatchColumn = "EntryDate", MatchPrefix = 10 },
     };

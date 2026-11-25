@@ -312,12 +312,18 @@ public sealed class SyncEngine
             else if (!known && IsEmpty(theirs)) { }
             else
             {
-                // Both wrote something different: ours stays, theirs is set aside for the user.
+                // Both wrote something different: one stays, the other is set aside for the user.
+                // With a common ancestor, ours stays (we are the one syncing last). Without one (two
+                // devices linking rows they each already had), nobody knows which is newer: the
+                // longer text stays - the fuller version of a journal day - whichever side holds it.
+                var theirsWins = !known && theirs is string theirText && ours is string ourText && theirText.Length > ourText.Length;
+                if (theirsWins) take[field] = theirs;
+                var (kept, lost) = theirsWins ? (theirs, ours) : (ours, theirs);
                 Exec(db, tx, """
                     INSERT INTO sync_conflict(entity_type, sync_id, local_id, label, field, kept_value, lost_value, lost_device, created_at)
                     VALUES ($t, $s, $l, $label, $f, $kept, $lost, $dev, $at)
                     """, ("$t", type), ("$s", syncId), ("$l", map.LocalId), ("$label", t.LabelOf(local)), ("$f", field),
-                    ("$kept", Text(ours)), ("$lost", Text(theirs)), ("$dev", device), ("$at", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")));
+                    ("$kept", Text(kept)), ("$lost", Text(lost)), ("$dev", theirsWins ? "cet appareil" : device), ("$at", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")));
                 report.SetAside++;
             }
         }

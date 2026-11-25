@@ -16,7 +16,8 @@ public sealed class SyncService
     // What is synchronised. A recipe's cover is a file path on this machine: it stays here.
     private static readonly SyncTable[] Tables =
     {
-        new("Recipe", "Recipe", "CoverImagePath"),
+        // Same title = the same recipe, when two devices each already had it in slightly different versions.
+        new("Recipe", "Recipe", "CoverImagePath") { MatchColumn = "Title" },
         // One entry per day: two devices that each wrote "today" hold the same entry (joined on the date).
         new("JournalEntry", "JournalEntry") { MatchColumn = "EntryDate", MatchPrefix = 10 },
     };

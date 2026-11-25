@@ -70,8 +70,9 @@ internal object SyncValues {
         return out
     }
 
-    /** One field both sides changed differently: [ours] stays in the row, [theirs] is set aside for the user. */
-    data class SetAside(val field: String, val ours: Any?, val theirs: Any?)
+    /** One field both sides changed differently: [kept] is what the row holds after the merge, [lost] is set
+     * aside for the user. [lostIsOurs]: the text set aside is the one this device had. */
+    data class SetAside(val field: String, val kept: Any?, val lost: Any?, val lostIsOurs: Boolean = false)
 
     class Merge(val take: SortedMap<String, Any?>, val setAside: List<SetAside>)
 
@@ -97,6 +98,13 @@ internal object SyncValues {
                 !known && field == matchColumn -> take[field] = theirs
                 !known && isEmpty(ours) -> take[field] = theirs
                 !known && isEmpty(theirs) -> Unit
+                // Both wrote something different. With a common ancestor, ours stays (we are the one syncing
+                // last). Without one (two devices linking rows they each already had), nobody knows which
+                // is newer: the longer text stays - the fuller version of a journal day - whichever side holds it.
+                !known && theirs is String && ours is String && theirs.length > ours.length -> {
+                    take[field] = theirs
+                    aside += SetAside(field, theirs, ours, lostIsOurs = true)
+                }
                 else -> aside += SetAside(field, ours, theirs)
             }
         }
