@@ -19,6 +19,13 @@ object AkashicCatalog {
         decimalTextColumns = decimals,
     )
 
+    /** The columns holding the path of a file of the app folder (see FileSync). */
+    val fileColumns: List<Pair<String, String>> = listOf(
+        "Recipe" to "CoverImagePath", "Artwork" to "CoverImagePath", "WatchlistItem" to "CoverImagePath",
+        "Poem" to "ImagePath", "JournalPhoto" to "ImagePath", "Photo" to "ImagePath", "CanvasElement" to "ImagePath",
+        "RefImage" to "ImagePath", "Book" to "FilePath", "Book" to "CoverPath", "Ticket" to "FilePath",
+    )
+
     private val created = listOf("CreatedAt")
 
     val tables: List<SyncTable> = listOf(
