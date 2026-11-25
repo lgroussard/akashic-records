@@ -99,12 +99,18 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
     // Files added by a download run (from any screen): refresh the list.
     val libraryVersion by Downloader.libraryVersion.collectAsState()
     LaunchedEffect(libraryVersion) { if (granted && libraryVersion > 0) rescan() }
+    // The catalogue changed through a sync (tracks added on the PC, files arrived on the hub).
+    val syncedVersion by com.akashicrecords.sync.SyncService.dataVersion.collectAsState()
+    LaunchedEffect(syncedVersion) { if (granted && syncedVersion > 0) rescan() }
+    // "Sur ce téléphone" chip: only what plays without network.
+    var offlineOnly by remember { mutableStateOf(false) }
     LaunchedEffect(selectedMood, tracks) {
         moodTrackIds = selectedMood?.let { id -> withContext(Dispatchers.IO) { db.trackMoodDao().trackIdsForMood(id).toSet() } } ?: emptySet()
     }
 
-    // Only tracks with a file on this phone are listed.
-    val playable = tracks.filter { library.uriFor(it) != null }
+    // Everything that can be played: the files on this phone, and the rest of the catalogue from the hub.
+    val everything = tracks.filter { library.uriFor(it) != null }
+    val playable = if (offlineOnly) everything.filter { library.isLocal(it) } else everything
     val filtered = playable
         .filter { selectedMood == null || it.Id in moodTrackIds }
         .filter {
@@ -127,8 +133,8 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
             return@Column
         }
 
-        // "Serveur": the whole catalogue, to choose which tracks live on this phone.
-        val tabs = listOf("Bibliothèque" to "Library", "Rechercher" to "Search", "Serveur" to "Server")
+        // "Hors ligne": the whole catalogue, to choose which tracks (or whole lists) are kept on this phone.
+        val tabs = listOf("Bibliothèque" to "Library", "Rechercher" to "Search", "Hors ligne" to "Server")
         // Downloads: behind ⤓ (badge while a run is going) rather than a tab of their own.
         val downloads by Downloader.state.collectAsState()
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -181,6 +187,10 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (everything.any { !library.isLocal(it) }) {
+                FilterChip(selected = offlineOnly, onClick = { offlineOnly = !offlineOnly }, label = { Text("Sur ce téléphone", maxLines = 1) })
+                Spacer(Modifier.width(10.dp))
+            }
             Text("AMBIANCES", fontSize = 10.sp, color = Palette.TextFaint, fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(6.dp))
             moods.forEach { m ->
@@ -208,6 +218,7 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
         if (playable.isEmpty()) {
             Text(
                 if (scanning) "Scan en cours…"
+                else if (offlineOnly) "Aucun titre gardé sur ce téléphone. L'onglet « Hors ligne » sert à en garder."
                 else "Aucune piste sur ce téléphone. Copie des fichiers audio dans « $folder » " +
                     "(un sous-dossier = un album, comme le dossier music/ du PC), puis « Rescanner ».",
                 color = Palette.TextMuted,
@@ -241,7 +252,7 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
                     }
                     if (expandedAlbum == album) {
                         itemsIndexed(albumTracks, key = { _, t -> "t:${t.Id}" }) { i, t ->
-                            TrackRow(db, t, moods, open = openTrack == t.Id,
+                            TrackRow(db, t, moods, local = library.isLocal(t), open = openTrack == t.Id,
                                 onToggleOpen = { openTrack = if (openTrack == t.Id) null else t.Id },
                                 onPlay = { play(albumTracks, i) },
                                 onPlayNext = { library.uriFor(t)?.let { player.playNext(t, it) } },
@@ -251,7 +262,7 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
                 }
             } else {
                 itemsIndexed(filtered, key = { _, t -> "t:${t.Id}" }) { i, t ->
-                    TrackRow(db, t, moods, open = openTrack == t.Id,
+                    TrackRow(db, t, moods, local = library.isLocal(t), open = openTrack == t.Id,
                         onToggleOpen = { openTrack = if (openTrack == t.Id) null else t.Id },
                         onPlay = { play(filtered, i) },
                         onPlayNext = { library.uriFor(t)?.let { player.playNext(t, it) } },
@@ -392,6 +403,7 @@ private fun TrackRow(
     db: AkashicDatabase,
     track: MusicTrack,
     moods: List<Mood>,
+    local: Boolean,
     open: Boolean,
     onToggleOpen: () -> Unit,
     onPlay: () -> Unit,
@@ -403,7 +415,8 @@ private fun TrackRow(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f).clickable(onClick = onPlay).padding(vertical = 6.dp)) {
                 Text(track.Title.ifBlank { "(sans titre)" }, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                val sub = listOfNotNull(track.Artist.takeIf { it.isNotBlank() }, track.DurationSeconds?.let(::formatTime)).joinToString(" · ")
+                // ☁ = not on this phone: played from the server, needs the network.
+                val sub = listOfNotNull(if (local) null else "☁", track.Artist.takeIf { it.isNotBlank() }, track.DurationSeconds?.let(::formatTime)).joinToString(" · ")
                 if (sub.isNotEmpty()) Text(sub, fontSize = 11.sp, color = Palette.TextMuted)
             }
             TextButton(onClick = onPlayNext) { Text("⇥", fontSize = 16.sp) }

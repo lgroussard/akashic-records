@@ -8,6 +8,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -57,13 +59,16 @@ class CatalogTrack(
     val onPhone get() = uri != null
 }
 
+class CatalogMood(val id: Int, val name: String, val trackIds: Set<Int>)
+
 /** The music catalogue (every track known to the hub) and this phone's choice for each one. */
 object MusicCatalog {
     fun load(context: Context, db: AkashicDatabase, folder: String): List<CatalogTrack> {
         val sql = db.openHelper.writableDatabase
         FileSync.ensureSchema(sql)
         val local = MusicFiles(context, folder).local().associate { MusicFiles.key(it.path) to it.uri }
-        val listed = sql.query("SELECT lower(Path) FROM sync_file WHERE Path LIKE 'music/%'").use { c -> buildSet { while (c.moveToNext()) add(c.getString(0)) } }
+        // Keys are folded in Kotlin (SQLite's lower() leaves accented capitals alone).
+        val listed = sql.query("SELECT Path FROM sync_file").use { c -> buildSet { while (c.moveToNext()) add(MusicFiles.key(c.getString(0))) } }
         val keep = sql.query("SELECT path FROM sync_keep WHERE keep = 1").use { c -> buildSet { while (c.moveToNext()) add(c.getString(0)) } }
         return db.openHelper.readableDatabase.let {
             sql.query("SELECT Id, FilePath, Title, Artist, DurationSeconds, CoverImagePath, Album, AddedAt FROM MusicTrack").use { c ->
@@ -87,11 +92,29 @@ object MusicCatalog {
         val sql = db.openHelper.writableDatabase
         keys.forEach { FileSync.setKeep(sql, it, keep) }
     }
+
+    /** The ambiances, each with the ids of its tracks. */
+    fun moods(db: AkashicDatabase): List<CatalogMood> {
+        val sql = db.openHelper.writableDatabase
+        val links = sql.query("SELECT MoodId, TrackId FROM TrackMood").use { c ->
+            buildMap<Int, MutableSet<Int>> { while (c.moveToNext()) getOrPut(c.getInt(0)) { mutableSetOf() }.add(c.getInt(1)) }
+        }
+        return sql.query("SELECT Id, Name FROM Mood ORDER BY Name").use { c ->
+            buildList { while (c.moveToNext()) add(CatalogMood(c.getInt(0), c.getString(1), links[c.getInt(0)] ?: emptySet())) }
+        }
+    }
+
+    /** Whole lists kept on this phone: albums by name, ambiances by id (see FileSync.applyKeptLists). */
+    fun keptAlbums(db: AkashicDatabase) = FileSync.keptLists(db.openHelper.writableDatabase, "album")
+    fun keptMoods(db: AkashicDatabase) = FileSync.keptLists(db.openHelper.writableDatabase, "mood").mapNotNull { it.toIntOrNull() }.toSet()
+    fun setKeepAlbum(db: AkashicDatabase, album: String, keep: Boolean) = FileSync.setKeepList(db.openHelper.writableDatabase, "album", album, keep)
+    fun setKeepMood(db: AkashicDatabase, id: Int, keep: Boolean) = FileSync.setKeepList(db.openHelper.writableDatabase, "mood", id.toString(), keep)
 }
 
-// The "Serveur" tab of the music section: every track of the catalogue, and for each one whether its file lives
-// on this phone. "Garder" fetches it (on Wi-Fi), "Retirer" takes it off this phone only: the track stays in the
-// catalogue and on the hub.
+// The "Hors ligne" tab of the music section: every track of the catalogue, and for each one whether its file lives
+// on this phone. Any track the hub holds can be played without being here (HubStream); "Garder" fetches it (on
+// Wi-Fi) so it also plays without network, "Retirer" takes it off this phone only. A whole album or ambiance
+// can be kept: the choice is remembered and covers the titles added to it later.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ServerCatalogPanel(db: AkashicDatabase, folder: String) {
@@ -105,8 +128,16 @@ internal fun ServerCatalogPanel(db: AkashicDatabase, folder: String) {
     val synced by SyncService.dataVersion.collectAsState()
     val library by Downloader.libraryVersion.collectAsState()
 
+    var moods by remember { mutableStateOf<List<CatalogMood>>(emptyList()) }
+    var keptAlbums by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var keptMoods by remember { mutableStateOf<Set<Int>>(emptySet()) }
+
     suspend fun reload() {
-        items = withContext(Dispatchers.IO) { runCatching { MusicCatalog.load(context, db, folder) }.getOrDefault(emptyList()) }
+        class Loaded(val items: List<CatalogTrack>, val moods: List<CatalogMood>, val albums: Set<String>, val moodIds: Set<Int>)
+        val l = withContext(Dispatchers.IO) {
+            runCatching { Loaded(MusicCatalog.load(context, db, folder), MusicCatalog.moods(db), MusicCatalog.keptAlbums(db), MusicCatalog.keptMoods(db)) }.getOrNull()
+        } ?: return
+        items = l.items; moods = l.moods; keptAlbums = l.albums; keptMoods = l.moodIds
     }
     LaunchedEffect(synced, library, sync.busy, folder) { reload() }
 
@@ -139,6 +170,29 @@ internal fun ServerCatalogPanel(db: AkashicDatabase, folder: String) {
         reload()
     }
 
+    // A whole list: remembered, so the titles added to it later arrive by themselves.
+    fun keepAlbum(album: String, tracks: List<CatalogTrack>) = scope.launch {
+        withContext(Dispatchers.IO) { MusicCatalog.setKeepAlbum(db, album, true) }
+        keep(tracks.filter { !it.onPhone })
+    }
+
+    fun keepMood(m: CatalogMood) = scope.launch {
+        withContext(Dispatchers.IO) { MusicCatalog.setKeepMood(db, m.id, true) }
+        keep(items.filter { it.track.Id in m.trackIds && !it.onPhone })
+    }
+
+    // No longer kept: its tracks leave this phone, except those another kept list still holds.
+    fun unkeep(album: String?, mood: CatalogMood?) = scope.launch {
+        withContext(Dispatchers.IO) {
+            album?.let { MusicCatalog.setKeepAlbum(db, it, false) }
+            mood?.let { MusicCatalog.setKeepMood(db, it.id, false) }
+        }
+        val albumsLeft = keptAlbums - setOfNotNull(album)
+        val moodIdsLeft = moods.filter { it.id in keptMoods && it.id != mood?.id }.flatMap { it.trackIds }.toSet()
+        forget(items.filter { (album != null && it.track.Album == album) || (mood != null && it.track.Id in mood.trackIds) }
+            .filter { it.track.Album !in albumsLeft && it.track.Id !in moodIdsLeft })
+    }
+
     val shown = items
         .filter { it.onPhone == here }
         .filter { search.isBlank() || it.track.Title.contains(search, true) || it.track.Artist.contains(search, true) || it.track.Album.contains(search, true) }
@@ -152,7 +206,7 @@ internal fun ServerCatalogPanel(db: AkashicDatabase, folder: String) {
                 !sync.paired -> "Ce téléphone n'est pas relié au serveur (Plus → Réglages → Synchronisation)."
                 waiting > 0 && !wifi -> "$waiting titre(s) à récupérer : en attente du Wi-Fi (jamais sur les données mobiles)."
                 waiting > 0 -> "$waiting titre(s) en cours de récupération…"
-                else -> "${items.count { it.onPhone }} titre(s) sur ce téléphone, ${items.size} au catalogue."
+                else -> "${items.count { it.onPhone }} titre(s) gardé(s) sur ce téléphone, ${items.size} au catalogue. Les autres se lisent depuis le serveur."
             },
             fontSize = 12.sp,
             color = Palette.TextMuted,
@@ -163,20 +217,34 @@ internal fun ServerCatalogPanel(db: AkashicDatabase, folder: String) {
             Spacer(Modifier.width(8.dp))
             FilterChip(selected = here, onClick = { here = true }, label = { Text("Sur ce téléphone") })
         }
+        if (moods.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+                Text("Ambiances gardées :", fontSize = 11.sp, color = Palette.TextMuted)
+                moods.forEach { m ->
+                    Spacer(Modifier.width(6.dp))
+                    val kept = m.id in keptMoods
+                    FilterChip(selected = kept, onClick = { if (kept) unkeep(null, m) else keepMood(m) }, label = { Text("${m.name} (${m.trackIds.size})", maxLines = 1) })
+                }
+            }
+        }
 
         LazyColumn(Modifier.fillMaxSize()) {
             albums.forEach { (album, tracks) ->
                 item(key = "album:$album") {
+                    val raw = tracks.first().track.Album
+                    val kept = raw in keptAlbums
                     Row(Modifier.fillMaxWidth().clickable { open = if (album in open) open - album else open + album }, verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            (if (album in open) "▾ " else "▸ ") + album + "  (${tracks.size})",
+                            (if (album in open) "▾ " else "▸ ") + (if (kept) "★ " else "") + album + "  (${tracks.size})",
                             fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                         )
-                        if (here) {
-                            TextButton(onClick = { forget(tracks) }) { Text("Tout retirer") }
-                        } else {
-                            val fetchable = tracks.filter { it.onServer && !it.wanted }
-                            TextButton(onClick = { keep(fetchable) }, enabled = fetchable.isNotEmpty()) { Text("Tout garder") }
+                        when {
+                            kept -> TextButton(onClick = { unkeep(raw, null) }) { Text("Ne plus garder") }
+                            here -> Row {
+                                TextButton(onClick = { keepAlbum(raw, tracks) }) { Text("Garder l'album") }
+                                TextButton(onClick = { forget(tracks) }) { Text("Retirer") }
+                            }
+                            else -> TextButton(onClick = { keepAlbum(raw, tracks) }) { Text("Garder l'album") }
                         }
                     }
                 }
