@@ -11,8 +11,9 @@ import java.time.YearMonth
 // Port of the desktop CalendarService: the three things worth showing on a calendar, merged into
 // one agenda — birthdays (recurring MM-DD), calendar events (dated, optionally yearly, optionally
 // multi-day) and project deadlines. The screen and the reminder worker read the same agenda.
+// Phone only, a fourth one: the tickets that have a time (a train leaving, doors opening).
 
-enum class AgendaSource { Birthday, Event, Deadline }
+enum class AgendaSource { Birthday, Event, Deadline, Ticket }
 
 // Ordinals match the desktop CalendarEventKind enum (stored as Int in CalendarEvent.Kind).
 enum class EventKind(val label: String, val color: Color, val defaultLeadMinutes: Int) {
@@ -29,10 +30,15 @@ enum class EventKind(val label: String, val color: Color, val defaultLeadMinutes
 
 val BirthdayColor = Color(0xFFF06CA8)
 val DeadlineColor = Color(0xFFF2C14E)
+val TicketColor = Color(0xFF2DD4BF)
 
 // Desktop lead-time defaults (AppConfig): birthdays on the day (09:00), deadlines 2 days before.
 const val BIRTHDAY_LEAD_MINUTES = 0
 const val DEADLINE_LEAD_MINUTES = 2880
+// A ticket with a time: one hour before it leaves.
+const val TICKET_LEAD_MINUTES = 60
+// A timed event announced a day or more ahead (a trip, a week before) reminds once more this close to its hour.
+const val NEAR_LEAD_MINUTES = 60
 
 data class AgendaItem(
     val date: LocalDate,
@@ -50,12 +56,18 @@ data class AgendaItem(
             AgendaSource.Birthday -> BirthdayColor
             AgendaSource.Deadline -> DeadlineColor
             AgendaSource.Event -> (kind ?: EventKind.Autre).color
+            AgendaSource.Ticket -> TicketColor
         }
 
     val timeText: String get() = hour?.let { "%02d:%02d".format(it, minute ?: 0) } ?: ""
 
     // Same key as the desktop (Source:RefId:yyyy-MM-dd): one reminder per occurrence.
     val notificationKey: String get() = "$source:$refId:$date"
+
+    // What Reminders remembers as "already notified": the occurrence and the time its reminder was
+    // due [at], so an event moved to another hour after its reminder went out can ring again. The
+    // date stays last: old keys are pruned on it.
+    fun notifiedKey(at: LocalDateTime): String = "$source:$refId:$at:$date"
 
     // When the reminder should fire: lead minutes back from the clock time, or from 09:00 for
     // all-day items. Null = no reminder for this item.
@@ -65,12 +77,28 @@ data class AgendaItem(
             AgendaSource.Birthday -> BIRTHDAY_LEAD_MINUTES
             AgendaSource.Deadline -> DEADLINE_LEAD_MINUTES
             AgendaSource.Event -> (kind ?: EventKind.Autre).defaultLeadMinutes
+            AgendaSource.Ticket -> TICKET_LEAD_MINUTES
         }
         if (lead < 0) return null
         val reference = date.atTime(hour ?: 9, if (hour != null) minute ?: 0 else 0)
         return reference.minusMinutes(lead.toLong())
     }
+
+    // Every moment this item reminds at: reminderTime(), and for a timed event whose reminder comes a day or more
+    // ahead, once more close to its hour — "Voyage, dans une semaine" says nothing on the day it starts.
+    fun reminderTimes(): List<LocalDateTime> {
+        val first = reminderTime() ?: return emptyList()
+        val h = hour
+        if (source != AgendaSource.Event || h == null) return listOf(first)
+        val start = date.atTime(h, minute ?: 0)
+        return if (first <= start.minusDays(1)) listOf(first, start.minusMinutes(NEAR_LEAD_MINUTES.toLong())) else listOf(first)
+    }
 }
+
+// The earliest reminder of [items] still to come after [now]: the moment the reminder alarm is
+// armed for. Those already due are handled (notified or marked) by the check that precedes.
+fun nextReminderAt(items: List<AgendaItem>, now: LocalDateTime): LocalDateTime? =
+    items.flatMap { it.reminderTimes() }.filter { it > now }.minOrNull()
 
 object Agenda {
     // All items whose date falls in [from, to] (inclusive), recurring ones materialised per year.
@@ -116,6 +144,22 @@ object Agenda {
                 subtitle = if (p.Status == 1) "Échéance (projet terminé)" else "Échéance de projet",
                 source = AgendaSource.Deadline,
                 refId = p.Id,
+            )
+        }
+
+        // Tickets that have a time: the departure shows among the day's items (the others stay chips).
+        for (t in db.ticketDao().getAll()) {
+            val h = t.Hour ?: continue
+            val date = day(t.Date) ?: continue
+            if (date < from || date > to) continue
+            items += AgendaItem(
+                date = date,
+                title = t.Title,
+                subtitle = t.EventTitle,
+                source = AgendaSource.Ticket,
+                refId = t.Id,
+                hour = h,
+                minute = t.Minute ?: 0,
             )
         }
 

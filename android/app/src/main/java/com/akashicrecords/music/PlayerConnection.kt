@@ -32,6 +32,7 @@ data class PlayerUi(
     val positionMs: Long = 0,
     val durationMs: Long = 0,
     val queue: List<Pair<Int, String>> = emptyList(), // trackId -> label
+    val order: List<Int> = emptyList(), // queue indices in the order they play (shuffled in shuffle)
     val currentIndex: Int = -1,
     val shuffle: Boolean = false,
 )
@@ -78,6 +79,7 @@ class PlayerConnection(context: Context) {
                 val item = c.getMediaItemAt(i)
                 (item.mediaId.toIntOrNull() ?: -1) to (item.mediaMetadata.title?.toString() ?: "")
             },
+            order = c.currentTimeline.playOrder(c.shuffleModeEnabled),
             currentIndex = if (c.mediaItemCount == 0) -1 else c.currentMediaItemIndex,
             shuffle = c.shuffleModeEnabled,
         )

@@ -18,16 +18,18 @@ public sealed class MusicLibraryScanner
 
     public IReadOnlyList<MusicTrack> ScanAndSync()
     {
+        List<string>? files = null;
         try
         {
             Directory.CreateDirectory(MusicFolder);
+            files = AudioFiles().ToList();
 
             // Known tracks read once, then looked up in memory: one query per file (a fresh connection each time)
             // made every player opening cost seconds of CPU on a library of a few thousand files.
             var known = new Dictionary<string, MusicTrack>(StringComparer.OrdinalIgnoreCase);
             foreach (var track in _trackRepository.GetAll()) known.TryAdd(track.FilePath.Replace('\\', '/'), track);
 
-            foreach (var fullPath in AudioFiles())
+            foreach (var fullPath in files)
             {
                 try
                 {
@@ -64,17 +66,20 @@ public sealed class MusicLibraryScanner
 
         // Prune rows whose files were deleted from disk, so the library never shows
         // tracks pointing at missing files (the "Sans album" ghost tracks).
-        PruneMissingTracks();
+        // Not when the folder could not be read or holds no audio at all: that is a music folder that is
+        // missing (app copied without it, folder moved, drive not there), not a library the user emptied,
+        // and pruning would delete every track with its moods, typed titles and artists.
+        if (files is { Count: > 0 }) PruneMissingTracks(files);
 
         return _trackRepository.GetAll();
     }
 
     // Removes DB rows whose FilePath no longer exists under music/. The scanner only ever
     // *adds* rows, so a file deleted from disk would otherwise linger forever.
-    private void PruneMissingTracks()
+    private void PruneMissingTracks(IReadOnlyList<string> files)
     {
         var present = new HashSet<string>(
-            AudioFiles()
+            files
                 .Select(f => Path.Combine("music", UnderMusic(f)))
                 .Select(p => p.Replace('\\', '/')),
             StringComparer.OrdinalIgnoreCase);

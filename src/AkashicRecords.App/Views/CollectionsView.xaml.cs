@@ -976,6 +976,7 @@ public partial class CollectionsView : UserControl, ISearchNavigable, IRemembers
         var deleteButton = new Button { Content = "✕", Style = (Style)FindResource("MiniButtonStyle") };
         deleteButton.Click += (_, _) =>
         {
+            if (!ConfirmDelete.Ask($"Retirer « {item.Title} » de la liste À voir ?")) return;
             if (item.CoverImagePath is { } cover) MediaStorage.DeleteFile(cover);
             _watchlistRepository.Delete(item.Id);
             RefreshWatchlist();

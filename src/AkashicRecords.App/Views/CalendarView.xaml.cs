@@ -718,6 +718,7 @@ public partial class CalendarView : UserControl
     private void ShowForm(string title)
     {
         FormTitle.Text = title;
+        FormErrorText.Visibility = Visibility.Collapsed;
         BirthdayFormPanel.Visibility = _mode is FormMode.NewBirthday or FormMode.EditBirthday
             ? Visibility.Visible : Visibility.Collapsed;
         EventFormPanel.Visibility = _mode is FormMode.NewEvent or FormMode.EditEvent
@@ -755,23 +756,33 @@ public partial class CalendarView : UserControl
 
     private void SaveFormButton_OnClick(object sender, RoutedEventArgs e)
     {
-        switch (_mode)
+        // A form that cannot be saved stays open and says why: closing it would throw away what was typed.
+        var problem = _mode switch
         {
-            case FormMode.NewBirthday or FormMode.EditBirthday:
-                SaveBirthdayForm();
-                break;
-            case FormMode.NewEvent or FormMode.EditEvent:
-                SaveEventForm();
-                break;
+            FormMode.NewBirthday or FormMode.EditBirthday => SaveBirthdayForm(),
+            FormMode.NewEvent or FormMode.EditEvent => SaveEventForm(),
+            _ => null,
+        };
+        if (problem is not null)
+        {
+            FormErrorText.Text = problem;
+            FormErrorText.Visibility = Visibility.Visible;
+            return;
         }
         CloseForm();
         RefreshAll();
     }
 
-    private void SaveBirthdayForm()
+    // Both return null once saved, else the reason nothing was saved.
+    private string? SaveBirthdayForm()
     {
         var name = BirthdayNameInput.Text.Trim();
-        if (name.Length == 0 || BirthdayDateInput.SelectedDate is not { } date) return;
+        if (name.Length == 0)
+        {
+            BirthdayNameInput.Focus();
+            return "Il manque le nom.";
+        }
+        if (BirthdayDateInput.SelectedDate is not { } date) return "Il manque la date.";
 
         int? year = int.TryParse(BirthdayYearInput.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var y)
                      && y >= 1 && y <= DateTime.Today.Year ? y : null;
@@ -789,16 +800,28 @@ public partial class CalendarView : UserControl
 
         // A new/edited row may deserve its lead-time notification — let MainWindow reschedule.
         _notifySettingsChanged?.Invoke();
+        return null;
     }
 
-    private void SaveEventForm()
+    private string? SaveEventForm()
     {
         var title = EventTitleInput.Text.Trim();
-        if (title.Length == 0 || EventDateInput.SelectedDate is not { } date) return;
-
-        int? hour = null, minute = null;
-        if (EventAllDayToggle.IsChecked != true && TryParseTime(EventTimeInput.Text, out var h, out var m))
+        if (title.Length == 0)
         {
+            EventTitleInput.Focus();
+            return "Il manque le titre.";
+        }
+        if (EventDateInput.SelectedDate is not { } date) return "Il manque la date.";
+
+        // An empty time still means "all day"; one that cannot be read is not silently dropped.
+        int? hour = null, minute = null;
+        if (EventAllDayToggle.IsChecked != true && EventTimeInput.Text.Trim().Length > 0)
+        {
+            if (!TryParseTime(EventTimeInput.Text, out var h, out var m))
+            {
+                EventTimeInput.Focus();
+                return "Heure illisible — par exemple 20:30 ou 8h.";
+            }
             hour = h;
             minute = m;
         }
@@ -835,6 +858,7 @@ public partial class CalendarView : UserControl
         }
 
         _notifySettingsChanged?.Invoke();
+        return null;
     }
 
     // Replace-on-save: wipe the owner's old link rows, re-insert the form's working copy.
@@ -1322,6 +1346,11 @@ public partial class CalendarView : UserControl
 
     private void DeleteFormButton_OnClick(object sender, RoutedEventArgs e)
     {
+        var question = _mode == FormMode.EditBirthday
+            ? $"Supprimer l'anniversaire de « {BirthdayNameInput.Text.Trim()} » ?"
+            : $"Supprimer l'événement « {EventTitleInput.Text.Trim()} » ?";
+        if (!ConfirmDelete.Ask(question)) return;
+
         switch (_mode)
         {
             case FormMode.EditBirthday:

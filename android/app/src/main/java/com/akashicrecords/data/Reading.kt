@@ -50,6 +50,14 @@ interface BookDao {
     @Update
     suspend fun update(e: Book)
 
+    // One column each: the reader holds the Book it opened with, and writing that whole row back
+    // (as @Update does) would put the reading position back to where it was at opening.
+    @Query("UPDATE Book SET ArtworkId = :artworkId WHERE Id = :id")
+    suspend fun setArtwork(id: Int, artworkId: Int?)
+
+    @Query("UPDATE Book SET Locator = :locator, Progress = :progress, LastReadAt = :lastReadAt WHERE Id = :id")
+    suspend fun setPosition(id: Int, locator: String, progress: Double, lastReadAt: String)
+
     @Query("DELETE FROM Book WHERE Id = :id")
     suspend fun deleteById(id: Int)
 

@@ -1,9 +1,11 @@
 package com.akashicrecords.calendar
 
 import android.Manifest
+import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -24,17 +26,26 @@ import com.akashicrecords.data.AkashicDatabase
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.ZoneId
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 // Phone version of the desktop calendar toasts (MainWindow.CheckCalendarReminders):
 //   * a morning summary of today's agenda, once a day (from 08:00);
 //   * a reminder per item at its lead time (per kind, desktop defaults), birthdays on the day at
-//     09:00 as a heads-up notification.
-// Runs in WorkManager every 15 minutes (so a reminder can be a few minutes late), plus right after
-// an edit. Notified occurrences are remembered so each one pings once.
+//     09:00 as a heads-up notification; a timed event announced days ahead once more an hour
+//     before it starts; a ticket with a time an hour before it leaves, as a heads-up too.
+// Runs in WorkManager every 15 minutes (so a reminder can be a few minutes late), right after an
+// edit, and on an alarm armed for the next reminder (the phone asleep delays the periodic work by
+// hours). Notified occurrences are remembered so each one pings once.
 object Reminders {
     private const val CHANNEL_AGENDA = "agenda"
     private const val CHANNEL_BIRTHDAYS = "birthdays"
+    private const val CHANNEL_DEPARTURES = "departures"
     private const val PREFS = "akashic_reminders"
     private const val KEY_NOTIFIED = "notified"
     private const val KEY_SUMMARY_DAY = "summaryDay"
@@ -76,9 +87,17 @@ object Reminders {
                 description = "Le jour d'un anniversaire"
             },
         )
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_DEPARTURES, "Départs (billets)", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "Une heure avant l'heure d'un billet"
+            },
+        )
     }
 
-    suspend fun check(context: Context) {
+    // The worker and the alarm can land together: one check at a time, or both would notify.
+    private val checking = Mutex()
+
+    suspend fun check(context: Context) = checking.withLock {
         ensureChannels(context)
         val db = AkashicDatabase.get(context)
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -95,10 +114,11 @@ object Reminders {
             if (todays.isNotEmpty()) notifySummary(context, todays)
         }
 
-        for (item in Agenda.range(db, today, today.plusDays(35))) {
-            val key = item.notificationKey
-            if (key in notified) continue
-            val at = item.reminderTime() ?: continue
+        val items = Agenda.range(db, today, today.plusDays(35))
+        for (item in items) for ((n, at) in item.reminderTimes().withIndex()) {
+            val key = item.notifiedKey(at)
+            // notificationKey: what was stored before the reminder time became part of the key.
+            if (key in notified || (n == 0 && item.notificationKey in notified)) continue
             if (at > now) continue
             // Covered by today's summary if it was already due when the summary went out.
             val coveredBySummary = item.date == today && summaryAt != null && summaryAt.toLocalDate() == today && at <= summaryAt
@@ -108,6 +128,8 @@ object Reminders {
             // except a birthday, which still pops up for as long as it is that day.
             val birthdayToday = item.source == AgendaSource.Birthday && item.date == today
             if (at < now.minusHours(3) && !birthdayToday) continue
+            // A ticket whose hour has passed (phone off until then): nothing left to catch.
+            if (item.source == AgendaSource.Ticket && at.plusMinutes(TICKET_LEAD_MINUTES.toLong()) < now) continue
             notifyItem(context, item)
         }
 
@@ -115,22 +137,39 @@ object Reminders {
         val cutoff = today.minusDays(2)
         notified.removeAll { k -> runCatching { LocalDate.parse(k.substringAfterLast(':')) < cutoff }.getOrDefault(true) }
         prefs.edit().putStringSet(KEY_NOTIFIED, notified).apply()
+
+        armAlarm(context, nextReminderAt(items, now))
+    }
+
+    // The periodic work is put off for hours while the phone sleeps (Doze): the next reminder also
+    // gets an alarm that goes through it. Inexact on purpose (it may come a few minutes late): an
+    // exact one needs a special permission. Every check re-arms it, so it follows the notifications
+    // and the edits; nothing left to remind: no alarm.
+    private fun armAlarm(context: Context, at: LocalDateTime?) {
+        val alarms = context.getSystemService(AlarmManager::class.java)
+        val intent = PendingIntent.getBroadcast(
+            context, 0, Intent(context, ReminderAlarmReceiver::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        if (at == null) alarms.cancel(intent)
+        else alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(), intent)
     }
 
     private fun canNotify(context: Context) =
         Build.VERSION.SDK_INT < 33 ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
-    private fun openCalendar(context: Context, date: LocalDate, requestCode: Int): PendingIntent {
+    private fun openCalendar(context: Context, date: LocalDate, requestCode: Int, section: String = "Calendrier"): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            putExtra(EXTRA_SECTION, "Calendrier")
+            putExtra(EXTRA_SECTION, section)
             putExtra(EXTRA_DATE, date.toString())
         }
         return PendingIntent.getActivity(context, requestCode, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
 
-    private fun line(item: AgendaItem) = listOf(item.timeText, item.title, item.subtitle).filter { it.isNotBlank() }.joinToString(" · ")
+    private fun line(item: AgendaItem) =
+        listOf(item.timeText, (if (item.source == AgendaSource.Ticket) "🎫 " else "") + item.title, item.subtitle).filter { it.isNotBlank() }.joinToString(" · ")
 
     private fun notifySummary(context: Context, items: List<AgendaItem>) {
         if (!canNotify(context)) return
@@ -151,19 +190,21 @@ object Reminders {
     private fun notifyItem(context: Context, item: AgendaItem) {
         if (!canNotify(context)) return
         val birthday = item.source == AgendaSource.Birthday
+        val ticket = item.source == AgendaSource.Ticket
         val whenText = when (item.date) {
             LocalDate.now() -> if (item.timeText.isNotEmpty()) "Aujourd'hui à ${item.timeText}" else "Aujourd'hui"
             LocalDate.now().plusDays(1) -> "Demain" + if (item.timeText.isNotEmpty()) " à ${item.timeText}" else ""
             else -> "Le ${item.date.dayOfMonth}/${item.date.monthValue}" + if (item.timeText.isNotEmpty()) " à ${item.timeText}" else ""
         }
         val text = listOf(whenText, item.subtitle).filter { it.isNotBlank() }.joinToString(" · ")
-        val n = NotificationCompat.Builder(context, if (birthday) CHANNEL_BIRTHDAYS else CHANNEL_AGENDA)
+        val n = NotificationCompat.Builder(context, if (birthday) CHANNEL_BIRTHDAYS else if (ticket) CHANNEL_DEPARTURES else CHANNEL_AGENDA)
             .setSmallIcon(if (birthday) R.drawable.ic_cake else R.drawable.ic_calendar)
-            .setContentTitle(if (birthday) "🎂 ${item.title}" else item.title)
+            .setContentTitle(if (birthday) "🎂 ${item.title}" else if (ticket) "🎫 ${item.title}" else item.title)
             .setContentText(text)
-            .setPriority(if (birthday) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
-            .setCategory(if (birthday) NotificationCompat.CATEGORY_REMINDER else NotificationCompat.CATEGORY_EVENT)
-            .setContentIntent(openCalendar(context, item.date, item.notificationKey.hashCode()))
+            .setPriority(if (birthday || ticket) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(if (birthday || ticket) NotificationCompat.CATEGORY_REMINDER else NotificationCompat.CATEGORY_EVENT)
+            // A ticket's reminder opens the tickets of the day, ready to show.
+            .setContentIntent(openCalendar(context, item.date, item.notificationKey.hashCode(), if (ticket) com.akashicrecords.Launch.TICKETS else "Calendrier"))
             .setAutoCancel(true)
             .build()
         NotificationManagerCompat.from(context).notify(item.notificationKey.hashCode(), n)
@@ -176,5 +217,20 @@ class ReminderWorker(context: Context, params: WorkerParameters) : CoroutineWork
         // Same cadence keeps the home-screen widgets current (agenda of the day, journal page).
         com.akashicrecords.widgets.Widgets.refreshAll(applicationContext)
         return Result.success()
+    }
+}
+
+// The alarm of the next reminder (Reminders.armAlarm), and the phone restarting, which drops it:
+// both run the check, which notifies what is due and arms the following one.
+class ReminderAlarmReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val pending = goAsync()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                Reminders.check(context.applicationContext)
+            } finally {
+                pending.finish()
+            }
+        }
     }
 }

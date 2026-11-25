@@ -84,8 +84,17 @@ class ConfigStore(context: Context) {
     fun musicFolder(): String = prefs.getString(MUSIC_FOLDER, null) ?: DEFAULT_MUSIC_FOLDER
     fun saveMusicFolder(folder: String) = putString(MUSIC_FOLDER, folder.trim().trim('/'))
 
+    // Mobile-only: when the playback service may chain suggestions after the queue (SuggestionChain).
+    // Each one is a whole track downloaded, hence the "unmetered network only" choice.
+    fun suggestionChain(): String = prefs.getString(SUGGESTION_CHAIN, null) ?: CHAIN_ALWAYS
+    fun saveSuggestionChain(mode: String) = putString(SUGGESTION_CHAIN, mode)
+
     companion object {
         const val MUSIC_FOLDER = "MobileMusicFolder"
+        const val SUGGESTION_CHAIN = "MobileSuggestionChain"
+        const val CHAIN_ALWAYS = "Always"
+        const val CHAIN_WIFI = "Wifi"
+        const val CHAIN_NEVER = "Never"
         const val DISABLED_MODULES = "DisabledModules"
         const val LECTURE_OPEN_BOOK = "LectureOpenBook"
         const val READER_FONT_SCALE = "ReaderFontScale"

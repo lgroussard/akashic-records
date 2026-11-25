@@ -59,7 +59,8 @@ public partial class ArchivesView : UserControl, ISearchNavigable, IRemembersVie
         _config = config;
 
         _slideshowTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
-        _slideshowTimer.Tick += (_, _) => ShowPhotoAt(_viewerIndex + 1);
+        // The slideshow waits while a field of the viewer is being typed in.
+        _slideshowTimer.Tick += (_, _) => { if (Keyboard.FocusedElement is not TextBoxBase) StepPhoto(+1); };
 
         Loaded += (_, _) =>
         {
@@ -627,23 +628,63 @@ public partial class ArchivesView : UserControl, ISearchNavigable, IRemembersVie
 
     private void CloseViewer()
     {
+        SaveViewerFields();
         StopSlideshow();
         ViewerOverlay.Visibility = Visibility.Collapsed;
         ViewerImage.Source = null;
         _viewerIndex = -1;
         // Forget the photo, or the next visit would reopen the one the user just closed.
         SaveActiveItem();
+
+        if (_viewerFieldsSaved)
+        {
+            _viewerFieldsSaved = false;
+            RefreshGrid();
+        }
     }
 
     private void CloseViewerButton_OnClick(object sender, RoutedEventArgs e) => CloseViewer();
 
-    private void PreviousButton_OnClick(object sender, RoutedEventArgs e) => ShowPhotoAt(_viewerIndex - 1);
-    private void NextButton_OnClick(object sender, RoutedEventArgs e) => ShowPhotoAt(_viewerIndex + 1);
+    private void PreviousButton_OnClick(object sender, RoutedEventArgs e) => StepPhoto(-1);
+    private void NextButton_OnClick(object sender, RoutedEventArgs e) => StepPhoto(+1);
+
+    // Moving to another photo keeps what was typed on this one: the fields are about to be overwritten.
+    private void StepPhoto(int delta)
+    {
+        SaveViewerFields();
+        ShowPhotoAt(_viewerIndex + delta);
+    }
+
+    // The viewer's text fields, written to the photo when they differ from it. The grid is rebuilt
+    // once, when the viewer closes.
+    private void SaveViewerFields()
+    {
+        if (CurrentPhoto is not { } photo) return;
+
+        var title = ViewerTitleInput.Text.Trim();
+        var description = ViewerDescriptionInput.Text.Trim();
+        var tags = ViewerTagsInput.Text.Trim();
+        var taken = ViewerDatePicker.SelectedDate;
+        if ((photo.Title ?? string.Empty) == title && (photo.Description ?? string.Empty) == description
+            && (photo.Tags ?? string.Empty) == tags && photo.TakenDate == taken) return;
+
+        photo.Title = title;
+        photo.Description = description;
+        photo.Tags = tags;
+        photo.TakenDate = taken;
+        _photoRepo.UpdateMetadata(photo.Id, photo.Title, photo.Description, photo.TakenDate, photo.Tags);
+        _viewerFieldsSaved = true;
+    }
+
+    private bool _viewerFieldsSaved;
 
     // Escape closes the viewer; arrows navigate. Handled so Escape doesn't bubble up and close
     // the whole Archives section while the viewer is open.
     private void ViewerOverlay_OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
+        // In a text field the arrows move the caret and Delete erases a character.
+        if (e.Key != Key.Escape && e.OriginalSource is TextBoxBase) return;
+
         switch (e.Key)
         {
             case Key.Escape:
@@ -651,11 +692,11 @@ public partial class ArchivesView : UserControl, ISearchNavigable, IRemembersVie
                 e.Handled = true;
                 break;
             case Key.Left:
-                ShowPhotoAt(_viewerIndex - 1);
+                StepPhoto(-1);
                 e.Handled = true;
                 break;
             case Key.Right:
-                ShowPhotoAt(_viewerIndex + 1);
+                StepPhoto(+1);
                 e.Handled = true;
                 break;
             case Key.Delete:

@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -66,11 +66,7 @@ public partial class MainWindow : Window
         _filmOfTheDayService = new FilmOfTheDayService(_watchlistRepository);
         new SchemaInitializer(new SqliteConnectionFactory()).EnsureCreated();
         FitToScreen();
-
-        _config = _configService.Load();
-        _filmOfTheDayService = new FilmOfTheDayService(_watchlistRepository);
-        new SchemaInitializer(new SqliteConnectionFactory()).EnsureCreated();
-        FitToScreen();
+        ApplyModuleVisibility();
 
         // One-shot debounce: started on each keystroke, stopped as soon as it fires so the app
         // never keeps a timer ticking while idle (§45).
@@ -131,18 +127,19 @@ public partial class MainWindow : Window
         return new IntPtr(HTTRANSPARENT);
     }
 
+    // Both corners through PointToScreen: the mouse position is in physical pixels, ActualWidth/Height
+    // are not, and at a Windows scale other than 100 % a rectangle mixing the two stops short of the
+    // element's right and bottom edges (search box, ♪, ⚙ became click-through).
     private static bool IsPointInside(FrameworkElement element, Point screenPoint)
     {
         var topLeft = element.PointToScreen(new Point(0, 0));
-        var bounds = new Rect(topLeft, new Size(element.ActualWidth, element.ActualHeight));
-        return bounds.Contains(screenPoint);
+        var bottomRight = element.PointToScreen(new Point(element.ActualWidth, element.ActualHeight));
+        return new Rect(topLeft, bottomRight).Contains(screenPoint);
     }
 
     private void SetupWindowsIntegration()
     {
-        _hotkey = new GlobalHotkey(HotkeyId, GlobalHotkey.ModControl | GlobalHotkey.ModAlt, GlobalHotkey.VkSpace);
-        _hotkey.Pressed += ToggleVisibility;
-
+        // The tray icon first: it holds Exit, the only way to quit, so nothing may fail before it exists.
         _trayIcon = new TrayIcon("Archives Akashiques", StartupManager.IsEnabled());
         _trayIcon.ToggleRequested += ToggleVisibility;
         _trayIcon.ExitRequested += ExitApplication;
@@ -152,10 +149,66 @@ public partial class MainWindow : Window
         _trayIcon.RecipeWidgetToggled += OnRecipeWidgetToggled;
         _trayIcon.DownloaderRequested += ToggleDownloader;
 
+        // Ctrl+Alt+Space may belong to another program: the app then runs without its shortcut (the tray
+        // icon still shows and hides it) instead of stopping here with no widgets and no notifications.
+        try
+        {
+            _hotkey = new GlobalHotkey(HotkeyId, GlobalHotkey.ModControl | GlobalHotkey.ModAlt, GlobalHotkey.VkSpace);
+            _hotkey.Pressed += ToggleVisibility;
+        }
+        catch (InvalidOperationException)
+        {
+            _hotkey = null;
+        }
+
         InitializeAmbientWidgets();
         BootstrapCalendarNotifications();
 
         DockHeaderToScreenEdge();
+
+        // A night asleep delays the midnight timer by as long as the PC slept, and a clock change moves
+        // midnight: both redo what the timer does. Display changes re-fit the overlay to the screen.
+        Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
+        Microsoft.Win32.SystemEvents.TimeChanged += OnSystemTimeChanged;
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+    }
+
+    private void OnPowerModeChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs e)
+    {
+        if (e.Mode == Microsoft.Win32.PowerModes.Resume) Dispatcher.InvokeAsync(RefreshForNewDay);
+    }
+
+    private void OnSystemTimeChanged(object? sender, EventArgs e) => Dispatcher.InvokeAsync(RefreshForNewDay);
+
+    private void OnDisplaySettingsChanged(object? sender, EventArgs e) => Dispatcher.InvokeAsync(() =>
+    {
+        FitToScreen();
+        if (IsVisible) DockHeaderToScreenEdge();
+        foreach (var widget in new Window?[] { _filmWidget, _recipeWidget, _reminderWidget, _saveWidget })
+        {
+            if (widget is { IsLoaded: true }) (widget.Left, widget.Top) = OnScreen(widget.Left, widget.Top, widget);
+        }
+    });
+
+    // SystemEvents are static: a handler left on them would keep this window alive after exit.
+    private void UnhookSystemEvents()
+    {
+        Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+        Microsoft.Win32.SystemEvents.TimeChanged -= OnSystemTimeChanged;
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+    }
+
+    // A saved widget position, brought back onto the desktop when it no longer falls on a screen
+    // (second monitor unplugged, resolution lowered): the widget would otherwise show nowhere.
+    private static (double Left, double Top) OnScreen(double left, double top, Window window)
+    {
+        var width = window.ActualWidth > 0 ? window.ActualWidth : 200;
+        var height = window.ActualHeight > 0 ? window.ActualHeight : 100;
+        var minLeft = SystemParameters.VirtualScreenLeft;
+        var minTop = SystemParameters.VirtualScreenTop;
+        var maxLeft = minLeft + SystemParameters.VirtualScreenWidth - width;
+        var maxTop = minTop + SystemParameters.VirtualScreenHeight - height;
+        return (Math.Max(minLeft, Math.Min(left, maxLeft)), Math.Max(minTop, Math.Min(top, maxTop)));
     }
 
     // --- Ambient desktop widgets (§32-34, §45) -------------------------------
@@ -209,9 +262,19 @@ public partial class MainWindow : Window
         _midnightTimer.Start();
     }
 
-    private void MidnightTimer_OnTick(object? sender, EventArgs e)
+    private void MidnightTimer_OnTick(object? sender, EventArgs e) => RefreshForNewDay();
+
+    // Everything that follows the date: the film and recipe picks, and the calendar (the morning toast
+    // and its 60 s timer, which is stopped while no reminder is ahead and would otherwise miss midnight).
+    // Harmless when the day has not changed: each part compares with the date it last ran for.
+    private void RefreshForNewDay()
     {
         _midnightTimer?.Stop();
+        if (!_screenshotMode)
+        {
+            CheckCalendarReminders();
+            RescheduleCalendarTimer();
+        }
         ComputeTodaysFilms();
         _filmWidget?.ShowPicks(_todaysFilmPick, ResolveCover(_todaysFilmPick), _todaysAnimPick, ResolveCover(_todaysAnimPick));
         // A Monday midnight starts a new week of recipes; any other night keeps the same picks.
@@ -278,8 +341,7 @@ public partial class MainWindow : Window
         if (_recipeWidget is null) return;
         if (_config.RecipeWidgetLeft is { } left && _config.RecipeWidgetTop is { } top)
         {
-            _recipeWidget.Left = left;
-            _recipeWidget.Top = top;
+            (_recipeWidget.Left, _recipeWidget.Top) = OnScreen(left, top, _recipeWidget);
         }
         else
         {
@@ -357,8 +419,7 @@ public partial class MainWindow : Window
         if (_filmWidget is null) return;
         if (_config.FilmWidgetLeft is { } left && _config.FilmWidgetTop is { } top)
         {
-            _filmWidget.Left = left;
-            _filmWidget.Top = top;
+            (_filmWidget.Left, _filmWidget.Top) = OnScreen(left, top, _filmWidget);
         }
         else
         {
@@ -422,8 +483,7 @@ public partial class MainWindow : Window
         if (_reminderWidget is null) return;
         if (_config.RemindersWidgetLeft is { } left && _config.RemindersWidgetTop is { } top)
         {
-            _reminderWidget.Left = left;
-            _reminderWidget.Top = top;
+            (_reminderWidget.Left, _reminderWidget.Top) = OnScreen(left, top, _reminderWidget);
         }
         else
         {
@@ -621,18 +681,44 @@ public partial class MainWindow : Window
         // Bottom-right, raised above where the film widget docks so the two never overlap.
         _calendarToast.Left = SystemParameters.PrimaryScreenWidth - _calendarToast.ActualWidth - 24;
         _calendarToast.Top = SystemParameters.PrimaryScreenHeight - _calendarToast.ActualHeight - 360;
-        _calendarToast.Activate();
+        // Not activated: a reminder that pops while the user types elsewhere must not take the keyboard.
     }
 
-    // Clicking a toast row deep-links into the calendar section.
+    // Clicking a toast row deep-links into the calendar section, bringing the main window back if hidden.
     private void OnCalendarToastItemClicked(string key)
     {
-        foreach (var button in new[] { OrganisationNav, JournauxNav, CollectionsNav, ArchivesNav, BudgetNav, CalendarNav })
+        if (!_config.IsEnabled("Calendrier")) return;
+        if (!IsVisible) ToggleVisibility();
+        Activate();
+        OpenSection("Calendrier");
+    }
+
+    private System.Windows.Controls.Primitives.ToggleButton[] NavButtons =>
+        new System.Windows.Controls.Primitives.ToggleButton[] { OrganisationNav, JournauxNav, CollectionsNav, ArchivesNav, BudgetNav, CalendarNav };
+
+    private System.Windows.Controls.Primitives.ToggleButton? NavButtonFor(string section) => section switch
+    {
+        "Organisation" => OrganisationNav,
+        "Journaux" => JournauxNav,
+        "Collections" => CollectionsNav,
+        "Archives" => ArchivesNav,
+        "Budget" => BudgetNav,
+        "Calendrier" => CalendarNav,
+        _ => null
+    };
+
+    // Opens a section from code (search result, toast, widget): its header button is the only one left
+    // checked, whichever section was open before.
+    private bool OpenSection(string section)
+    {
+        if (NavButtonFor(section) is not { } nav) return false;
+        foreach (var button in NavButtons) button.IsChecked = button == nav;
+        if (_activeSection != section)
         {
-            button.IsChecked = button == CalendarNav;
+            _activeSection = section;
+            UpdateSectionContent();
         }
-        _activeSection = "Calendrier";
-        UpdateSectionContent();
+        return true;
     }
 
     // Reserves the header's strip of screen space so maximized/snapped windows leave it free.
@@ -666,6 +752,9 @@ public partial class MainWindow : Window
             Show();
             Activate();
             DockHeaderToScreenEdge();
+            // Nothing open: the shortcut that brings the app back leaves the caret in the search box,
+            // ready to type. With a section open, the focus stays where it was in it.
+            if (_activeSection is null) SearchBox.Focus();
         }
     }
 
@@ -736,8 +825,7 @@ public partial class MainWindow : Window
         if (_saveWidget is null) return;
         if (_config.MusicSaveWidgetLeft is { } left && _config.MusicSaveWidgetTop is { } top)
         {
-            _saveWidget.Left = left;
-            _saveWidget.Top = top;
+            (_saveWidget.Left, _saveWidget.Top) = OnScreen(left, top, _saveWidget);
             return;
         }
         // Default: bottom-left corner of the primary screen.
@@ -968,26 +1056,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var nav = result.Section switch
-        {
-            "Organisation" => OrganisationNav,
-            "Journaux" => JournauxNav,
-            "Collections" => CollectionsNav,
-            "Archives" => ArchivesNav,
-            "Budget" => BudgetNav,
-            _ => null
-        };
-        if (nav is null) return;
-
-        if (_activeSection != result.Section)
-        {
-            foreach (var button in new[] { OrganisationNav, JournauxNav, CollectionsNav, ArchivesNav })
-            {
-                button.IsChecked = button == nav;
-            }
-            _activeSection = result.Section;
-            UpdateSectionContent();
-        }
+        if (!OpenSection(result.Section)) return;
 
         // The freshly-created view isn't loaded yet: it stores the target and applies it on Loaded.
         if (SectionContent.Content is ISearchNavigable navigable)
@@ -1035,8 +1104,35 @@ public partial class MainWindow : Window
     // own state right after, so this snapshot never outlives the screen it describes.
     private void MainWindow_OnEscapeSnapshot(object sender, KeyEventArgs e)
     {
+        if (HandleShortcut(e)) return;
         if (e.Key != Key.Escape || _activeSection is null || _screenshotMode) return;
         if (SectionContent.Content is IRemembersViewState view) view.CaptureViewState();
+    }
+
+    // Ctrl+K: the search box. Ctrl+1 … Ctrl+6: the sections, in the order of the header and counting
+    // only those this device shows (a module switched off takes no number).
+    private bool HandleShortcut(KeyEventArgs e)
+    {
+        if (Keyboard.Modifiers != ModifierKeys.Control) return false;
+
+        if (e.Key == Key.K)
+        {
+            SearchBox.Focus();
+            SearchBox.SelectAll();
+            e.Handled = true;
+            return true;
+        }
+
+        var number = e.Key is >= Key.D1 and <= Key.D6 ? e.Key - Key.D1
+            : e.Key is >= Key.NumPad1 and <= Key.NumPad6 ? e.Key - Key.NumPad1
+            : -1;
+        if (number < 0) return false;
+
+        var shown = NavButtons.Where(button => button.Visibility == Visibility.Visible).ToList();
+        if (number >= shown.Count || shown[number].Tag is not string section) return false;
+        OpenSection(section);
+        e.Handled = true;
+        return true;
     }
 
     // Common "reopen where I left off" rule (see IRemembersViewState): the outgoing view records the
@@ -1148,6 +1244,8 @@ public partial class MainWindow : Window
     {
         _isExiting = true;
         PersistSectionState();
+        UnhookSystemEvents();
+        AkashicRecords.Infrastructure.Downloading.ExternalDownloader.KillRunning();
         _screenEdgeDock?.Remove();
         _hotkey?.Dispose();
         _trayIcon?.Dispose();

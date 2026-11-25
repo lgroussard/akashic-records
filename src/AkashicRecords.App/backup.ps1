@@ -74,9 +74,9 @@ if ($Keep -gt 0) {
     $old = Get-ChildItem -Path $Destination -Directory |
         Where-Object { $_.Name -like '20*' } |
         Sort-Object Name -Descending |
-        Select-Object -Skip ($Keep - 1)
+        Select-Object -Skip $Keep   # the list includes the backup just made: it is one of the N kept
     foreach ($o in $old) {
         Remove-Item -Recurse -Force $o.FullName
-        Write-Host "  prune $o.Name"
+        Write-Host "  prune $($o.Name)"
     }
 }

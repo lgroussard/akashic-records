@@ -35,14 +35,18 @@ internal object ShoppingParser {
     fun parse(ingredients: String): List<Line> {
         val lines = ingredients.lines().map { it.trim().trimStart('-', '•', '*').trim() }
         val out = mutableListOf<Line>()
+        // A lone title above a block of amounts ("Gelée") names a part of the recipe, not a product. Parts come
+        // in pairs at least ("Crèmes" … "Gelée"): a single such line is a product without an amount that happens
+        // to open the list ("Huile d'olive" above "2 oignons"), and is kept.
+        fun startsBlock(i: Int) = !skipped(lines[i]) && AMOUNT.find(lines[i]) == null &&
+            (i == 0 || lines[i - 1].isEmpty()) && lines.getOrNull(i + 1)?.firstOrNull()?.isDigit() == true
+        val titled = lines.indices.count { startsBlock(it) } >= 2
         lines.forEachIndexed { i, line ->
-            if (line.isEmpty() || SERVINGS.containsMatchIn(line) || line.endsWith(":")) return@forEachIndexed
+            if (skipped(line)) return@forEachIndexed
             val amount = AMOUNT.find(line)
             if (amount == null) {
-                // A lone title above a block of amounts ("Gelée") names a part of the recipe, not a product.
-                val startsBlock = (i == 0 || lines[i - 1].isEmpty()) && lines.getOrNull(i + 1)?.firstOrNull()?.isDigit() == true
                 val name = line.substringBefore('(').trim().trimEnd('.')
-                if (!startsBlock && name.isNotEmpty()) out += Line(name, null, "")
+                if (!(titled && startsBlock(i)) && name.isNotEmpty()) out += Line(name, null, "")
                 return@forEachIndexed
             }
             val (q1, u1, q2, u2, rest) = amount.destructured
@@ -54,6 +58,9 @@ internal object ShoppingParser {
         }
         return out
     }
+
+    // Not an ingredient at all: an empty line, « Pour 4 personnes », a title ending with a colon.
+    private fun skipped(line: String) = line.isEmpty() || SERVINGS.containsMatchIn(line) || line.endsWith(":")
 
     private fun number(text: String): Double {
         val parts = text.replace(',', '.').split('/').map { it.trim().toDouble() }

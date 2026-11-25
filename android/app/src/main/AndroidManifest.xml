@@ -12,8 +12,12 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Suggestions (iTunes / MusicBrainz), 30 s previews and yt-dlp downloads. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- « Enchaîner des suggestions : en Wi-Fi seulement »: is the current network metered? -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Calendar: morning summary, event reminders, birthday pop-ups. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- The reminder alarm is lost when the phone restarts: armed again at boot. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Downloads written to Music/ on Android 9 and below (MediaStore is used from Android 10). -->
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
@@ -81,6 +85,23 @@
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
         </service>
+        <!-- The headset's play button after the service is gone: restarts it, which resumes the saved queue
+             (PlaybackService.onPlaybackResumption). Hands over to Media3's MediaButtonReceiver. -->
+        <receiver
+            android:name=".music.ResumeButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+        <!-- Calendar reminders: the alarm of the next one, and its re-arming after a restart. -->
+        <receiver
+            android:name=".calendar.ReminderAlarmReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
         <!-- Home-screen widgets: a launcher page of them stands in for "swipe right to Akashic". -->
         <receiver
             android:name=".widgets.AgendaWidgetReceiver"

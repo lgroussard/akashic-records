@@ -25,7 +25,30 @@ object DesktopImport {
     // Artwork/Observation, which the import does refill, are repaired right after (ReadingLinks.relinkAfterImport).
     private val PHONE_ONLY = setOf("Book", "BookHighlight", "RefBoard", "RefImage", "CrosswordGame", "Ticket", "ShoppingItem")
 
-    fun run(context: Context, source: Uri, db: AkashicDatabase): Result {
+    // The phone database as it was before each import, the two latest kept: what was written on the phone only
+    // is replaced by an import, and this is the way back (undo() below).
+    private fun backupDir(context: Context) = File(context.filesDir, "backups")
+
+    fun lastBackup(context: Context): File? =
+        backupDir(context).listFiles { f -> f.name.startsWith("avant-import-") && f.name.endsWith(".db") }?.maxByOrNull { it.name }
+
+    private fun backup(context: Context, db: AkashicDatabase) {
+        // Room writes through a journal file: folded into akashic.db first, so the copy is the whole database.
+        db.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
+        val dir = backupDir(context).apply { mkdirs() }
+        val stamp = java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", java.util.Locale.US).format(java.util.Date())
+        context.getDatabasePath("akashic.db").copyTo(File(dir, "avant-import-$stamp.db"), overwrite = true)
+        dir.listFiles { f -> f.name.startsWith("avant-import-") }?.sortedByDescending { it.name }?.drop(2)?.forEach { it.delete() }
+    }
+
+    // Puts the shared tables back as they were before the last import (the tables the phone owns were never
+    // touched by it). Media files the import overwrote are not restored.
+    fun undo(context: Context, db: AkashicDatabase): Result {
+        val file = requireNotNull(lastBackup(context)) { "Aucune copie d'avant import." }
+        return run(context, Uri.fromFile(file), db, keepBackup = false)
+    }
+
+    fun run(context: Context, source: Uri, db: AkashicDatabase, keepBackup: Boolean = true): Result {
         val work = File(context.cacheDir, "import").apply { deleteRecursively(); mkdirs() }
         val dbFile = File(work, "akashic.db")
         var media = 0
@@ -54,6 +77,10 @@ object DesktopImport {
             val srcTables = src.rawQuery("SELECT name FROM sqlite_master WHERE type='table'", null)
                 .use { c -> buildSet { while (c.moveToNext()) add(c.getString(0)) } }
 
+            // Some other SQLite file (or an empty one) would otherwise "import" nothing and report a success.
+            require(destTables.any { it in srcTables && it !in PHONE_ONLY }) { "Ce fichier n'est pas une base Akashic." }
+            if (keepBackup) backup(context, db)
+
             dest.beginTransaction()
             try {
                 for (table in destTables) {
@@ -64,6 +91,20 @@ object DesktopImport {
                     if (shared.isEmpty()) continue
                     // A column with a default of its own (Observation.OwnerKind = 'Artwork') is left to SQLite.
                     val fillers = destCols.filter { (name, col) -> name !in srcCols && col.notNull && !col.hasDefault }
+
+                    // The phone's own layout of a poem (Mobile* columns): the PC has the columns but never
+                    // fills them, so its NULLs would wipe what was set here. Kept by Id, put back below.
+                    val mobileCols = if (table == "Poem") shared.filter { it.startsWith("Mobile") } else emptyList()
+                    val mobileKept = mutableListOf<Pair<Long, ContentValues>>()
+                    if (mobileCols.isNotEmpty()) {
+                        dest.query("SELECT `Id`, ${mobileCols.joinToString { "`$it`" }} FROM `Poem`").use { c ->
+                            while (c.moveToNext()) {
+                                val v = ContentValues()
+                                mobileCols.forEachIndexed { i, name -> if (!c.isNull(i + 1)) put(v, name, c, i + 1) }
+                                if (v.size() > 0) mobileKept += c.getLong(0) to v
+                            }
+                        }
+                    }
 
                     dest.execSQL("DELETE FROM `$table`")
                     src.rawQuery("SELECT ${shared.joinToString { "`$it`" }} FROM `$table`", null).use { c ->
@@ -79,6 +120,12 @@ object DesktopImport {
                             }
                             dest.insert(table, SQLiteDatabase.CONFLICT_REPLACE, v)
                             rows++
+                        }
+                    }
+                    for ((id, values) in mobileKept) {
+                        for (name in values.keySet()) {
+                            val one = ContentValues().apply { putAll(values); keySet().filter { it != name }.forEach(::remove) }
+                            dest.update("Poem", SQLiteDatabase.CONFLICT_NONE, one, "`Id` = ? AND `$name` IS NULL", arrayOf<Any>(id))
                         }
                     }
                     tables++
@@ -125,8 +172,10 @@ object DesktopImport {
         ZipInputStream(context.contentResolver.openInputStream(source)!!.buffered()).use { zip ->
             while (true) {
                 val entry = zip.nextEntry ?: break
-                if (entry.isDirectory) continue
                 val path = entry.name.replace('\\', '/')
+                // A zip made on Windows names an empty folder "media\archive\": not a directory for
+                // ZipEntry (it only knows "/"), and writing it as a file fails on the folder of that name.
+                if (entry.isDirectory || path.endsWith("/")) continue
                 val segments = path.split('/')
                 when {
                     path.endsWith("data/akashic.db") || path == "akashic.db" ->

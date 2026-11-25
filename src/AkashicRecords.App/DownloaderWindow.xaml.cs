@@ -332,9 +332,10 @@ public partial class DownloaderWindow : Window
     {
         foreach (var (shell, folderId) in _zoneTargets)
         {
+            // Both corners in screen pixels (ActualWidth/Height are not, at a Windows scale other than 100 %).
             var topLeft = shell.PointToScreen(new Point(0, 0));
-            if (screenPoint.X >= topLeft.X && screenPoint.X <= topLeft.X + shell.ActualWidth &&
-                screenPoint.Y >= topLeft.Y && screenPoint.Y <= topLeft.Y + shell.ActualHeight)
+            var bottomRight = shell.PointToScreen(new Point(shell.ActualWidth, shell.ActualHeight));
+            if (new Rect(topLeft, bottomRight).Contains(screenPoint))
                 return folderId;
         }
         return null;
@@ -460,7 +461,14 @@ public partial class DownloaderWindow : Window
         if (_config.DownloaderAutoMode) await ProcessQueueAsync();
     }
 
-    private async void DownloadNowButton_OnClick(object sender, RoutedEventArgs e) => await ProcessQueueAsync();
+    // While the queue runs, the same button stops it.
+    private async void DownloadNowButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_isProcessing) _queueCancel?.Cancel();
+        else await ProcessQueueAsync();
+    }
+
+    private CancellationTokenSource? _queueCancel;
 
     // Drains all queued items sequentially through the external tool, then refreshes the library.
     private async Task ProcessQueueAsync()
@@ -483,6 +491,8 @@ public partial class DownloaderWindow : Window
         }
 
         _isProcessing = true;
+        _queueCancel = new CancellationTokenSource();
+        DownloadNowButton.Content = "Annuler";
         try
         {
             var toolPath = ResolveToolPath();
@@ -496,7 +506,14 @@ public partial class DownloaderWindow : Window
                 if (next is null) break;
 
                 StatusText.Text = $"Téléchargement : {Shorten(DisplayOf(next))}…";
-                var result = await _downloader.DownloadAsync(toolPath, args, next.Url, ResolveDownloadFolderForItem(next), ffmpegDir);
+                var result = await _downloader.DownloadAsync(toolPath, args, next.Url, ResolveDownloadFolderForItem(next), ffmpegDir, _queueCancel.Token);
+
+                // Stopped by the user: the item stays queued for the next run, and so do those after it.
+                if (_queueCancel.IsCancellationRequested)
+                {
+                    StatusText.Text = "Téléchargement annulé.";
+                    break;
+                }
 
                 if (result.Success)
                 {
@@ -515,12 +532,15 @@ public partial class DownloaderWindow : Window
             {
                 _scanner.ScanAndSync();
                 LibraryChanged?.Invoke();
-                if (!StatusText.Text.StartsWith("Échec")) StatusText.Text = "Téléchargements terminés.";
+                if (!StatusText.Text.StartsWith("Échec") && !_queueCancel.IsCancellationRequested) StatusText.Text = "Téléchargements terminés.";
             }
         }
         finally
         {
             _isProcessing = false;
+            _queueCancel.Dispose();
+            _queueCancel = null;
+            DownloadNowButton.Content = "Télécharger maintenant";
         }
     }
 

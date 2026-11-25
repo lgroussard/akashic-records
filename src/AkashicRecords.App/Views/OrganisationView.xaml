@@ -320,7 +320,7 @@
             </Border>
 
             <!-- Project detail -->
-            <Border Grid.Column="1" x:Name="ProjectDetailPanel" Visibility="Collapsed"
+            <Border Grid.Column="1" x:Name="ProjectDetailPanel" Visibility="Collapsed" Width="860" HorizontalAlignment="Left"
                     Background="{StaticResource Surface1Brush}"
                     BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="12" Padding="22">
                 <Grid>
@@ -390,7 +390,7 @@
                                  input below it and only added a dead, non-editable row. -->
                             <StackPanel Orientation="Horizontal" Margin="0,8,0,8">
                                 <TextBox x:Name="NewTaskInput" Width="220" Margin="0,0,8,0" Style="{StaticResource DarkTextBoxStyle}"
-                                         TextChanged="NewTaskInput_TextChanged"/>
+                                         TextChanged="NewTaskInput_TextChanged" KeyDown="NewTaskInput_OnKeyDown"/>
                                 <Button Content="＋ Ajouter une tâche" Click="AddTaskButton_OnClick" Style="{StaticResource PrimaryButtonStyle}"/>
                             </StackPanel>
                         </StackPanel>
@@ -443,7 +443,7 @@
             </Border>
 
             <!-- Transition detail -->
-            <Border Grid.Column="1" x:Name="TransitionDetailPanel" Visibility="Collapsed"
+            <Border Grid.Column="1" x:Name="TransitionDetailPanel" Visibility="Collapsed" Width="860" HorizontalAlignment="Left"
                     Background="{StaticResource Surface1Brush}"
                     BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="12" Padding="22">
                 <Grid>
@@ -533,7 +533,7 @@
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
-                                <TextBox x:Name="NewStepInput" Width="220" Margin="0,0,8,0" Style="{StaticResource DarkTextBoxStyle}"/>
+                                <TextBox x:Name="NewStepInput" Width="220" Margin="0,0,8,0" Style="{StaticResource DarkTextBoxStyle}" KeyDown="NewStepInput_OnKeyDown"/>
                                 <Button Content="＋ Ajouter une étape" Click="AddStepButton_OnClick" Style="{StaticResource PrimaryButtonStyle}"/>
                             </StackPanel>
 

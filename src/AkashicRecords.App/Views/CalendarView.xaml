@@ -213,7 +213,7 @@
 
                 <!-- Event / birthday form pane (over the agenda) -->
                 <Border x:Name="FormRoot" Style="{StaticResource CardBorderStyle}" Padding="22" Visibility="Collapsed"
-                        HorizontalAlignment="Stretch" VerticalAlignment="Top">
+                        HorizontalAlignment="Left" VerticalAlignment="Top" Width="720">
                     <StackPanel>
                         <TextBlock x:Name="FormTitle" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextBrush}"
                                    Margin="0,0,0,14"/>
@@ -297,6 +297,10 @@
                             <ToggleButton x:Name="EventRecurringToggle" Content="Se répète chaque année" Style="{StaticResource CheckChipStyle}"
                                          HorizontalAlignment="Left" Margin="0,0,0,16"/>
                         </StackPanel>
+
+                        <!-- Why the form was not saved (missing name/title/date, unreadable time). -->
+                        <TextBlock x:Name="FormErrorText" Foreground="{StaticResource SortieBrush}" FontSize="12.5"
+                                   Margin="0,0,0,10" Visibility="Collapsed"/>
 
                         <StackPanel Orientation="Horizontal">
                             <Button x:Name="SaveFormButton" Content="Enregistrer" Style="{StaticResource PrimaryButtonStyle}"

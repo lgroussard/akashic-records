@@ -41,6 +41,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+// The « Enchaîner des suggestions » choices (ConfigStore.suggestionChain), in the order shown.
+private val chainModes = listOf(
+    ConfigStore.CHAIN_ALWAYS to "Toujours",
+    ConfigStore.CHAIN_WIFI to "En Wi-Fi seulement",
+    ConfigStore.CHAIN_NEVER to "Jamais",
+)
+
 private fun audioPermission() =
     if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
 
@@ -71,6 +78,8 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
     var showDownloads by remember { mutableStateOf(initialTab == "Downloads") }
     LaunchedEffect(initialTab) { if (initialTab == "Queue" || initialTab == "Similar") onOpenPlayer(initialTab == "Similar") }
     var editingFolder by remember { mutableStateOf(false) }
+    var chainMode by remember { mutableStateOf(config.suggestionChain()) }
+    var editingChain by remember { mutableStateOf(false) }
     var creatingMood by remember { mutableStateOf(false) }
     var confirmDeleteMood by remember { mutableStateOf<Mood?>(null) }
 
@@ -155,6 +164,12 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
             )
             TextButton(onClick = { rescan() }, enabled = !scanning) { Text(if (scanning) "Scan…" else "⟳ Rescanner") }
         }
+        Text(
+            "Enchaîner des suggestions : " + chainModes.first { it.first == chainMode }.second,
+            fontSize = 11.sp,
+            color = Palette.TextFaint,
+            modifier = Modifier.fillMaxWidth().clickable { editingChain = true }.padding(horizontal = 12.dp, vertical = 4.dp),
+        )
 
         // Ambiances
         Row(
@@ -274,6 +289,36 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
                 }) { Text("Enregistrer") }
             },
             dismissButton = { TextButton(onClick = { editingFolder = false }) { Text("Annuler") } },
+        )
+    }
+
+    if (editingChain) {
+        AlertDialog(
+            onDismissRequest = { editingChain = false },
+            title = { Text("Enchaîner des suggestions") },
+            text = {
+                Column {
+                    Text(
+                        "Quand la file se termine, des titres similaires sont téléchargés et joués à la suite.",
+                        fontSize = 12.sp, color = Palette.TextMuted,
+                    )
+                    chainModes.forEach { (mode, label) ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable {
+                                config.saveSuggestionChain(mode)
+                                chainMode = mode
+                                editingChain = false
+                            }.padding(vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = mode == chainMode, onClick = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(label)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { editingChain = false }) { Text("Fermer") } },
         )
     }
 
@@ -407,13 +452,16 @@ internal fun QueueList(player: PlayerConnection) {
         return
     }
     LazyColumn(Modifier.fillMaxWidth()) {
-        itemsIndexed(ui.queue) { i, (_, label) ->
+        // Listed in the order they will play (ui.order: the shuffled one in shuffle); i stays the
+        // entry's index in the queue, which is what the player is addressed with.
+        itemsIndexed(ui.order) { place, i ->
+            val label = ui.queue.getOrNull(i)?.second ?: ""
             Row(
                 Modifier.fillMaxWidth().clickable { player.jumpTo(i) }.padding(horizontal = 12.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    (if (i == ui.currentIndex) "▶  " else "${i + 1}.  ") + label,
+                    (if (i == ui.currentIndex) "▶  " else "${place + 1}.  ") + label,
                     fontWeight = if (i == ui.currentIndex) FontWeight.Bold else FontWeight.Normal,
                     color = if (i == ui.currentIndex) Palette.Accent else Palette.Text,
                     modifier = Modifier.weight(1f),

@@ -1,14 +1,21 @@
 package com.akashicrecords.music
 
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.ForwardingPlayer
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.CommandButton
+import androidx.media3.session.MediaButtonReceiver
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
@@ -21,12 +28,16 @@ import com.akashicrecords.data.AkashicDatabase
 import com.akashicrecords.data.ConfigStore
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.SettableFuture
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 
 // Background playback: the player lives in a MediaSessionService so music keeps playing with
 // the screen off, and Android shows the standard media notification / lock-screen controls.
@@ -67,6 +78,21 @@ class PlaybackService : MediaSessionService() {
             if (customCommand.customAction == ACTION_DOWNLOAD) downloadCurrent()
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         }
+
+        // ▶ (headset button, widget) on an empty player, typically after Android killed the process
+        // during a long pause: the saved queue comes back where the listening stopped.
+        override fun onPlaybackResumption(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            val future = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
+            scope.launch {
+                val saved = runCatching { withContext(Dispatchers.IO) { SavedQueue.load(this@PlaybackService) } }.getOrNull()
+                // Nothing to resume: same answer as the default callback.
+                if (saved == null) future.setException(UnsupportedOperationException()) else future.set(saved)
+            }
+            return future
+        }
     }
 
     override fun onCreate() {
@@ -80,6 +106,9 @@ class PlaybackService : MediaSessionService() {
                 /* handleAudioFocus = */ true,
             )
             .setHandleAudioBecomingNoisy(true) // pause when headphones are unplugged
+            // Suggestions can be network streams (30 s clips): keeps the CPU and the Wi-Fi awake while
+            // playing with the screen off.
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
         val chain = SuggestionChain(this, player).also { this.chain = it }
         // ⏭ is always offered, so the system player never drops it (and never slides ⤓ into its
@@ -113,6 +142,13 @@ class PlaybackService : MediaSessionService() {
             override fun onEvents(p: Player, events: Player.Events) {
                 if (events.containsAny(Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_TIMELINE_CHANGED)) refreshLayout()
                 if (events.containsAny(Player.EVENT_IS_PLAYING_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_MEDIA_METADATA_CHANGED)) publishNowPlaying()
+                // Where the listening is, at each track change and at each pause (see SavedQueue).
+                if (events.containsAny(Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_TIMELINE_CHANGED, Player.EVENT_PLAY_WHEN_READY_CHANGED)) SavedQueue.savePosition(this@PlaybackService, p)
+            }
+
+            // Only when the queue itself changed, not when a track merely reports its duration.
+            override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+                if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) SavedQueue.saveItems(this@PlaybackService, player)
             }
         })
         // A ⤓ from the app's mini-player also turns the notification button into ✓.
@@ -214,6 +250,7 @@ class PlaybackService : MediaSessionService() {
         chain?.release()
         chain = null
         session?.run {
+            SavedQueue.savePosition(this@PlaybackService, player)
             player.release()
             release()
         }
@@ -223,5 +260,119 @@ class PlaybackService : MediaSessionService() {
 
     companion object {
         const val ACTION_DOWNLOAD = "akashic.download"
+    }
+}
+
+// The queue as last listened to, kept on disk: Android kills the process during a long pause, and
+// the player's queue with it. Holds what rebuilds each MediaItem (library tracks and suggestions
+// alike), plus the current entry and the position in it.
+internal object SavedQueue {
+    private const val ITEMS = "items"
+    private const val INDEX = "index"
+    private const val POSITION = "position"
+
+    private fun prefs(context: Context) = context.getSharedPreferences("akashic_playback", Context.MODE_PRIVATE)
+
+    // An emptied queue (■ Arrêter) clears the save: there is nothing to come back to.
+    fun saveItems(context: Context, player: Player) {
+        if (player.mediaItemCount == 0) {
+            prefs(context).edit().clear().apply()
+            return
+        }
+        val items = JSONArray()
+        for (i in 0 until player.mediaItemCount) {
+            val item = player.getMediaItemAt(i)
+            val md = item.mediaMetadata
+            items.put(
+                JSONObject()
+                    .put("id", item.mediaId)
+                    .put("uri", item.localConfiguration?.uri?.toString() ?: "")
+                    .put("title", md.title?.toString() ?: "")
+                    .put("artist", md.artist?.toString() ?: "")
+                    .put("album", md.albumTitle?.toString() ?: "")
+                    // Suggestions only (PlayerItems.suggestion).
+                    .putOpt("xTitle", md.extras?.getString(PlayerItems.EXTRA_TITLE))
+                    .putOpt("xArtist", md.extras?.getString(PlayerItems.EXTRA_ARTIST)),
+            )
+        }
+        prefs(context).edit().putString(ITEMS, items.toString()).apply()
+    }
+
+    fun savePosition(context: Context, player: Player) {
+        if (player.mediaItemCount == 0) return
+        prefs(context).edit()
+            .putInt(INDEX, player.currentMediaItemIndex)
+            .putLong(POSITION, player.currentPosition.coerceAtLeast(0))
+            .apply()
+    }
+
+    private fun items(context: Context): JSONArray? =
+        prefs(context).getString(ITEMS, null)?.let { runCatching { JSONArray(it) }.getOrNull() }?.takeIf { it.length() > 0 }
+
+    fun isEmpty(context: Context) = items(context) == null
+
+    // Suggestion files (app cache) the saved queue still points at.
+    fun files(context: Context): Set<String> {
+        val items = items(context) ?: return emptySet()
+        return (0 until items.length())
+            .map { Uri.parse(items.getJSONObject(it).optString("uri")) }
+            .filter { it.scheme == "file" }
+            .mapNotNull { it.path }
+            .toSet()
+    }
+
+    // The saved queue as media items, without the entries whose file is gone since (track deleted
+    // from the phone, cache cleared); null when nothing is left to play.
+    suspend fun load(context: Context): MediaSession.MediaItemsWithStartPosition? {
+        val saved = items(context) ?: return null
+        val library = MusicLibrary.get(context)
+        if (library.available.isEmpty()) library.scanAndSync(ConfigStore(context).musicFolder())
+        val onPhone = library.available.values.toSet()
+        val index = prefs(context).getInt(INDEX, 0)
+        var position = prefs(context).getLong(POSITION, 0)
+        var start = 0
+        val items = ArrayList<MediaItem>()
+        for (i in 0 until saved.length()) {
+            val o = saved.getJSONObject(i)
+            val uri = Uri.parse(o.optString("uri"))
+            val there = when (uri.scheme) {
+                "content" -> uri in onPhone // a library track
+                "file" -> uri.path?.let { File(it).exists() } == true // a suggestion fetched whole
+                "http", "https" -> true // a 30 s clip, streamed
+                else -> false
+            }
+            if (i == index) {
+                start = items.size
+                // The track that was playing is gone: the one after it starts from its beginning.
+                if (!there) position = 0
+            }
+            if (!there) continue
+            val md = MediaMetadata.Builder()
+                .setTitle(o.optString("title"))
+                .setArtist(o.optString("artist"))
+                .setAlbumTitle(o.optString("album"))
+            if (o.has("xTitle")) {
+                md.setExtras(Bundle().apply {
+                    putString(PlayerItems.EXTRA_TITLE, o.optString("xTitle"))
+                    putString(PlayerItems.EXTRA_ARTIST, o.optString("xArtist"))
+                })
+            }
+            items += MediaItem.Builder().setMediaId(o.optString("id")).setUri(uri).setMediaMetadata(md.build()).build()
+        }
+        if (items.isEmpty()) return null
+        if (start >= items.size) {
+            start = items.size - 1
+            position = 0
+        }
+        return MediaSession.MediaItemsWithStartPosition(items, start, position)
+    }
+}
+
+// The headset's ▶ once the service is gone. Media3's receiver starts the service in the foreground
+// for any ▶, and Android kills the app if no playback follows within seconds: with nothing saved
+// to resume, the press is ignored instead.
+class ResumeButtonReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (!SavedQueue.isEmpty(context)) MediaButtonReceiver().onReceive(context, intent)
     }
 }

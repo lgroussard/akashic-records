@@ -61,7 +61,7 @@ public sealed class BudgetPlanRepository
                 Id = reader.GetInt32(0),
                 PlanId = reader.GetInt32(1),
                 CategoryId = reader.GetInt32(2),
-                MonthlyAmount = decimal.Parse(reader.GetString(3))
+                MonthlyAmount = MoneyText.Parse(reader.GetString(3))
             });
         }
         return results;
@@ -81,7 +81,7 @@ public sealed class BudgetPlanRepository
             {
                 using var upd = connection.CreateCommand();
                 upd.CommandText = "UPDATE BudgetPlanLine SET MonthlyAmount = $amount WHERE Id = $id;";
-                upd.Parameters.AddWithValue("$amount", monthlyAmount.ToString());
+                upd.Parameters.AddWithValue("$amount", MoneyText.Format(monthlyAmount));
                 upd.Parameters.AddWithValue("$id", existing.Value);
                 upd.ExecuteNonQuery();
                 return;
@@ -91,7 +91,7 @@ public sealed class BudgetPlanRepository
         insert.CommandText = "INSERT INTO BudgetPlanLine (PlanId, CategoryId, MonthlyAmount) VALUES ($plan, $cat, $amount);";
         insert.Parameters.AddWithValue("$plan", planId);
         insert.Parameters.AddWithValue("$cat", categoryId);
-        insert.Parameters.AddWithValue("$amount", monthlyAmount.ToString());
+        insert.Parameters.AddWithValue("$amount", MoneyText.Format(monthlyAmount));
         insert.ExecuteNonQuery();
     }
 

@@ -476,9 +476,14 @@ public partial class BudgetView : UserControl, ISearchNavigable, IRemembersViewS
 
         var source = Path.GetFileName(dialog.FileName);
         int added = 0, dupes = 0;
+        // Two real operations can share date, label and amount (two tickets the same day): within one
+        // statement the 2nd, 3rd… get a rank in their identity, so only a re-import counts as a duplicate.
+        var seen = new Dictionary<string, int>();
         foreach (var row in parse.Rows)
         {
             var ext = StatementImporter.ExternalIdOf(row);
+            var rank = seen[ext] = seen.GetValueOrDefault(ext) + 1;
+            if (rank > 1) ext += "|#" + rank.ToString(CultureInfo.InvariantCulture);
             if (_txnRepo.ExistsByExternalId(ext)) { dupes++; continue; }
             _txnRepo.Add(new BudgetTransaction
             {
@@ -596,7 +601,13 @@ public partial class BudgetView : UserControl, ISearchNavigable, IRemembersViewS
 
         var del = new Button { Content = "✕", Width = 24, Height = 24, Padding = new Thickness(0), Style = (Style)FindResource("SecondaryButtonStyle"), ToolTip = "Supprimer" };
         var delId = t.Id;
-        del.Click += (_, _) => { _txnRepo.Delete(delId); RefreshAll(); };
+        var delLabel = t.Label;
+        del.Click += (_, _) =>
+        {
+            if (!ConfirmDelete.Ask($"Supprimer l'opération « {delLabel} » ?")) return;
+            _txnRepo.Delete(delId);
+            RefreshAll();
+        };
         Grid.SetColumn(del, 4);
         grid.Children.Add(del);
 
@@ -800,6 +811,7 @@ public partial class BudgetView : UserControl, ISearchNavigable, IRemembersViewS
     private void DeletePlanButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (_selectedPlanId is not { } pid) return;
+        if (!ConfirmDelete.Ask("Supprimer ce plan et toutes ses enveloppes ?")) return;
         _planRepo.Delete(pid);
         _selectedPlanId = null;
         RefreshPlans();

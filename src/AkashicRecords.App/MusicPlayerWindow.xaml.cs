@@ -950,7 +950,7 @@ public partial class MusicPlayerWindow : Window
             {
                 // Exit code 101 is the normal "--max-downloads reached" stop: judge by the printed path.
                 var result = await new AkashicRecords.Infrastructure.Downloading.ExternalDownloader()
-                    .DownloadAsync(tool, args, query, StreamCacheDir, ffmpegDir).ConfigureAwait(false);
+                    .DownloadAsync(tool, args, query, StreamCacheDir, ffmpegDir, timeout: TimeSpan.FromMinutes(3)).ConfigureAwait(false);
                 var path = (result.Output ?? string.Empty)
                     .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                     .Select(line => System.IO.Path.Combine(StreamCacheDir, line))

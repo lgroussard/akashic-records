@@ -415,6 +415,9 @@ public sealed class SchemaInitializer
         AddColumnIfMissing(connection, "CanvasElement", "Height", "REAL");
         AddColumnIfMissing(connection, "Recipe", "Category", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing(connection, "Recipe", "Servings", "INTEGER NOT NULL DEFAULT 0");
+        // Room v9 (phone): the time a ticket's transport leaves.
+        AddColumnIfMissing(connection, "Ticket", "Hour", "INTEGER");
+        AddColumnIfMissing(connection, "Ticket", "Minute", "INTEGER");
         AddColumnIfMissing(connection, "Recueil", "Summary", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing(connection, "Poem", "TextAlignment", "TEXT NOT NULL DEFAULT 'Left'");
         AddColumnIfMissing(connection, "Poem", "Margin", "REAL NOT NULL DEFAULT 0");
@@ -437,6 +440,18 @@ public sealed class SchemaInitializer
         AddColumnIfMissing(connection, "CalendarEvent", "EndDate", "TEXT");
         MigrateCalendarEventLinkOwner(connection);
         MigrateObservationOwner(connection);
+
+        // Budget amounts written by a French Windows carry a comma ("-45,90"): rewritten with a point, the
+        // one form MoneyText writes. Harmless to run again (no row matches once done).
+        foreach (var (table, column) in new[]
+                 {
+                     ("BudgetTransaction", "Amount"), ("BudgetCategory", "MonthlyCap"), ("BudgetPlanLine", "MonthlyAmount"),
+                 })
+        {
+            using var fix = connection.CreateCommand();
+            fix.CommandText = $"UPDATE {table} SET {column} = REPLACE({column}, ',', '.') WHERE {column} LIKE '%,%';";
+            fix.ExecuteNonQuery();
+        }
 
         // The typing-window width opened at a 300 base before settling at 900. Rows seeded under that first
         // default carry 300, and ALTER's column default never rewrites existing rows — so they are lifted

@@ -41,7 +41,7 @@ public sealed class BudgetCategoryRepository
                 Id = reader.GetInt32(0),
                 Name = reader.GetString(1),
                 Color = reader.IsDBNull(2) ? "#5B8CFF" : reader.GetString(2),
-                MonthlyCap = reader.IsDBNull(3) ? null : decimal.Parse(reader.GetString(3)),
+                MonthlyCap = reader.IsDBNull(3) ? null : MoneyText.Parse(reader.GetString(3)),
                 SortOrder = reader.GetInt32(4)
             });
         }
@@ -88,7 +88,5 @@ public sealed class BudgetCategoryRepository
         command.ExecuteNonQuery();
     }
 
-    // Primitive Parse/ToString are culture-free (invariant) under .NET Core, so decimals round-trip
-    // as plain "1234.56" text regardless of the machine locale.
-    private static string? Fmt(decimal? value) => value?.ToString();
+    private static string? Fmt(decimal? value) => value is { } v ? MoneyText.Format(v) : null;
 }

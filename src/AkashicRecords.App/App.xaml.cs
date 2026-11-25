@@ -39,8 +39,22 @@ public partial class App : Application
             return;
         }
 
+        // One running app per Windows session. A second one (« Start with Windows » plus a launch by
+        // hand) could not register the global hotkey, ended up with no tray icon — so no way to quit
+        // it — and wrote the same config.json and database. It simply leaves; headless captures above
+        // are not concerned and still run beside the app.
+        _singleInstance = new Mutex(initiallyOwned: true, @"Local\AkashicRecords.App.SingleInstance", out var isFirst);
+        if (!isFirst)
+        {
+            Shutdown();
+            return;
+        }
+
         base.OnStartup(e);
     }
+
+    // Held for the life of the process (a collected Mutex would release the name).
+    private static Mutex? _singleInstance;
 
     private void RunScreenshot(string target, string outputPath)
     {

@@ -29,6 +29,7 @@ public sealed class GlobalHotkey : IDisposable
 
         if (!NativeMethods.RegisterHotKey(_window.Handle, id, modifiers, virtualKey))
         {
+            _window.Dispose();
             throw new InvalidOperationException(
                 $"Failed to register global hotkey {id} - it may already be in use by another application.");
         }

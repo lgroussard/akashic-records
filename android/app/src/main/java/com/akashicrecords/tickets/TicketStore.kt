@@ -48,13 +48,28 @@ object TicketStore {
     }
 
     // Copies the file into the app and adds the ticket. Event = the one it belongs to, or null for the day alone.
-    suspend fun add(context: Context, db: AkashicDatabase, item: Incoming, title: String, date: LocalDate, event: CalendarEvent?): Ticket {
+    // time = hour to minute of the departure, when known.
+    suspend fun add(
+        context: Context, db: AkashicDatabase, item: Incoming, title: String, date: LocalDate, event: CalendarEvent?,
+        time: Pair<Int, Int>? = null,
+    ): Ticket {
         val path = if (item.mime == "application/pdf") copyPdf(context, item.uri) else MediaFiles.import(context, item.uri, "tickets")
         val t = Ticket(
             Title = title.trim(), FilePath = path, MimeType = item.mime, Date = date.toString(),
             EventId = event?.Id, EventTitle = event?.Title.orEmpty(), CreatedAt = nowIso(),
+            Hour = time?.first, Minute = time?.second,
         )
-        return t.copy(Id = db.ticketDao().add(t).toInt()).also { bump() }
+        return t.copy(Id = db.ticketDao().add(t).toInt()).also { changed(context) }
+    }
+
+    // Sets or clears (null) the time a ticket leaves at.
+    suspend fun setTime(context: Context, db: AkashicDatabase, t: Ticket, time: Pair<Int, Int>?): Ticket =
+        t.copy(Hour = time?.first, Minute = time?.second).also { db.ticketDao().update(it); changed(context) }
+
+    // The calendar's chips and rows follow, and so do the reminders: a ticket with a time has one.
+    private fun changed(context: Context) {
+        bump()
+        com.akashicrecords.calendar.Reminders.checkNow(context.applicationContext)
     }
 
     private fun bump() = android.os.Handler(android.os.Looper.getMainLooper()).post { changes++ }
@@ -69,7 +84,7 @@ object TicketStore {
     suspend fun delete(context: Context, db: AkashicDatabase, t: Ticket) {
         db.ticketDao().deleteById(t.Id)
         MediaFiles.delete(context, t.FilePath)
-        bump()
+        changed(context)
     }
 
     // The ticket as pictures: the image itself, or each PDF page drawn on white at about `width` px wide.
@@ -111,5 +126,14 @@ object TicketStore {
         val ahead = db.ticketDao().from(today.toString())
         val first = ahead.firstOrNull()?.Date ?: return emptyList()
         return ahead.filter { it.Date == first }
+    }
+
+    // Which of the day's tickets to show first: today, the next one to leave (one that left under half an hour ago
+    // still counts: the inspector comes after the departure); tickets without a time come last in the list.
+    fun currentIndex(tickets: List<Ticket>, now: java.time.LocalDateTime = java.time.LocalDateTime.now()): Int {
+        if (tickets.firstOrNull()?.Date != now.toLocalDate().toString()) return 0
+        val limit = now.toLocalTime().minusMinutes(30)
+        if (limit > now.toLocalTime()) return 0 // just after midnight: nothing has left yet
+        return tickets.indexOfFirst { t -> t.Hour == null || java.time.LocalTime.of(t.Hour, t.Minute ?: 0) >= limit }.coerceAtLeast(0)
     }
 }

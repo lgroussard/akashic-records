@@ -130,7 +130,7 @@
             <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
                 <Button Content="＋ Zone" Style="{StaticResource DlSmallButton}" Click="NewZoneButton_OnClick"
                         ToolTip="Créer une zone de placement"/>
-                <Button Content="Télécharger maintenant" Style="{StaticResource DlSmallButton}" Click="DownloadNowButton_OnClick"/>
+                <Button x:Name="DownloadNowButton" Content="Télécharger maintenant" Style="{StaticResource DlSmallButton}" Click="DownloadNowButton_OnClick"/>
                 <Button Content="Copier les liens en file" Style="{StaticResource DlSmallButton}" Click="CopyQueuedButton_OnClick"/>
                 <Button Content="Vider terminés" Style="{StaticResource DlSmallButton}" Click="ClearDoneButton_OnClick"/>
                 <Button Content="Vider la file" Style="{StaticResource DlSmallButton}" Click="ClearAllButton_OnClick"/>
