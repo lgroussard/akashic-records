@@ -28,7 +28,73 @@ public partial class SettingsView : Window
         PinterestKeyInput.Text = _config.PinterestToken ?? string.Empty;
         MusicSaveWidgetInput.IsChecked = _config.ShowMusicSaveWidget;
         BuildModulesPanel();
+
+        SyncHubInput.Text = Sync.SyncService.Instance.Settings.HubUrl;
+        Sync.SyncService.Instance.StateChanged += RefreshSyncStatus;
+        RefreshSyncStatus();
     }
+
+    // --- Synchronisation with the hub (see Sync.SyncService) -----------------------------------
+
+    private void RefreshSyncStatus()
+    {
+        var sync = Sync.SyncService.Instance;
+        SyncStatusText.Text = sync.StatusText;
+        SyncStatusText.Foreground = sync.LastError is null
+            ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xCC, 0xCC, 0xCC))
+            : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xFF, 0xB0, 0x7F));
+        var paired = sync.Settings.IsPaired;
+        SyncPairButton.Content = paired ? "Appairer à nouveau" : "Appairer";
+        SyncNowButton.Visibility = paired ? Visibility.Visible : Visibility.Collapsed;
+        SyncUnpairButton.Visibility = paired ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private async void SyncPairButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var url = SyncHubInput.Text.Trim();
+        var code = SyncCodeInput.Text.Trim();
+        if (url.Length == 0 || code.Length == 0)
+        {
+            SyncStatusText.Text = "Il faut l'adresse du hub (par exemple http://192.168.1.200:5199) et le code affiché par le hub.";
+            return;
+        }
+
+        SyncPairButton.IsEnabled = false;
+        SyncStatusText.Text = "Appairage en cours…";
+        try
+        {
+            await Sync.SyncService.Instance.PairAsync(url, code);
+            SyncCodeInput.Text = string.Empty; // used up
+            SyncHubInput.Text = Sync.SyncService.Instance.Settings.HubUrl;
+        }
+        catch (Exception ex)
+        {
+            SyncStatusText.Text = "Appairage impossible : " + ex.Message;
+        }
+        finally
+        {
+            SyncPairButton.IsEnabled = true;
+        }
+    }
+
+    private async void SyncNowButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        SyncNowButton.IsEnabled = false;
+        SyncStatusText.Text = "Synchronisation…";
+        try
+        {
+            await Sync.SyncService.Instance.RunAsync();
+        }
+        finally
+        {
+            SyncNowButton.IsEnabled = true;
+            RefreshSyncStatus();
+        }
+    }
+
+    public void ScrollToSyncForScreenshot() => SyncUnpairButton.BringIntoView();
+
+    private void SyncUnpairButton_OnClick(object sender, RoutedEventArgs e) => Sync.SyncService.Instance.Unpair();
 
     // Raised after a module is switched on/off (already saved), so MainWindow re-lays out the header.
     public event Action? ModulesChanged;

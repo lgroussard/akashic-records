@@ -9,6 +9,26 @@ using Microsoft.Data.Sqlite;
 
 if (args.Length >= 2 && args[0] == "rehearse") return await Rehearsal.RunAsync(args[1]);
 
+// Hand tools for end-to-end checks against a hub that is already running:
+//   device <db> <hubUrl> <token>   one sync of that database, as a second device would do
+//   sql <db> "<statement>"         run a statement on a test database and print what it returns
+if (args.Length == 4 && args[0] == "device")
+{
+    using var hub = new HubClient(args[2], args[3]);
+    Console.WriteLine(await new SyncEngine(args[1], hub, Lab.Tables).RunAsync());
+    return 0;
+}
+if (args.Length == 3 && args[0] == "sql")
+{
+    using var c = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = args[1] }.ToString());
+    c.Open();
+    using var cmd = c.CreateCommand();
+    cmd.CommandText = args[2];
+    using var r = cmd.ExecuteReader();
+    while (r.Read()) Console.WriteLine(string.Join(" | ", Enumerable.Range(0, r.FieldCount).Select(i => r.IsDBNull(i) ? "<null>" : r.GetValue(i).ToString())));
+    return 0;
+}
+
 var failures = 0;
 var passed = 0;
 

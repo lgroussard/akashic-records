@@ -25,6 +25,38 @@
                            Text="Décochez ce que vous n'utilisez pas ici : la barre du haut, les onglets et la recherche s'adaptent. Rien n'est supprimé, et le téléphone garde ses propres réglages."/>
                 <StackPanel x:Name="ModulesPanel" Margin="0,0,0,16"/>
 
+                <TextBlock Text="Synchronisation" FontSize="14" FontWeight="SemiBold"
+                           Foreground="#7FB0FF" Margin="0,8,0,4"/>
+                <TextBlock TextWrapping="Wrap" Foreground="#AAAAAA" FontSize="12" Margin="0,0,0,8"
+                           Text="Relie cet ordinateur au hub de la maison pour que les recettes suivent entre le PC et le téléphone. L'adresse et le code s'obtiennent sur le hub (commande « pair ») ; le code ne sert qu'une fois."/>
+                <TextBlock x:Name="SyncStatusText" TextWrapping="Wrap" Foreground="#CCCCCC" FontSize="12"
+                           LineHeight="16" Margin="0,0,0,8"/>
+                <Grid Margin="0,0,0,4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="8"/>
+                        <ColumnDefinition Width="130"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="Adresse du hub" Foreground="White" Margin="0,0,0,4"/>
+                        <TextBox x:Name="SyncHubInput" Background="#2A2A45" Foreground="White"
+                                 BorderThickness="1" BorderBrush="#553B82F6" Padding="8,6"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Text="Code d'appairage" Foreground="White" Margin="0,0,0,4"/>
+                        <TextBox x:Name="SyncCodeInput" Background="#2A2A45" Foreground="White"
+                                 BorderThickness="1" BorderBrush="#553B82F6" Padding="8,6"/>
+                    </StackPanel>
+                </Grid>
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,16">
+                    <Button x:Name="SyncPairButton" Content="Appairer"
+                            Style="{StaticResource ChipButtonStyle}" Padding="16,6" Click="SyncPairButton_OnClick"/>
+                    <Button x:Name="SyncNowButton" Content="Synchroniser maintenant" Margin="8,0,0,0"
+                            Style="{StaticResource MiniButtonStyle}" Click="SyncNowButton_OnClick"/>
+                    <Button x:Name="SyncUnpairButton" Content="Dissocier" Margin="8,0,0,0"
+                            Style="{StaticResource MiniButtonStyle}" Click="SyncUnpairButton_OnClick"/>
+                </StackPanel>
+
                 <TextBlock Text="Recherche d'images automatiques" FontSize="14" FontWeight="SemiBold"
                            Foreground="#7FB0FF" Margin="0,8,0,12"/>
 

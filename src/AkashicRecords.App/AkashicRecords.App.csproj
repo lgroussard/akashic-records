@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\AkashicRecords.Domain\AkashicRecords.Domain.csproj" />
     <ProjectReference Include="..\AkashicRecords.Infrastructure\AkashicRecords.Infrastructure.csproj" />
+    <ProjectReference Include="..\AkashicRecords.Sync\AkashicRecords.Sync.csproj" />
   </ItemGroup>
 
   <ItemGroup>
