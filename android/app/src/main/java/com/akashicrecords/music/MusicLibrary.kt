@@ -7,6 +7,7 @@ import android.os.Build
 import android.provider.MediaStore
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.flow.collectLatest
 import com.akashicrecords.data.AkashicDatabase
 import com.akashicrecords.data.MusicTrack
 import com.akashicrecords.sync.FileSync
@@ -92,7 +93,7 @@ class MusicLibrary(private val context: Context, private val db: AkashicDatabase
     /** What the player opens for a track: its file on this phone, else the hub's copy (streamed), else null. */
     fun uriFor(track: MusicTrack): Uri? {
         val key = normalize(track.FilePath)
-        return available[key] ?: if (key in remote && online(context)) HubStream.uri(key) else null
+        return available[key] ?: if (key in remote && reachable(context)) HubStream.uri(key) else null
     }
 
     private fun queryFolder(folder: String): List<LocalFile> {
@@ -159,6 +160,27 @@ class MusicLibrary(private val context: Context, private val db: AkashicDatabase
             return cm.getNetworkCapabilities(cm.activeNetwork)?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
         }
 
+        /** Last answer of the hub (see [probe]). Android's own "connected" is not enough: Tailscale's VPN stays up
+         * with mobile data and Wi-Fi off, so the phone looks online while nothing gets through. */
+        @Volatile
+        var hubReachable = true
+            private set
+
+        fun reachable(context: Context) = online(context) && hubReachable
+
+        /** Asks the hub whether it answers (3 s at most); remembers and returns the result. */
+        suspend fun probe(context: Context): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val creds = SyncService.credentials(context)
+            val ok = online(context) && creds != null && runCatching {
+                val conn = java.net.URL(creds.first + "/health").openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 3000
+                conn.readTimeout = 3000
+                try { conn.responseCode == 200 } finally { conn.disconnect() }
+            }.getOrDefault(false)
+            hubReachable = ok
+            ok
+        }
+
         // Desktop compares paths with '\' -> '/' and case-insensitively; same here.
         fun normalize(path: String) = path.replace('\\', '/').lowercase()
 
@@ -172,21 +194,29 @@ class MusicLibrary(private val context: Context, private val db: AkashicDatabase
     }
 }
 
-/** True while the phone has a network; follows changes, so the library hides the server's tracks when it goes away. */
+/** True while the hub answers: checked at once, at every network change and every 15 s, so the library hides the
+ * server's tracks when they cannot be played. */
 @androidx.compose.runtime.Composable
 fun rememberOnline(): Boolean {
     val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
-    var online by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(MusicLibrary.online(context)) }
+    var online by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(MusicLibrary.reachable(context)) }
+    val changes = androidx.compose.runtime.remember { kotlinx.coroutines.flow.MutableStateFlow(0) }
     androidx.compose.runtime.DisposableEffect(Unit) {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
-        val main = android.os.Handler(android.os.Looper.getMainLooper())
         val callback = object : android.net.ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: android.net.Network) { main.post { online = MusicLibrary.online(context) } }
-            override fun onLost(network: android.net.Network) { main.post { online = MusicLibrary.online(context) } }
-            override fun onCapabilitiesChanged(network: android.net.Network, caps: android.net.NetworkCapabilities) { main.post { online = MusicLibrary.online(context) } }
+            override fun onAvailable(network: android.net.Network) { changes.value++ }
+            override fun onLost(network: android.net.Network) { changes.value++ }
         }
         runCatching { cm.registerDefaultNetworkCallback(callback) }
         onDispose { runCatching { cm.unregisterNetworkCallback(callback) } }
+    }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        changes.collectLatest {
+            while (true) {
+                online = MusicLibrary.probe(context)
+                kotlinx.coroutines.delay(15_000)
+            }
+        }
     }
     return online
 }
