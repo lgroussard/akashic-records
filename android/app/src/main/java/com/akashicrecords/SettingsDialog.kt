@@ -35,6 +35,7 @@ import com.akashicrecords.data.AkashicDatabase
 import com.akashicrecords.data.ConfigStore
 import com.akashicrecords.data.DesktopImport
 import com.akashicrecords.data.Modules
+import com.akashicrecords.data.PhoneExport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
@@ -57,6 +58,25 @@ fun SettingsDialog(
 
     var undoing by remember { mutableStateOf(false) }
     var hasBackup by remember { mutableStateOf(DesktopImport.lastBackup(context) != null) }
+
+    // The phone data as a .zip, written where the user says (Drive, Download…): read only, nothing changes here.
+    val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        if (uri != null) {
+            busy = true
+            status = "Export en cours…"
+            scope.launch {
+                status = withContext(NonCancellable + Dispatchers.IO) {
+                    try {
+                        val r = PhoneExport.run(context, uri, db)
+                        "Export terminé : ${r.files} fichiers, ${r.bytes / 1024} Ko."
+                    } catch (e: Exception) {
+                        "Échec de l'export : ${e.message}"
+                    }
+                }
+                busy = false
+            }
+        }
+    }
 
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) picked = uri
@@ -109,6 +129,23 @@ fun SettingsDialog(
                 if (hasBackup) {
                     TextButton(onClick = { undoing = true }, enabled = !busy) { Text("Revenir avant le dernier import") }
                 }
+                HorizontalDivider(color = Palette.BorderStrong, modifier = Modifier.padding(vertical = 12.dp))
+                Text("Exporter les données du téléphone", fontSize = 15.sp)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Un .zip de tout ce qui est sur ce téléphone (base, photos), à déposer sur Drive pour le fusionner " +
+                        "avec les données du PC. Rien n'est modifié ici.",
+                    fontSize = 12.sp,
+                    color = Palette.TextMuted,
+                )
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        val stamp = java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm", java.util.Locale.US).format(java.util.Date())
+                        export.launch("akashic-telephone-$stamp.zip")
+                    },
+                    enabled = !busy,
+                ) { Text("Exporter…") }
                 status?.let {
                     Spacer(Modifier.height(8.dp))
                     Text(it, fontSize = 12.sp)
