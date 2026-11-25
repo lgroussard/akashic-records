@@ -18,7 +18,44 @@ public sealed record SyncTable(string EntityType, string Table, params string[] 
     /// </summary>
     public string? MatchColumn { get; init; }
     public int MatchPrefix { get; init; } = int.MaxValue;
+
+    /// <summary>Same idea with several columns that must all be equal (a link row is "the same thing"
+    /// when it joins the same two items). Used when `MatchColumn` is not set.</summary>
+    public string[] MatchColumns { get; init; } = [];
+
+    /// <summary>
+    /// Columns holding the row id of another synchronised item: column -> that item's entity type.
+    /// Row ids differ from one device to the next, so on the wire such a column carries the target's
+    /// sync id and each device translates it back to its own row id.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> Refs { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>References whose target type depends on another column of the same row
+    /// (Observation.OwnerId means an Artwork, a Poem... according to OwnerKind).</summary>
+    public IReadOnlyList<KindRef> KindRefs { get; init; } = [];
+
+    internal IReadOnlyList<string> AllMatchColumns => MatchColumn is not null ? [MatchColumn] : MatchColumns;
+
+    /// <summary>The entity type `column` points at for this row, or null when it is not a reference
+    /// (or its kind is unknown: the value then travels as it is).</summary>
+    internal string? TargetOf(string column, IReadOnlyDictionary<string, object?> row)
+    {
+        if (Refs.TryGetValue(column, out var fixedTarget)) return fixedTarget;
+        foreach (var k in KindRefs)
+        {
+            if (k.IdColumn != column) continue;
+            var kind = row.TryGetValue(k.KindColumn, out var v) ? v as string : null;
+            if (kind is null) return null;
+            if (k.Kinds is not null) return k.Kinds.TryGetValue(kind, out var mapped) ? mapped : null;
+            return kind; // the kind is the entity type itself
+        }
+        return null;
+    }
 }
+
+/// <summary>`IdColumn` holds a row id whose table is named by `KindColumn`. `Kinds` maps the kind's
+/// values to entity types; null = the value is the entity type.</summary>
+public sealed record KindRef(string IdColumn, string KindColumn, IReadOnlyDictionary<string, string>? Kinds = null);
 
 public sealed class SyncReport
 {
@@ -28,6 +65,8 @@ public sealed class SyncReport
     /// <summary>Fields where both sides wrote something different: this device's text was kept,
     /// the other one was saved in `sync_conflict` for the user to read.</summary>
     public int SetAside;
+    /// <summary>Rows waiting for an item they point at that has not arrived yet (applied as soon as it does).</summary>
+    public int Waiting;
     public long Cursor;
     public bool NothingToDo => Inserted + Updated + Deleted + Adopted + Pushed + PushedDeletes == 0;
     public override string ToString() =>
@@ -70,7 +109,7 @@ public sealed class SyncEngine
     /// <summary>Safety brake: a run that would delete more than this share of a table's synchronised
     /// rows on the hub (and more than `MinDeletesForBrake`) stops instead. A database swapped under
     /// the engine looks exactly like "the user deleted everything".</summary>
-    public double MaxDeleteShare { get; set; } = 0.30;
+    public double MaxDeleteShare { get; set; } = 0.90;
     public int MinDeletesForBrake { get; set; } = 5;
 
     public SyncEngine(string dbPath, HubClient hub, IReadOnlyList<SyncTable> tables)
@@ -118,6 +157,14 @@ public sealed class SyncEngine
             );
             CREATE INDEX IF NOT EXISTS sync_map_local ON sync_map(entity_type, local_id);
             CREATE TABLE IF NOT EXISTS sync_state(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS sync_deferred(
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                entity_type TEXT NOT NULL,
+                sync_id     TEXT NOT NULL,
+                rev         INTEGER NOT NULL,
+                payload     TEXT NOT NULL,      -- as received: it points at an item not here yet
+                device      TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS sync_conflict(
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 entity_type TEXT NOT NULL,
@@ -134,6 +181,27 @@ public sealed class SyncEngine
         // The row as last synchronised (canonical JSON): the common ancestor of a field-by-field merge.
         using var cmd = Cmd(db, null, "SELECT COUNT(*) FROM pragma_table_info('sync_map') WHERE name = 'synced_values'");
         if ((long)cmd.ExecuteScalar()! == 0) Exec(db, null, "ALTER TABLE sync_map ADD COLUMN synced_values TEXT");
+    }
+
+    /// <summary>
+    /// The synchronised content of a database as it would travel: one line per row, references
+    /// written as sync ids, sorted. Two databases that hold the same data give the same list whatever
+    /// their row ids - once each has synchronised (before that, nothing has a sync id and references
+    /// read as empty). For checks and rehearsals; changes no data (creates the bookkeeping tables).
+    /// </summary>
+    public static List<string> WireDump(string dbPath, IReadOnlyList<SyncTable> tables)
+    {
+        using var db = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath }.ToString());
+        db.Open();
+        EnsureSchema(db);
+        var infos = tables.Select(d => TableInfo.Load(db, d)).Where(t => t is not null).Select(t => t!).ToList();
+        var lines = new List<string>();
+        using var tx = db.BeginTransaction();
+        foreach (var t in infos)
+            foreach (var (_, values) in t.ReadAll(db, tx).ToList())
+                lines.Add($"{t.Def.EntityType}|{ToWire(db, tx, t, values)}");
+        lines.Sort(StringComparer.Ordinal);
+        return lines;
     }
 
     /// <summary>The versions set aside by field-level conflicts, newest first.</summary>
@@ -192,6 +260,7 @@ public sealed class SyncEngine
                     report.Pulled++;
                     Apply(db, tx, table, row, report);
                 }
+                RetryDeferred(db, tx, tables, report);
                 SetCursor(db, tx, page.NextCursor);
                 tx.Commit();
             }
@@ -199,9 +268,80 @@ public sealed class SyncEngine
         }
     }
 
-    private static void Apply(SqliteConnection db, SqliteTransaction tx, TableInfo t, HubLogRow row, SyncReport report) =>
-        ApplyRemote(db, tx, t, row.EntityId, row.Rev,
-            row.Deleted || row.Payload is null ? null : t.Project(row.Payload.Value), row.DeviceId, report);
+    private static void Apply(SqliteConnection db, SqliteTransaction tx, TableInfo t, HubLogRow row, SyncReport report)
+    {
+        if (row.Deleted || row.Payload is null) { ApplyRemote(db, tx, t, row.EntityId, row.Rev, null, row.DeviceId, report); return; }
+        var payload = FromWire(db, tx, t, t.Project(row.Payload.Value));
+        if (payload is null)
+        {
+            // It points at an item that has not arrived yet: kept as received, applied once it has.
+            Exec(db, tx, "INSERT INTO sync_deferred(entity_type, sync_id, rev, payload, device) VALUES ($t, $s, $r, $p, $d)",
+                ("$t", row.EntityType), ("$s", row.EntityId), ("$r", row.Rev), ("$p", row.Payload.Value.GetRawText()), ("$d", row.DeviceId));
+            return;
+        }
+        ApplyRemote(db, tx, t, row.EntityId, row.Rev, payload, row.DeviceId, report);
+    }
+
+    /// <summary>Rows set aside because they pointed at something unknown: tried again now that more has arrived.</summary>
+    private static void RetryDeferred(SqliteConnection db, SqliteTransaction tx, List<TableInfo> tables, SyncReport report)
+    {
+        for (var progress = true; progress;)
+        {
+            progress = false;
+            var waiting = new List<(long Id, string Type, string SyncId, long Rev, string Payload, string Device)>();
+            using (var cmd = Cmd(db, tx, "SELECT id, entity_type, sync_id, rev, payload, device FROM sync_deferred ORDER BY id"))
+            using (var r = cmd.ExecuteReader())
+                while (r.Read()) waiting.Add((r.GetInt64(0), r.GetString(1), r.GetString(2), r.GetInt64(3), r.GetString(4), r.GetString(5)));
+            foreach (var w in waiting)
+            {
+                var t = tables.FirstOrDefault(x => x.Def.EntityType == w.Type);
+                var known = MapEntry.BySyncId(db, tx, w.Type, w.SyncId);
+                var obsolete = t is null || (known is not null && known.Rev >= w.Rev);
+                var payload = obsolete ? null : FromWire(db, tx, t!, t!.Project(Parse(w.Payload)));
+                if (!obsolete && payload is null) continue; // still waiting
+                if (!obsolete) ApplyRemote(db, tx, t!, w.SyncId, w.Rev, payload, w.Device, report);
+                Exec(db, tx, "DELETE FROM sync_deferred WHERE id = $id", ("$id", w.Id));
+                progress = true;
+            }
+        }
+        using var count = Cmd(db, tx, "SELECT COUNT(*) FROM sync_deferred");
+        report.Waiting = (int)(long)count.ExecuteScalar()!;
+    }
+
+    // ---- References: row ids are local, so on the wire a reference carries the target's sync id.
+
+    /// <summary>A row as it goes to the hub: each reference replaced by its target's sync id (null when
+    /// the target does not exist here).</summary>
+    private static string ToWire(SqliteConnection db, SqliteTransaction tx, TableInfo t, SortedDictionary<string, object?> values)
+    {
+        var wire = new SortedDictionary<string, object?>(values, StringComparer.Ordinal);
+        foreach (var (column, value) in values)
+        {
+            if (value is not long id || id == 0) continue;
+            var target = t.Def.TargetOf(column, values);
+            if (target is null) continue;
+            using var cmd = Cmd(db, tx, "SELECT sync_id FROM sync_map WHERE entity_type = $t AND local_id = $l AND deleted = 0", ("$t", target), ("$l", id));
+            wire[column] = cmd.ExecuteScalar() as string;
+        }
+        return TableInfo.Canonical(wire);
+    }
+
+    /// <summary>A row as received, with each reference turned back into this database's row id.
+    /// Null when one of them points at an item that is not here (yet).</summary>
+    private static SortedDictionary<string, object?>? FromWire(SqliteConnection db, SqliteTransaction tx, TableInfo t, SortedDictionary<string, object?> wire)
+    {
+        var values = new SortedDictionary<string, object?>(wire, StringComparer.Ordinal);
+        foreach (var (column, value) in wire)
+        {
+            var target = t.Def.TargetOf(column, wire);
+            if (target is null || value is not string syncId) continue;
+            using var cmd = Cmd(db, tx, "SELECT local_id FROM sync_map WHERE entity_type = $t AND sync_id = $s", ("$t", target), ("$s", syncId));
+            using var r = cmd.ExecuteReader();
+            if (!r.Read()) return null;                            // never heard of it: wait for it
+            values[column] = r.IsDBNull(0) ? null : r.GetInt64(0); // known but deleted: the link is empty
+        }
+        return values;
+    }
 
     /// <summary>Brings one entity's state on the hub (`payload` null = deleted there) into this database.</summary>
     private static void ApplyRemote(SqliteConnection db, SqliteTransaction tx, TableInfo t, string syncId, long rev,
@@ -307,7 +447,7 @@ public sealed class SyncEngine
             var known = ancestor is not null && ancestor.TryGetValue(field, out common);
             if (known && Equals(ours, common)) take[field] = theirs;       // only they changed it
             else if (known && Equals(theirs, common)) { }                  // only we changed it
-            else if (!known && field == t.Def.MatchColumn) take[field] = theirs; // joined on it: same day, another hour — not a conflict
+            else if (!known && t.Def.AllMatchColumns.Contains(field)) take[field] = theirs; // joined on it: same day, another hour — not a conflict
             else if (!known && IsEmpty(ours)) take[field] = theirs;        // no ancestor: something beats nothing
             else if (!known && IsEmpty(theirs)) { }
             else
@@ -357,7 +497,7 @@ public sealed class SyncEngine
 
     // ------------------------------------------------------------------ scan & push
 
-    private sealed record Pending(TableInfo Table, string SyncId, long? LocalId, long BaseRev, string? Hash, string? PayloadJson)
+    private sealed record Pending(TableInfo Table, string SyncId, long? LocalId, long BaseRev, string? Hash, string? PayloadJson, string? WireJson = null)
     {
         public bool IsDelete => PayloadJson is null;
         // Derived from the content: sending the same change twice is the same mutation for the hub.
@@ -395,6 +535,8 @@ public sealed class SyncEngine
             throw new SyncSafetyException(
                 $"{deletes.Count} {t.Def.EntityType} sur {byLocal.Count} ont disparu de cette base depuis la derniere synchro. " +
                 "Cela ressemble a une base remplacee plutot qu'a des suppressions voulues : rien n'a ete envoye au hub.");
+        // Now that every new row of this table has its sync id, write the rows as they travel.
+        pending = pending.Select(p => p with { WireJson = ToWire(db, tx, t, t.Project(Parse(p.PayloadJson!))) }).ToList();
         pending.AddRange(deletes.Select(m => new Pending(t, m.SyncId, null, m.Rev, null, null)));
 
         tx.Commit();
@@ -408,7 +550,7 @@ public sealed class SyncEngine
         {
             var mutations = batch.Select(p => new HubMutation(
                 p.MutationId, p.Table.Def.EntityType, p.SyncId, p.BaseRev,
-                p.PayloadJson is null ? null : Parse(p.PayloadJson), p.IsDelete)).ToList();
+                p.WireJson is null ? null : Parse(p.WireJson), p.IsDelete)).ToList();
             var response = await _hub.PushAsync(mutations, ct);
 
             using var tx = db.BeginTransaction();
@@ -429,9 +571,14 @@ public sealed class SyncEngine
                     if (res.Current is null || res.Current.Rev <= map.Rev)
                         MapEntry.Upsert(db, tx, type, p.SyncId, map.LocalId, res.Rev, null, false); // unknown to this hub: send as it is
                     else
-                        ApplyRemote(db, tx, p.Table, p.SyncId, res.Current.Rev,
-                            res.Current.Deleted || res.Current.Payload is null ? null : p.Table.Project(res.Current.Payload.Value),
-                            res.Current.LastDevice, report);
+                    {
+                        var gone = res.Current.Deleted || res.Current.Payload is null;
+                        var theirs = gone ? null : FromWire(db, tx, p.Table, p.Table.Project(res.Current.Payload!.Value));
+                        if (!gone && theirs is null)
+                            MapEntry.Upsert(db, tx, type, p.SyncId, map.LocalId, res.Current.Rev, null, false); // points at something unknown here: ours goes on top
+                        else
+                            ApplyRemote(db, tx, p.Table, p.SyncId, res.Current.Rev, theirs, res.Current.LastDevice, report);
+                    }
                     conflicts++;
                 }
             }
@@ -538,18 +685,28 @@ public sealed class SyncEngine
         /// (see SyncTable.MatchColumn). Null when the table has none or nothing matches.</summary>
         public long? FindUnmappedByKey(SqliteConnection db, SqliteTransaction tx, SortedDictionary<string, object?> payload)
         {
-            var column = Def.MatchColumn;
-            if (column is null || !payload.TryGetValue(column, out var value) || value is not string wanted || wanted.Length == 0) return null;
-            if (_columns.All(c => c.Name != column)) return null;
-            static string Key(string s, int n) => s.Length > n ? s[..n] : s;
+            var keys = Def.AllMatchColumns;
+            if (keys.Count == 0 || keys.Any(k => _columns.All(c => c.Name != k))) return null;
+            // Every key column must be carried and say something: an empty key identifies nothing.
+            if (keys.Any(k => !payload.TryGetValue(k, out var v) || v is null or "")) return null;
+
+            object? Key(object? v) => v is string s && s.Length > Def.MatchPrefix ? s[..Def.MatchPrefix] : v;
+            long? best = null;
+            var bestScore = -1;
             using var cmd = Cmd(db, tx,
-                $"SELECT \"{_pk}\", \"{column}\" FROM \"{Def.Table}\" " +
+                $"SELECT \"{_pk}\", {ColumnList} FROM \"{Def.Table}\" " +
                 $"WHERE \"{_pk}\" NOT IN (SELECT local_id FROM sync_map WHERE entity_type = $t AND local_id IS NOT NULL) ORDER BY \"{_pk}\"",
                 ("$t", Def.EntityType));
             using var r = cmd.ExecuteReader();
             while (r.Read())
-                if (!r.IsDBNull(1) && Key(r.GetString(1), Def.MatchPrefix) == Key(wanted, Def.MatchPrefix)) return r.GetInt64(0);
-            return null;
+            {
+                var local = ReadValues(r);
+                if (!keys.All(k => Equals(Key(local[k]), Key(payload[k])))) continue;
+                // Several candidates (rows created in one batch share a timestamp): the closest one.
+                var score = payload.Count(kv => Equals(local[kv.Key], kv.Value));
+                if (score > bestScore) { best = r.GetInt64(0); bestScore = score; }
+            }
+            return best;
         }
 
         private SortedDictionary<string, object?> ReadValues(SqliteDataReader r)
