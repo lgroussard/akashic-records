@@ -711,10 +711,11 @@ public sealed class SyncEngine
             object? Key(object? v) => v is string s && s.Length > Def.MatchPrefix ? s[..Def.MatchPrefix] : v;
             long? best = null;
             var bestScore = -1;
+            var (filter, args) = KeyFilter(payload)!.Value;
             using var cmd = Cmd(db, tx,
                 $"SELECT \"{_pk}\", {ColumnList} FROM \"{Def.Table}\" " +
-                $"WHERE \"{_pk}\" NOT IN (SELECT local_id FROM sync_map WHERE entity_type = $t AND local_id IS NOT NULL) ORDER BY \"{_pk}\"",
-                ("$t", Def.EntityType));
+                $"WHERE \"{_pk}\" NOT IN (SELECT local_id FROM sync_map WHERE entity_type = $t AND local_id IS NOT NULL){filter} ORDER BY \"{_pk}\"",
+                [("$t", Def.EntityType), .. args]);
             using var r = cmd.ExecuteReader();
             while (r.Read())
             {
@@ -779,13 +780,44 @@ public sealed class SyncEngine
             return payload.All(kv => Equals(local[kv.Key], kv.Value));
         }
 
+        /// <summary>
+        /// The match columns as an SQL condition (" AND col = $k0 ..."), when the payload carries a value
+        /// for each. Looking a row up this way instead of reading every unlinked row is what keeps the
+        /// first link of a few thousand tracks from taking minutes; an identical row always has the same
+        /// key, so nothing is missed. Null when the table has no key or the payload's key is empty.
+        /// </summary>
+        private (string Sql, (string Name, object? Value)[] Args)? KeyFilter(SortedDictionary<string, object?> payload)
+        {
+            var keys = Def.AllMatchColumns;
+            if (keys.Count == 0 || keys.Any(k => _columns.All(c => c.Name != k))) return null;
+            if (keys.Any(k => !payload.TryGetValue(k, out var v) || v is null or "")) return null;
+            var sql = new StringBuilder();
+            var args = new List<(string, object?)>();
+            for (var i = 0; i < keys.Count; i++)
+            {
+                var value = payload[keys[i]];
+                if (Def.MatchPrefix != int.MaxValue && value is string s)
+                {
+                    sql.Append($" AND substr(\"{keys[i]}\", 1, {Def.MatchPrefix}) = $k{i}");
+                    args.Add(($"$k{i}", s.Length > Def.MatchPrefix ? s[..Def.MatchPrefix] : s));
+                }
+                else
+                {
+                    sql.Append($" AND \"{keys[i]}\" = $k{i}");
+                    args.Add(($"$k{i}", value));
+                }
+            }
+            return (sql.ToString(), args.ToArray());
+        }
+
         public long? FindUnmappedTwin(SqliteConnection db, SqliteTransaction tx, SortedDictionary<string, object?> payload)
         {
             if (payload.Count == 0) return null;
+            var filter = KeyFilter(payload);
             using var cmd = Cmd(db, tx,
                 $"SELECT \"{_pk}\", {ColumnList} FROM \"{Def.Table}\" " +
-                $"WHERE \"{_pk}\" NOT IN (SELECT local_id FROM sync_map WHERE entity_type = $t AND local_id IS NOT NULL)",
-                ("$t", Def.EntityType));
+                $"WHERE \"{_pk}\" NOT IN (SELECT local_id FROM sync_map WHERE entity_type = $t AND local_id IS NOT NULL){filter?.Sql}",
+                [("$t", Def.EntityType), .. filter?.Args ?? []]);
             using var r = cmd.ExecuteReader();
             while (r.Read())
             {

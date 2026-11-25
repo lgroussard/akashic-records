@@ -563,10 +563,11 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
             fun key(v: Any?): Any? = if (v is String && v.length > def.matchPrefix) v.take(def.matchPrefix) else v
             var best: Long? = null
             var bestScore = -1
+            val (filter, args) = keyFilter(payload)!!
             db.query(
                 "SELECT `$pk`, $columnList FROM `${def.table}` WHERE `$pk` NOT IN " +
-                    "(SELECT local_id FROM sync_map WHERE entity_type = ? AND local_id IS NOT NULL) ORDER BY `$pk`",
-                arrayOf<Any?>(def.entityType),
+                    "(SELECT local_id FROM sync_map WHERE entity_type = ? AND local_id IS NOT NULL)$filter ORDER BY `$pk`",
+                arrayOf<Any?>(def.entityType, *args.toTypedArray()),
             ).use { c ->
                 while (c.moveToNext()) {
                     val local = values(c)
@@ -582,12 +583,38 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
             return best
         }
 
+        /**
+         * The match columns as an SQL condition (" AND col = ? ..."), when the payload carries a value for each.
+         * Looking a row up this way instead of reading every unlinked row is what keeps the first link of a few
+         * thousand tracks from taking minutes; an identical row always has the same key, so nothing is missed.
+         * Null when the table has no key or the payload's key is empty.
+         */
+        private fun keyFilter(payload: Map<String, Any?>): Pair<String, List<Any?>>? {
+            val keys = def.allMatchColumns
+            if (keys.isEmpty() || keys.any { k -> columns.none { it.name == k } }) return null
+            if (keys.any { k -> !payload.containsKey(k) || payload[k] == null || payload[k] == "" }) return null
+            val sql = StringBuilder()
+            val args = ArrayList<Any?>()
+            for (k in keys) {
+                val value = payload[k]
+                if (def.matchPrefix != Int.MAX_VALUE && value is String) {
+                    sql.append(" AND substr(`$k`, 1, ${def.matchPrefix}) = ?")
+                    args += value.take(def.matchPrefix)
+                } else {
+                    sql.append(" AND `$k` = ?")
+                    args += value
+                }
+            }
+            return sql.toString() to args
+        }
+
         fun findUnmappedTwin(db: SupportSQLiteDatabase, payload: SortedMap<String, Any?>): Long? {
             if (payload.isEmpty()) return null
+            val filter = keyFilter(payload)
             db.query(
                 "SELECT `$pk`, $columnList FROM `${def.table}` WHERE `$pk` NOT IN " +
-                    "(SELECT local_id FROM sync_map WHERE entity_type = ? AND local_id IS NOT NULL)",
-                arrayOf<Any?>(def.entityType),
+                    "(SELECT local_id FROM sync_map WHERE entity_type = ? AND local_id IS NOT NULL)${filter?.first.orEmpty()}",
+                arrayOf<Any?>(def.entityType, *(filter?.second ?: emptyList()).toTypedArray()),
             ).use { c ->
                 while (c.moveToNext()) if (SyncValues.matches(values(c), payload)) return c.getLong(0)
             }

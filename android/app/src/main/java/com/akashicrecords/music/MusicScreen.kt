@@ -127,7 +127,8 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
             return@Column
         }
 
-        val tabs = listOf("Bibliothèque" to "Library", "Rechercher" to "Search")
+        // "Serveur": the whole catalogue, to choose which tracks live on this phone.
+        val tabs = listOf("Bibliothèque" to "Library", "Rechercher" to "Search", "Serveur" to "Server")
         // Downloads: behind ⤓ (badge while a run is going) rather than a tab of their own.
         val downloads by Downloader.state.collectAsState()
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -148,6 +149,10 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
         when (tabs[page].second) {
             "Search" -> {
                 SearchPanel(db, player, playable) { t -> library.uriFor(t)?.let { player.playNext(t, it) } }
+                return@Column
+            }
+            "Server" -> {
+                ServerCatalogPanel(db, folder)
                 return@Column
             }
         }

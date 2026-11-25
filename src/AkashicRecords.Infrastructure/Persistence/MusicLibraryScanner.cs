@@ -69,10 +69,18 @@ public sealed class MusicLibraryScanner
         // Not when the folder could not be read or holds no audio at all: that is a music folder that is
         // missing (app copied without it, folder moved, drive not there), not a library the user emptied,
         // and pruning would delete every track with its moods, typed titles and artists.
-        if (files is { Count: > 0 }) PruneMissingTracks(files);
+        // Nor once the library is synchronised with the hub: the rows are then the catalogue of every device, and a
+        // track whose file is not in this folder is a track kept on another device (or on the hub only), not a
+        // ghost. Deleting the row here would delete the track, its moods and its place in playlists everywhere.
+        // The player lists the tracks whose file is here (IsOnThisDevice).
+        if (files is { Count: > 0 } && !_trackRepository.IsSynchronised()) PruneMissingTracks(files);
 
         return _trackRepository.GetAll();
     }
+
+    // Is this track's file in this computer's music folder?
+    public static bool IsOnThisDevice(MusicTrack track) =>
+        File.Exists(Path.Combine(AppContext.BaseDirectory, track.FilePath));
 
     // Removes DB rows whose FilePath no longer exists under music/. The scanner only ever
     // *adds* rows, so a file deleted from disk would otherwise linger forever.

@@ -338,6 +338,54 @@ await Scenario("12. Fichiers : photos, couvertures", async lab =>
         "un chemin qui sort du dossier de l'app est ignore");
 });
 
+await Scenario("13. Musique : le catalogue partout, les fichiers au choix de chaque appareil", async lab =>
+{
+    var pc = await lab.Device("pc");                           // keeps every track
+    var phone = await lab.Device("phone", chosenMusic: true);  // keeps only what it is told to
+    byte[] Audio(int seed) { var b = new byte[60_000]; new Random(seed).NextBytes(b); return b; }
+
+    pc.AddPhoto(@"music\Celeste\01 Prologue.mp3", Audio(1), "Prologue");
+    pc.AddPhoto(@"music\Celeste\02 First Steps.mp3", Audio(2), "First Steps");
+    pc.AddPhoto(@"music\Vivaldi\Ete.mp3", Audio(3), "Ete");
+    await pc.Sync(); await phone.Sync();
+    Check(phone.PhotoRows() == 3 && phone.LastFiles.Downloaded == 0 && phone.FileBytes("music/Celeste/01 Prologue.mp3") is null,
+        "le telephone voit les 3 pistes du catalogue mais ne telecharge aucun fichier de lui-meme");
+
+    phone.Keep(@"music\Vivaldi\Ete.mp3", true);
+    await phone.Sync();
+    Check(phone.LastFiles.Downloaded == 1 && phone.FileBytes("music/Vivaldi/Ete.mp3")?.SequenceEqual(Audio(3)) == true
+          && phone.FileBytes("music/Celeste/02 First Steps.mp3") is null,
+        "une piste marquee 'a garder' est telechargee, et elle seule");
+
+    // A track added on the phone goes up, and the PC (which keeps everything) fetches it.
+    phone.AddPhoto("music/Telephone/Enregistrement.mp3", Audio(4), "Enregistrement");
+    await phone.Sync(); await pc.Sync();
+    Check(pc.FileBytes(@"music\Telephone\Enregistrement.mp3")?.SequenceEqual(Audio(4)) == true, "une piste ajoutee sur le telephone arrive sur le PC");
+
+    // Removing a file by hand takes the track off THIS device only.
+    pc.RemoveFileByHand(@"music\Celeste\01 Prologue.mp3");
+    await pc.Sync(); await phone.Sync(); await pc.Sync();
+    Check(pc.FileBytes(@"music\Celeste\01 Prologue.mp3") is null && pc.PhotoRows() == 4 && phone.PhotoRows() == 4,
+        "un fichier retire a la main du PC n'est pas retelecharge, et la piste reste au catalogue partout");
+    phone.Keep(@"music\Celeste\01 Prologue.mp3", true);
+    await phone.Sync();
+    Check(phone.FileBytes("music/Celeste/01 Prologue.mp3")?.SequenceEqual(Audio(1)) == true, "le telephone peut toujours la recuperer : le serveur l'a gardee");
+    pc.Keep(@"music\Celeste\01 Prologue.mp3", true);
+    await pc.Sync();
+    Check(pc.FileBytes(@"music\Celeste\01 Prologue.mp3")?.SequenceEqual(Audio(1)) == true, "et le PC aussi, s'il la redemande");
+
+    // A large library goes up in slices: each run stops at its time budget and resumes.
+    var slow = await lab.Device("pc-lent", budgetMs: 0);
+    for (var i = 0; i < 6; i++) slow.AddPhoto($@"music\Lot\piste{i}.mp3", Audio(10 + i), $"piste {i}");
+    await slow.Sync();
+    var firstRun = slow.LastFiles;
+    var runs = 1;
+    while (slow.LastFiles.ToSend > 0 && runs < 20) { await slow.Sync(); runs++; }
+    await phone.Sync();
+    Check(firstRun.Uploaded < 6 && firstRun.ToSend > 0 && runs > 1 && slow.LastFiles.ToSend == 0 && phone.PhotoRows() == 10,
+        $"une grosse bibliotheque part par tranches ({runs} passages ici), sans rien perdre");
+});
+
 await Scenario("10. Mise a niveau depuis la premiere version du moteur", async lab =>
 {
     var (pc, phone) = await lab.SeededPair("Houmous", "Falafels");

@@ -40,7 +40,7 @@ public sealed class Lab : IAsyncDisposable
     public long HubRows() => Store.HeadSeq();
 
     /// <summary>A device with its own database, paired with the hub through the real flow.</summary>
-    public async Task<Device> Device(string name, bool withoutServings = false, string? existingDb = null)
+    public async Task<Device> Device(string name, bool withoutServings = false, string? existingDb = null, bool chosenMusic = false, int budgetMs = 25_000)
     {
         Directory.CreateDirectory(_dir);
         var db = Path.Combine(_dir, $"{name}-{Guid.NewGuid():N}.db");
@@ -51,7 +51,7 @@ public sealed class Lab : IAsyncDisposable
         }
         using var anonymous = new HubClient(Address.ToString());
         var paired = await anonymous.PairAsync(Store.CreatePairCode(10), name, name);
-        var device = new Device(name, db, Address.ToString(), paired.Token, create: existingDb is null, withoutServings);
+        var device = new Device(name, db, Address.ToString(), paired.Token, create: existingDb is null, withoutServings, chosenMusic, budgetMs);
         _devices.Add(device);
         return device;
     }
@@ -91,7 +91,7 @@ public sealed class Device : IDisposable
     public string Name { get; }
     public string DbPath { get; }
 
-    public Device(string name, string dbPath, string hubUrl, string token, bool create, bool withoutServings)
+    public Device(string name, string dbPath, string hubUrl, string token, bool create, bool withoutServings, bool chosenMusic = false, int budgetMs = 25_000)
     {
         Name = name;
         DbPath = dbPath;
@@ -130,7 +130,11 @@ public sealed class Device : IDisposable
         FileSync.EnsureSchema(dbPath);
         _hub = new HubClient(hubUrl, token, _handler);
         _engine = new SyncEngine(dbPath, _hub, Lab.Tables);
-        _files = new FileSync(dbPath, BaseDir, _hub, new[] { ("Photo", "ImagePath") });
+        _files = new FileSync(dbPath, BaseDir, _hub, new[] { ("Photo", "ImagePath") })
+        {
+            Music = chosenMusic ? MusicPolicy.Chosen : MusicPolicy.All,
+            Budget = TimeSpan.FromMilliseconds(budgetMs),
+        };
     }
 
     /// <summary>What the app does at each cycle: send the files, synchronise the rows, fetch the files.</summary>
@@ -164,6 +168,12 @@ public sealed class Device : IDisposable
         var full = Path.Combine(BaseDir, relativePath.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar));
         return File.Exists(full) ? File.ReadAllBytes(full) : null;
     }
+
+    /// <summary>The device's own choice for a track: keep its file here, or not.</summary>
+    public void Keep(string relativePath, bool keep) => FileSync.SetKeep(DbPath, relativePath, keep);
+
+    public void RemoveFileByHand(string relativePath) =>
+        File.Delete(Path.Combine(BaseDir, relativePath.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar)));
 
     public long PhotoRows() => (long)Scalar("SELECT COUNT(*) FROM Photo")!;
 

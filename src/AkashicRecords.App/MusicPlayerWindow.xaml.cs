@@ -1138,7 +1138,10 @@ public partial class MusicPlayerWindow : Window
     private int _libraryShown = LibraryPage;
     private DispatcherTimer? _librarySearchTimer;
 
-    private IReadOnlyList<MusicTrack> AllTracks() => _allTracks ??= _trackRepository.GetAll().ToList();
+    // Only the tracks whose file is on this computer: once synchronised, the table also lists tracks kept on
+    // another device only (see MusicLibraryScanner).
+    private IReadOnlyList<MusicTrack> AllTracks() =>
+        _allTracks ??= _trackRepository.GetAll().Where(MusicLibraryScanner.IsOnThisDevice).ToList();
 
     // After a scan (new or removed files): the next read goes back to the database.
     private void InvalidateLibrary() => _allTracks = null;
@@ -1160,7 +1163,9 @@ public partial class MusicPlayerWindow : Window
 
     private IReadOnlyList<MusicTrack> CurrentLibraryTracks()
     {
-        IEnumerable<MusicTrack> tracks = _selectedMoodId is { } moodId ? _trackRepository.GetByMood(moodId) : AllTracks();
+        IEnumerable<MusicTrack> tracks = _selectedMoodId is { } moodId
+            ? _trackRepository.GetByMood(moodId).Where(MusicLibraryScanner.IsOnThisDevice)
+            : AllTracks();
         if (!string.IsNullOrWhiteSpace(_librarySearch))
         {
             var q = _librarySearch.Trim();

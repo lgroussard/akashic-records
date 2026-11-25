@@ -61,6 +61,11 @@ object Downloader {
     private val _libraryVersion = MutableStateFlow(0)
     val libraryVersion: StateFlow<Int> = _libraryVersion
 
+    // Files added to or removed from the music folder by something else (the sync fetching a kept track).
+    fun notifyLibraryChanged() {
+        _libraryVersion.value++
+    }
+
     private fun set(f: State.() -> State) {
         _state.value = _state.value.f()
     }
