@@ -21,7 +21,10 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8: removes unused code and optimises the rest (Compose screens open and scroll faster). Names are
+            // kept (-dontobfuscate in proguard-rules.pro) so a crash report stays readable.
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // Signed with the same (debug) key as every APK installed so far, so the release build updates
             // the installed app in place and keeps its data. Release is what goes on the phone: a debug
             // build is debuggable, which makes Compose screens several times slower to open.
