@@ -103,7 +103,10 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
 
         pull(infos, report)
         for (round in 0 until 4) {
+            scanLinked = 0
+            scanDeleted = 0
             val pending = infos.flatMap { scan(it) }
+            checkDeleteBrake()
             if (pending.isEmpty()) break
             val conflicts = push(pending, report)
             pull(infos, report)
@@ -400,6 +403,23 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
         val mutationId get() = SyncValues.mutationId(table.def.entityType, syncId, baseRev, hash)
     }
 
+    private var scanLinked = 0
+    private var scanDeleted = 0
+
+    /**
+     * The brake, on the whole database: a database swapped under the engine (an empty or old file) loses nearly
+     * every row of every table at once. Emptying one table (the shopping list, a cleared collection) is an
+     * ordinary use and goes through; it used to stop every sync of the phone, its other changes included.
+     */
+    private fun checkDeleteBrake() {
+        if (scanDeleted > minDeletesForBrake && scanDeleted > scanLinked * maxDeleteShare) {
+            throw SyncSafetyException(
+                "$scanDeleted lignes sur $scanLinked ont disparu de ce téléphone depuis la dernière synchro. " +
+                    "Cela ressemble à une base remplacée plutôt qu'à des suppressions voulues : rien n'a été envoyé au hub.",
+            )
+        }
+    }
+
     private fun scan(t: TableInfo): List<Pending> = transaction {
         val type = t.def.entityType
         val pending = mutableListOf<Pending>()
@@ -421,12 +441,9 @@ class SyncEngine(private val db: SupportSQLiteDatabase, private val hub: HubClie
         }
 
         val deletes = byLocal.values.filter { it.localId!! !in seen }
-        if (deletes.size > minDeletesForBrake && deletes.size > byLocal.size * maxDeleteShare) {
-            throw SyncSafetyException(
-                "${deletes.size} $type sur ${byLocal.size} ont disparu de ce téléphone depuis la dernière synchro. " +
-                    "Cela ressemble à une base remplacée plutôt qu'à des suppressions voulues : rien n'a été envoyé au hub.",
-            )
-        }
+        // Counted for the brake, which looks at the whole database (see checkDeleteBrake).
+        scanLinked += byLocal.size
+        scanDeleted += deletes.size
         // Now that every new row of this table has its sync id, write the rows as they travel.
         pending.forEach { p -> p.wire = toWire(t, p.values!!) }
         deletes.forEach { pending += Pending(t, it.syncId, null, it.rev, null, null) }

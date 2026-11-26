@@ -140,7 +140,9 @@ public sealed class SyncEngine
         await PullAsync(db, tables, report, ct);
         for (var round = 0; round < 4 && !PullOnly; round++)
         {
+            _scanLinked = _scanDeleted = 0;
             var pending = tables.SelectMany(t => Scan(db, t)).ToList();
+            CheckDeleteBrake();
             if (pending.Count == 0) break;
             var conflicts = await PushAsync(db, pending, report, ct);
             await PullAsync(db, tables, report, ct);
@@ -533,6 +535,19 @@ public sealed class SyncEngine
         public string MutationId => Sha($"{Table.Def.EntityType}|{SyncId}|{BaseRev}|{Hash ?? "deleted"}");
     }
 
+    private int _scanLinked, _scanDeleted;
+
+    /// <summary>The brake, on the whole database: a database swapped under the engine loses nearly every row of
+    /// every table at once. Emptying one table (the shopping list, a cleared collection) is ordinary use and goes
+    /// through; it used to stop every sync of the device, its other changes included.</summary>
+    private void CheckDeleteBrake()
+    {
+        if (_scanDeleted > MinDeletesForBrake && _scanDeleted > _scanLinked * MaxDeleteShare)
+            throw new SyncSafetyException(
+                $"{_scanDeleted} lignes sur {_scanLinked} ont disparu de cette base depuis la derniere synchro. " +
+                "Cela ressemble a une base remplacee plutot qu'a des suppressions voulues : rien n'a ete envoye au hub.");
+    }
+
     private List<Pending> Scan(SqliteConnection db, TableInfo t)
     {
         var pending = new List<Pending>();
@@ -560,10 +575,9 @@ public sealed class SyncEngine
         }
 
         var deletes = byLocal.Values.Where(m => !seen.Contains(m.LocalId!.Value)).ToList();
-        if (deletes.Count > MinDeletesForBrake && deletes.Count > byLocal.Count * MaxDeleteShare)
-            throw new SyncSafetyException(
-                $"{deletes.Count} {t.Def.EntityType} sur {byLocal.Count} ont disparu de cette base depuis la derniere synchro. " +
-                "Cela ressemble a une base remplacee plutot qu'a des suppressions voulues : rien n'a ete envoye au hub.");
+        // Counted for the brake, which looks at the whole database (see CheckDeleteBrake).
+        _scanLinked += byLocal.Count;
+        _scanDeleted += deletes.Count;
         // Now that every new row of this table has its sync id, write the rows as they travel.
         pending = pending.Select(p => p with { WireJson = ToWire(db, tx, t, t.Project(Parse(p.PayloadJson!))) }).ToList();
         pending.AddRange(deletes.Select(m => new Pending(t, m.SyncId, null, m.Rev, null, null)));
