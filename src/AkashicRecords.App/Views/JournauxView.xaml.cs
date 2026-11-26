@@ -102,12 +102,27 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
     private static readonly SolidColorBrush NormalBorderBrush = new(Color.FromArgb(0x55, 0x3B, 0x82, 0xF6));
     private static readonly SolidColorBrush PendingConnectBrush = Brushes.Gold;
 
-    public JournauxView(AppConfig config)
+    /// <summary>The tabs of the "Art" section; the others make up "Quotidien".</summary>
+    public static readonly string[] ArtTabs = { "Poetry", "Artistic", "References" };
+    public static bool IsArtTab(string? tab) => tab is not null && ArtTabs.Contains(tab);
+
+    private readonly bool _art;
+
+    /// <param name="art">True for the "Art" section (poetry, artistic archive, references); false for "Quotidien"
+    /// (personal journal, recipes). One view, two sections: Journaux was split so each keeps two or three tabs.</param>
+    public JournauxView(AppConfig config, bool art = false)
     {
         InitializeComponent();
         _config = config;
-        config.JournauxActiveTab = ModuleTabs.Apply(config, "Journaux", config.JournauxActiveTab, "Personal",
-            PersonalJournalTab, RecipesJournalTab, PoetryJournalTab, ArtisticJournalTab, ReferencesJournalTab);
+        _art = art;
+        var mine = art ? new[] { PoetryJournalTab, ArtisticJournalTab, ReferencesJournalTab } : new[] { PersonalJournalTab, RecipesJournalTab };
+        var others = art ? new[] { PersonalJournalTab, RecipesJournalTab } : new[] { PoetryJournalTab, ArtisticJournalTab, ReferencesJournalTab };
+        // This section's last tab; before the split there was only JournauxActiveTab.
+        var saved = art ? config.ArtActiveTab : config.QuotidienActiveTab;
+        if (saved is null && IsArtTab(config.JournauxActiveTab) == art) saved = config.JournauxActiveTab;
+        config.JournauxActiveTab = ModuleTabs.Apply(config, "Journaux", saved, art ? "Poetry" : "Personal", mine);
+        if (IsArtTab(config.JournauxActiveTab) != art) config.JournauxActiveTab = art ? "Poetry" : "Personal";
+        foreach (var t in others) t.Visibility = Visibility.Collapsed;
         _activeTab = config.JournauxActiveTab;
         PopulateFontFamilies();
         if (!string.IsNullOrEmpty(_activeTab))
@@ -306,6 +321,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
 
         _activeTab = type;
         _config.JournauxActiveTab = type;
+        if (IsArtTab(type)) _config.ArtActiveTab = type; else _config.QuotidienActiveTab = type;
     }
 
     // Records the exact item the user is viewing so reopening Journaux returns them there,

@@ -717,12 +717,13 @@ public partial class MainWindow : Window
     }
 
     private System.Windows.Controls.Primitives.ToggleButton[] NavButtons =>
-        new System.Windows.Controls.Primitives.ToggleButton[] { OrganisationNav, JournauxNav, CollectionsNav, ArchivesNav, BudgetNav, CalendarNav };
+        new System.Windows.Controls.Primitives.ToggleButton[] { OrganisationNav, JournauxNav, ArtNav, CollectionsNav, ArchivesNav, BudgetNav, CalendarNav };
 
     private System.Windows.Controls.Primitives.ToggleButton? NavButtonFor(string section) => section switch
     {
         "Organisation" => OrganisationNav,
         "Journaux" => JournauxNav,
+        "Art" => ArtNav,
         "Collections" => CollectionsNav,
         "Archives" => ArchivesNav,
         "Budget" => BudgetNav,
@@ -888,12 +889,15 @@ public partial class MainWindow : Window
     {
         foreach (var (button, key) in new (FrameworkElement, string)[]
                  {
-                     (OrganisationNav, "Organisation"), (JournauxNav, "Journaux"), (CollectionsNav, "Collections"),
+                     (OrganisationNav, "Organisation"), (JournauxNav, "Journaux"), (ArtNav, "Journaux"), (CollectionsNav, "Collections"),
                      (ArchivesNav, "Archives"), (BudgetNav, "Budget"), (CalendarNav, "Calendrier"), (MusicButton, "Musique"),
                  })
         {
             button.Visibility = _config.IsEnabled(key) ? Visibility.Visible : Visibility.Collapsed;
         }
+        // The split of Journaux: each of its two buttons shows while one of its own tabs is on.
+        JournauxNav.Visibility = _config.IsEnabled("Journaux", "Personal") || _config.IsEnabled("Journaux", "Recipes") ? Visibility.Visible : Visibility.Collapsed;
+        ArtNav.Visibility = Views.JournauxView.ArtTabs.Any(t => _config.IsEnabled("Journaux", t)) ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void OnModulesChanged()
@@ -907,7 +911,7 @@ public partial class MainWindow : Window
         if (!_config.IsEnabled(_activeSection))
         {
             // The open section was just switched off: close it, as Escape would.
-            foreach (var button in new[] { OrganisationNav, JournauxNav, CollectionsNav, ArchivesNav, BudgetNav, CalendarNav })
+            foreach (var button in new[] { OrganisationNav, JournauxNav, ArtNav, CollectionsNav, ArchivesNav, BudgetNav, CalendarNav })
             {
                 button.IsChecked = false;
             }
@@ -1097,7 +1101,9 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!OpenSection(result.Section)) return;
+        // Poems, the artistic archive and references live in "Art" since Journaux was split.
+        var section = result.Section == "Journaux" && result.Kind is SearchResultKind.Poem or SearchResultKind.ArtisticProject or SearchResultKind.RefImage ? "Art" : result.Section;
+        if (!OpenSection(section)) return;
 
         // The freshly-created view isn't loaded yet: it stores the target and applies it on Loaded.
         if (SectionContent.Content is ISearchNavigable navigable)
@@ -1194,6 +1200,7 @@ public partial class MainWindow : Window
         {
             "Organisation" => new OrganisationView(_config),
             "Journaux" => new JournauxView(_config),
+            "Art" => new JournauxView(_config, art: true),
             "Collections" => new CollectionsView(_config),
             "Archives" => new ArchivesView(_config),
             "Budget" => new BudgetView(_config),
@@ -1220,6 +1227,7 @@ public partial class MainWindow : Window
         {
             "Organisation" => OrganisationNav,
             "Journaux" => JournauxNav,
+            "Art" => ArtNav,
             "Collections" => CollectionsNav,
             "Archives" => ArchivesNav,
             "Budget" => BudgetNav,
