@@ -32,6 +32,12 @@ public sealed partial class HubOptions
     /// <summary>yt-dlp arguments for a download (same defaults as the desktop downloader).</summary>
     public string DownloadArgs { get; set; } = "-x --audio-format mp3 --embed-thumbnail --add-metadata";
 
+    /// <summary>Shared computing (see Compute.cs): the hub keeps the tools and models, devices run the jobs they
+    /// can. On by default.</summary>
+    public bool Compute { get; set; } = true;
+    /// <summary>Models the hub runs itself when no stronger device is around (comma list; empty = none).</summary>
+    public string ComputeHubModels { get; set; } = "high-fidelity-4x";
+
     /// <summary>Full listen URL; overrides Listen/Port. Used by the smoke test (port 0).</summary>
     public string? Url { get; set; }
 
@@ -43,6 +49,11 @@ public sealed partial class HubOptions
     public string DownloadsDbPath => Path.Combine(DataDir, "downloads.db");
     public string ToolDir => Path.Combine(DataDir, "bin");
     public string DownloadWorkDir => Path.Combine(DataDir, "downloads-work");
+    public string ComputeDir => Path.Combine(DataDir, "compute");
+    public string ComputeDbPath => Path.Combine(DataDir, "compute.db");
+    public string ComputeWorkDir => Path.Combine(DataDir, "compute-work");
+    public IReadOnlyList<string> HubModels =>
+        ComputeHubModels.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     public bool AcceptsEntityType(string? type) =>
         type is not null && TypeName().IsMatch(type) && (EntityTypes.Contains("*") || EntityTypes.Contains(type));
@@ -80,6 +91,8 @@ public sealed partial class HubOptions
         o.YtDlp = section["YtDlp"] ?? o.YtDlp;
         o.Ffmpeg = section["Ffmpeg"] ?? o.Ffmpeg;
         o.DownloadArgs = section["DownloadArgs"] ?? o.DownloadArgs;
+        if (bool.TryParse(section["Compute"], out var compute)) o.Compute = compute;
+        o.ComputeHubModels = section["ComputeHubModels"] ?? o.ComputeHubModels;
 
         Func<string, string?> env = Environment.GetEnvironmentVariable;
         if (env("AKASHIC_HUB_LISTEN") is { Length: > 0 } l) o.Listen = l;

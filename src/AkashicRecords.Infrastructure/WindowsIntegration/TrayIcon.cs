@@ -21,6 +21,7 @@ public sealed class TrayIcon : IDisposable
     public event Action<bool>? RemindersToggled;
     public event Action<bool>? RecipeWidgetToggled;
     public event Action? DownloaderRequested;
+    public event Action? UpscaleRequested;
 
     public TrayIcon(string tooltip, bool startWithWindowsInitiallyChecked)
     {
@@ -40,6 +41,7 @@ public sealed class TrayIcon : IDisposable
         menu.Items.Add(_remindersItem);
 
         menu.Items.Add("Téléchargements", null, (_, _) => DownloaderRequested?.Invoke());
+        menu.Items.Add("Agrandir des images", null, (_, _) => UpscaleRequested?.Invoke());
 
         _startWithWindowsItem = new ToolStripMenuItem("Start with Windows")
         {

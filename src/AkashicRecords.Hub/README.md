@@ -191,3 +191,21 @@ de requêtes. Code de sortie 0 si tout passe.
 - `sync_log` a une colonne en plus, `mutation_id` (unique) : c'est elle qui rend le renvoi d'un lot sans effet.
 - `entity_id` est une chaîne émise par le client (un GUID), pas le `Id` entier auto-incrémenté des tables actuelles.
 - Le hub ne valide pas le contenu des payloads ni l'intégrité des graphes (canevas) : il stocke du JSON par type.
+
+## Calcul partagé (agrandissement d'images)
+
+Le hub garde le programme d'agrandissement (Real-ESRGAN, version ncnn-vulkan) et ses modèles dans
+`<DataDir>/compute`, et la liste des demandes dans `compute.db`. Les appareils appairés qui savent faire
+tourner un modèle demandent du travail (`POST /compute/claim`), récupèrent le programme et le modèle auprès du
+hub la première fois, font le calcul et renvoient le résultat, qui reste sur le hub. Le hub fait lui-même les
+modèles listés dans `ComputeHubModels` (par défaut `high-fidelity-4x`), mais seulement quand aucun autre
+appareil capable n'est là : un PC avec une carte graphique le fait en quelques secondes, le mini-PC en deux minutes.
+
+Mise en place (une fois, puis pour ajouter des modèles) :
+
+1. Sur le PC : `.\build-compute-seed.ps1` (prépare `D:\workspace\akashic-hub\compute-seed`).
+2. Copier ce dossier sur le mini-PC, puis `sudo bash ~/compute-seed/setup-compute.sh ~/compute-seed`
+   (pilote Vulkan, accès du compte `akashic` à la puce graphique, copie des fichiers, redémarrage du hub).
+
+Ajouter un modèle = déposer sa paire `.param` + `.bin` dans `<DataDir>/compute/models`. Réglages :
+`"Compute": false` coupe tout, `"ComputeHubModels": ""` empêche le hub de calculer lui-même.

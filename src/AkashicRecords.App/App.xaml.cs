@@ -55,6 +55,17 @@ public partial class App : Application
             return;
         }
 
+        // Headless computing: `--compute-once <reportPath>` asks the hub for one job (see ComputeService),
+        // does it if one comes, writes what happened and exits. Runs beside the normal app, like the above.
+        var computeIdx = Array.IndexOf(e.Args, "--compute-once");
+        if (computeIdx >= 0 && computeIdx + 1 <= e.Args.Length - 1)
+        {
+            var result = Task.Run(() => Sync.ComputeService.Instance.RunOnceAsync()).GetAwaiter().GetResult();
+            File.WriteAllText(e.Args[computeIdx + 1], result);
+            Shutdown(result.StartsWith("OK") ? 0 : 1);
+            return;
+        }
+
         // One running app per Windows session. A second one (« Start with Windows » plus a launch by
         // hand) could not register the global hotkey, ended up with no tray icon — so no way to quit
         // it — and wrote the same config.json and database. It simply leaves; headless captures above
@@ -221,6 +232,23 @@ public partial class App : Application
                 finally { board.ForceClose(); Shutdown(); }
             };
             boardSettle.Start();
+            return;
+        }
+
+        // The image upscaler (needs this copy paired with a hub: config\sync.json).
+        if (section == "Agrandir")
+        {
+            var upscale = new UpscaleWindow { WindowStartupLocation = WindowStartupLocation.Manual, Left = 0, Top = 0 };
+            upscale.Show();
+            var upscaleSettle = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(4000) };
+            upscaleSettle.Tick += (_, _) =>
+            {
+                upscaleSettle.Stop();
+                try { CaptureElement((FrameworkElement)upscale.Content, outputPath); }
+                catch (Exception ex) { LogCrash(ex); }
+                finally { upscale.ForceClose(); Shutdown(); }
+            };
+            upscaleSettle.Start();
             return;
         }
 

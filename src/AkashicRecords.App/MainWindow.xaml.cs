@@ -33,6 +33,7 @@ public partial class MainWindow : Window
     private DesktopReminderWidget? _reminderWidget;
     private DownloaderWindow? _downloaderWindow;
     private HubDownloadsWindow? _hubDownloads;
+    private UpscaleWindow? _upscale;
     private Views.SettingsView? _settingsView;
     private bool _isExiting;
     private string? _activeSection;
@@ -149,6 +150,7 @@ public partial class MainWindow : Window
         _trayIcon.RemindersToggled += OnRemindersToggled;
         _trayIcon.RecipeWidgetToggled += OnRecipeWidgetToggled;
         _trayIcon.DownloaderRequested += ToggleDownloader;
+        _trayIcon.UpscaleRequested += ShowUpscale;
 
         // Ctrl+Alt+Space may belong to another program: the app then runs without its shortcut (the tray
         // icon still shows and hides it) instead of stopping here with no widgets and no notifications.
@@ -193,7 +195,11 @@ public partial class MainWindow : Window
                 UpdateSectionContent();
             }
         };
-        if (!App.Headless) Sync.SyncService.Instance.Start();
+        if (!App.Headless)
+        {
+            Sync.SyncService.Instance.Start();
+            Sync.ComputeService.Instance.Start();
+        }
     }
 
     private void OnPowerModeChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs e)
@@ -941,6 +947,15 @@ public partial class MainWindow : Window
         _ => result.Section,
     };
 
+    // The image upscaler (shared computing through the hub); created on first use, then hidden and shown again.
+    private void ShowUpscale()
+    {
+        _upscale ??= new UpscaleWindow();
+        _upscale.Show();
+        if (_upscale.WindowState == WindowState.Minimized) _upscale.WindowState = WindowState.Normal;
+        _upscale.Activate();
+    }
+
     // Toggles the downloader queue window (queue-only utility; created lazily). Separate top-level
     // window so it survives the main window hiding; closed only on real app exit.
     private void ToggleDownloader()
@@ -1309,6 +1324,7 @@ public partial class MainWindow : Window
         _recipeWidget?.ForceClose();
         _downloaderWindow?.ForceClose();
         _hubDownloads?.ForceClose();
+        _upscale?.ForceClose();
         _settingsView?.ForceClose();
         _calendarToast?.ForceClose();
         _midnightTimer?.Stop();

@@ -543,5 +543,106 @@ await Scenario("13. Journal de requetes", async hub =>
     Check(lines.Any(l => l.Contains("paired device 'pc'")), "l'appairage est journalise");
 });
 
+await Scenario("14. Calcul partage : le hub garde les modeles et la liste, les appareils font le travail", async hub =>
+{
+    var pc = await hub.Device("pc");
+    var phone = await hub.Device("phone");
+
+    // What an install puts in DataDir/compute: a program per platform and models (fake bytes here).
+    var compute = Path.Combine(hub.DataDir, "compute");
+    Directory.CreateDirectory(Path.Combine(compute, "models"));
+    Directory.CreateDirectory(Path.Combine(compute, "tools", "realesrgan", "win-x64"));
+    foreach (var m in new[] { "high-fidelity-4x", "ultrasharp-4x" })
+    {
+        File.WriteAllText(Path.Combine(compute, "models", m + ".param"), "param " + m);
+        File.WriteAllText(Path.Combine(compute, "models", m + ".bin"), "bin " + m);
+    }
+    File.WriteAllText(Path.Combine(compute, "models", "orphan.param"), "no .bin: not a model");
+    var exeBytes = Encoding.UTF8.GetBytes("fake exe");
+    File.WriteAllBytes(Path.Combine(compute, "tools", "realesrgan", "win-x64", "realesrgan-ncnn-vulkan.exe"), exeBytes);
+
+    JsonElement Json(HttpResponseMessage r) => JsonDocument.Parse(r.Content.ReadAsStringAsync().Result).RootElement;
+    async Task<HttpResponseMessage> Post(SimDevice d, string url, object body) => await d.Http.PostAsJsonAsync(url, body, SimDevice.Wire);
+
+    var board = Json(await pc.Http.GetAsync("/compute"));
+    var names = board.GetProperty("models").EnumerateArray().Select(m => m.GetProperty("name").GetString()).ToList();
+    Check(names.SequenceEqual(new[] { "high-fidelity-4x", "ultrasharp-4x" }) && board.GetProperty("models")[0].GetProperty("label").GetString() == "High Fidelity",
+        "les modeles du hub sont listes (paire .param + .bin), dans l'ordre et avec leur nom lisible");
+
+    var win = Json(await pc.Http.GetAsync("/compute/manifest?rid=win-x64"));
+    var exe = win.GetProperty("tool_files")[0];
+    var served = await pc.Http.GetByteArrayAsync("/compute/files/" + exe.GetProperty("hash").GetString());
+    Check(exe.GetProperty("path").GetString() == "realesrgan-ncnn-vulkan.exe" && served.AsSpan().SequenceEqual(exeBytes),
+        "manifeste Windows : le programme, servi par son empreinte, identique");
+    var linux = Json(await pc.Http.GetAsync("/compute/manifest?rid=linux-x64"));
+    Check(linux.GetProperty("tool_files").GetArrayLength() == 0 && linux.GetProperty("models").GetArrayLength() == 2,
+        "manifeste Linux : pas de programme pour cette plateforme, les modeles quand meme");
+    Check((await pc.Http.GetAsync("/compute/files/" + new string('c', 64))).StatusCode == HttpStatusCode.NotFound,
+        "fichier hors catalogue -> 404 (le hub ne sert que ses outils et modeles)");
+
+    // The phone sends a photo and asks for it to be upscaled.
+    var photo = Encoding.UTF8.GetBytes("pretend this is a webp");
+    var sent = (await (await phone.Http.PostAsync("/media", new ByteArrayContent(photo))).Content.ReadFromJsonAsync<MediaResponse>(SimDevice.Wire))!;
+    Check((await Post(phone, "/compute/jobs", new { model = "nope", input_hash = sent.Hash, input_name = "photo.webp" })).StatusCode == HttpStatusCode.BadRequest
+          && (await Post(phone, "/compute/jobs", new { model = "high-fidelity-4x", input_hash = sent.Hash, input_name = "photo.gif" })).StatusCode == HttpStatusCode.BadRequest
+          && (await Post(phone, "/compute/jobs", new { model = "high-fidelity-4x", input_hash = new string('d', 64), input_name = "photo.webp" })).StatusCode == HttpStatusCode.BadRequest,
+        "demande refusee : modele inconnu, format non pris en charge, image jamais envoyee");
+    var added = await Post(phone, "/compute/jobs", new { model = "high-fidelity-4x", input_hash = sent.Hash, input_name = "C:\\Photos\\photo.webp" });
+    var job = Json(added);
+    var jobId = job.GetProperty("id").GetString()!;
+    Check(added.StatusCode == HttpStatusCode.Created && job.GetProperty("status").GetString() == "queued" && job.GetProperty("input_name").GetString() == "photo.webp",
+        "demande acceptee, en attente ; seul le nom du fichier est garde");
+
+    Check((await Post(phone, "/compute/claim", new { name = "Telephone", rid = "android", models = Array.Empty<string>() })).StatusCode == HttpStatusCode.NoContent,
+        "le telephone ne sait rien faire tourner : rien pour lui");
+    Check((await Post(pc, "/compute/claim", new { name = "LOHAN", rid = "win-x64", models = new[] { "ultrasharp-4x" } })).StatusCode == HttpStatusCode.NoContent,
+        "un appareil sans ce modele ne recoit pas le travail");
+    var claimed = await Post(pc, "/compute/claim", new { name = "LOHAN", rid = "win-x64", models = new[] { "high-fidelity-4x", "ultrasharp-4x" } });
+    var held = Json(claimed);
+    Check(claimed.StatusCode == HttpStatusCode.OK && held.GetProperty("id").GetString() == jobId && held.GetProperty("status").GetString() == "running"
+          && held.GetProperty("worker_name").GetString() == "LOHAN",
+        "le PC qui sait le faire le recoit, marque en cours chez lui");
+    Check((await Post(pc, "/compute/claim", new { name = "LOHAN", rid = "win-x64", models = new[] { "high-fidelity-4x" } })).StatusCode == HttpStatusCode.NoContent,
+        "un travail en cours n'est pas donne deux fois");
+
+    var result = Encoding.UTF8.GetBytes("pretend this is a bigger png");
+    var up = (await (await pc.Http.PostAsync("/media", new ByteArrayContent(result))).Content.ReadFromJsonAsync<MediaResponse>(SimDevice.Wire))!;
+    Check((await Post(phone, $"/compute/jobs/{jobId}/complete", new { result_hash = up.Hash, seconds = 1.0 })).StatusCode == HttpStatusCode.Conflict,
+        "un autre appareil ne peut pas rendre le travail du PC");
+    var done = Json(await Post(pc, $"/compute/jobs/{jobId}/complete", new { result_hash = up.Hash, seconds = 4.7 }));
+    var fetched = await phone.Http.GetByteArrayAsync("/media/" + done.GetProperty("result_hash").GetString());
+    Check(done.GetProperty("status").GetString() == "done" && done.GetProperty("result_name").GetString() == "photo-high-fidelity-4x.png"
+          && fetched.AsSpan().SequenceEqual(result),
+        "resultat rendu par le PC : garde sur le hub, le telephone le recupere quand il veut");
+
+    // A failure, a retry, a removal.
+    var second = Json(await Post(phone, "/compute/jobs", new { model = "ultrasharp-4x", input_hash = sent.Hash, input_name = "photo.webp" })).GetProperty("id").GetString()!;
+    await Post(pc, "/compute/claim", new { name = "LOHAN", rid = "win-x64", models = new[] { "ultrasharp-4x" } });
+    var failed = Json(await Post(pc, $"/compute/jobs/{second}/fail", new { error = "vkCreateDevice failed" }));
+    var retried = (await phone.Http.PostAsync($"/compute/jobs/{second}/retry", null)).StatusCode;
+    var removed = (await phone.Http.DeleteAsync($"/compute/jobs/{second}")).StatusCode;
+    var left = Json(await pc.Http.GetAsync("/compute")).GetProperty("jobs").EnumerateArray().Select(j => j.GetProperty("id").GetString()).ToList();
+    Check(failed.GetProperty("error").GetString() == "vkCreateDevice failed" && retried == HttpStatusCode.OK && removed == HttpStatusCode.OK
+          && left.SequenceEqual(new[] { jobId }),
+        "echec garde avec son message, relance possible, retrait de la liste");
+
+    var workersNow = Json(await phone.Http.GetAsync("/compute")).GetProperty("workers").EnumerateArray().Select(w => w.GetProperty("name").GetString()).ToList();
+    Check(workersNow.SequenceEqual(new[] { "LOHAN", "Telephone" }), "la liste montre les appareils presents qui demandent du travail");
+
+    // A job held when the hub stops goes back to the queue.
+    var third = Json(await Post(phone, "/compute/jobs", new { model = "high-fidelity-4x", input_hash = sent.Hash, input_name = "photo.webp" })).GetProperty("id").GetString()!;
+    await Post(pc, "/compute/claim", new { name = "LOHAN", rid = "win-x64", models = new[] { "high-fidelity-4x" } });
+    await hub.RestartAsync();
+    var after = Json(await pc.Http.GetAsync("/compute")).GetProperty("jobs").EnumerateArray().First(j => j.GetProperty("id").GetString() == third);
+    Check(after.GetProperty("status").GetString() == "queued", "redemarrage du hub : un travail en cours repart en attente");
+
+    // The hub defers to a stronger device that is around.
+    var seen = new ComputeWorkers();
+    seen.Saw("pc", "LOHAN", "win-x64", new[] { "high-fidelity-4x" });
+    Check(seen.OtherCanRun("high-fidelity-4x", HubStore.HubDevice) && !seen.OtherCanRun("ultrasharp-4x", HubStore.HubDevice)
+          && !seen.OtherCanRun("high-fidelity-4x", "pc"),
+        "le hub laisse un modele au PC present qui sait le faire tourner, et le fait lui-meme sinon");
+});
+
 Console.WriteLine($"\n{passed} verifications reussies, {failures} en echec.");
 return failures == 0 ? 0 : 1;

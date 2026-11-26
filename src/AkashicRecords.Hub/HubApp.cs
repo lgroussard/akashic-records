@@ -47,6 +47,13 @@ public static class HubApp
         var board = new DownloadStore(options.DownloadsDbPath);
         builder.Services.AddSingleton(board);
         if (options.Downloads) builder.Services.AddHostedService<DownloadWorker>();
+        var computeJobs = new ComputeStore(options.ComputeDbPath);
+        var computeCatalog = new ComputeCatalog(options);
+        var computeWorkers = new ComputeWorkers();
+        builder.Services.AddSingleton(computeJobs);
+        builder.Services.AddSingleton(computeCatalog);
+        builder.Services.AddSingleton(computeWorkers);
+        if (options.Compute) builder.Services.AddHostedService<HubComputeWorker>();
 
         var app = builder.Build();
         var lastTouch = new ConcurrentDictionary<string, long>();
@@ -183,6 +190,7 @@ public static class HubApp
         });
 
         DownloadRoutes.Map(app, store, board, options);
+        ComputeRoutes.Map(app, computeJobs, computeCatalog, computeWorkers, blobs, options);
 
         log.Info($"hub {Version} starting on {options.EffectiveUrl}, data in {options.DataDir}, {options.EntityTypes.Count} entity types");
         return app;

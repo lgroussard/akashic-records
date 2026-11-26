@@ -1,0 +1,168 @@
+<Window x:Class="AkashicRecords.App.UpscaleWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Agrandir des images"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="True"
+        ResizeMode="CanResizeWithGrip"
+        Width="1120" Height="680" MinWidth="760" MinHeight="420"
+        WindowStartupLocation="CenterScreen"
+        Closing="Window_OnClosing">
+    <Window.Resources>
+        <SolidColorBrush x:Key="Muted" Color="#9A9AB5"/>
+        <SolidColorBrush x:Key="Faint" Color="#6B6B85"/>
+
+        <Style x:Key="Btn" TargetType="Button">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Padding" Value="10,5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="#2E2E4D" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#3B82F6"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.4"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource Btn}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="#3B82F6" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#5B9BFF"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.4"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="Flat" TargetType="Button" BasedOn="{StaticResource Btn}">
+            <Setter Property="Padding" Value="6,2"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="Transparent" CornerRadius="5" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#33FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.4"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border Background="#F21A1A2E" CornerRadius="12" BorderBrush="#553B82F6" BorderThickness="1" Padding="16">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Title bar: drag the window by it. -->
+            <Grid Grid.Row="0" Background="Transparent" MouseLeftButtonDown="TitleBar_OnMouseLeftButtonDown" Margin="0,0,0,12">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="AGRANDIR DES IMAGES" FontWeight="Bold" Foreground="White" FontSize="14"/>
+                    <TextBlock Text="  ·  gardées sur le serveur, calculées par l'appareil le plus fort présent" Foreground="{StaticResource Faint}" FontSize="12" VerticalAlignment="Center"/>
+                </StackPanel>
+                <Button Content="✕" HorizontalAlignment="Right" Style="{StaticResource Flat}" Click="Close_OnClick" ToolTip="Fermer"/>
+            </Grid>
+
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="300"/>
+                    <ColumnDefinition Width="320"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- New request: images, model, go. -->
+                <StackPanel Grid.Column="0" Margin="0,0,14,0">
+                    <Border x:Name="DropZone" AllowDrop="True" Drop="DropZone_OnDrop" DragOver="DropZone_OnDragOver" DragLeave="DropZone_OnDragLeave"
+                            Background="#12121F" BorderBrush="#3A3A5A" BorderThickness="1.5" CornerRadius="10" Height="150" Cursor="Hand"
+                            MouseLeftButtonUp="DropZone_OnClick">
+                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                            <TextBlock Text="🖼" FontSize="30" HorizontalAlignment="Center" Foreground="White"/>
+                            <TextBlock x:Name="DropText" Text="Dépose des images ici, ou clique pour choisir" Foreground="{StaticResource Muted}"
+                                       FontSize="12" TextAlignment="Center" TextWrapping="Wrap" Margin="12,6,12,0"/>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Text="MODÈLE" FontSize="10" Foreground="{StaticResource Muted}" Margin="0,14,0,4"/>
+                    <ComboBox x:Name="ModelBox" FontSize="13" SelectionChanged="ModelBox_OnSelectionChanged"/>
+                    <TextBlock x:Name="ModelHint" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
+
+                    <Button x:Name="GoButton" Content="Agrandir ×4" Style="{StaticResource Primary}" Margin="0,14,0,0" Padding="10,8" Click="GoButton_OnClick"/>
+
+                    <Border Background="#20203A" CornerRadius="8" Padding="10" Margin="0,18,0,0">
+                        <StackPanel>
+                            <CheckBox x:Name="WorkerBox" Content="Cet ordinateur fait les calculs" Foreground="White" FontSize="12"
+                                      Checked="WorkerBox_OnChanged" Unchecked="WorkerBox_OnChanged"/>
+                            <TextBlock x:Name="WorkerText" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- The jobs, newest first. -->
+                <DockPanel Grid.Column="1" Margin="0,0,14,0">
+                    <TextBlock DockPanel.Dock="Top" Text="DEMANDES" FontSize="10" Foreground="{StaticResource Muted}" Margin="0,0,0,6"/>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="JobsPanel"/>
+                    </ScrollViewer>
+                </DockPanel>
+
+                <!-- The selected one. -->
+                <Grid Grid.Column="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <DockPanel Grid.Row="0" Margin="0,0,0,6">
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <Button x:Name="BeforeButton" Content="Avant" Style="{StaticResource Btn}" Click="BeforeButton_OnClick" Margin="0,0,4,0"/>
+                            <Button x:Name="AfterButton" Content="Après" Style="{StaticResource Btn}" Click="AfterButton_OnClick" Margin="0,0,10,0"/>
+                            <Button x:Name="OpenButton" Content="Ouvrir" Style="{StaticResource Btn}" Click="OpenButton_OnClick" Margin="0,0,4,0"/>
+                            <Button x:Name="SaveButton" Content="Enregistrer…" Style="{StaticResource Btn}" Click="SaveButton_OnClick"/>
+                        </StackPanel>
+                        <TextBlock x:Name="PreviewTitle" Foreground="White" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                    </DockPanel>
+                    <Border Grid.Row="1" Background="#101018" CornerRadius="8">
+                        <Grid>
+                            <Image x:Name="PreviewImage" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" Margin="6"/>
+                            <TextBlock x:Name="PreviewText" Foreground="{StaticResource Faint}" FontSize="12" TextWrapping="Wrap" TextAlignment="Center"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" Margin="20"/>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Grid>
+
+            <TextBlock Grid.Row="2" x:Name="StatusText" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,10,0,0" TextWrapping="Wrap"/>
+        </Grid>
+    </Border>
+</Window>
