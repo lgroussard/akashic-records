@@ -13,6 +13,8 @@ class FileSyncReport {
     var missing = 0  // listed, wanted, but the hub does not have the content yet
     var toSend = 0   // left for the next run (time budget reached)
     var toFetch = 0
+    var failed = 0   // could not be written here (see lastFailure); the others still move
+    var lastFailure: String? = null
 }
 
 /**
@@ -145,6 +147,7 @@ class FileSync(
                 report.toFetch += wanted.size - i
                 return
             }
+            try {
             if (isMusic(w.path)) {
                 val temp = File(cacheDir, "sync-music-${w.hash}.part")
                 try {
@@ -161,6 +164,7 @@ class FileSync(
                 }
             } else {
                 val target = file(w.path)
+                makeFolders(target.parentFile)
                 if (hub.downloadFile(w.hash, target)) {
                     db.execSQL(
                         "INSERT OR REPLACE INTO sync_file_local(path, size, modified, hash, uploaded) VALUES (?, ?, ?, ?, 1)",
@@ -171,6 +175,33 @@ class FileSync(
                     report.missing++ // listed by a device that has not sent the content yet
                 }
             }
+            } catch (e: HubException) {
+                if (e.status == 401) throw e // this phone is no longer paired: stop here
+                report.failed++
+                report.lastFailure = "${w.path} : ${e.message}"
+            } catch (e: Exception) {
+                // One file that cannot be written here must not stop the others, nor the rows of this sync.
+                report.failed++
+                report.lastFailure = "${w.path} : ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+    }
+
+    /**
+     * Creates the folders of a file to write. A plain file where a folder must be is moved aside first: an early
+     * import of the PC's data left an empty file named "media/archive" on phones, and every picture of that
+     * folder then failed ("Not a directory"). An empty one is just removed.
+     */
+    private fun makeFolders(dir: File?) {
+        if (dir == null) return
+        var cur: File? = dir
+        val chain = ArrayList<File>()
+        while (cur != null && cur != baseDir && cur.path.startsWith(baseDir.path)) { chain.add(0, cur); cur = cur.parentFile }
+        for (d in chain) {
+            if (d.isFile) {
+                if (d.length() == 0L) d.delete() else d.renameTo(File(d.path + ".ancien"))
+            }
+            if (!d.exists()) d.mkdirs()
         }
     }
 

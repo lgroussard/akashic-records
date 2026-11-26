@@ -129,7 +129,8 @@ object SyncService {
             }
             lastSuccess = SimpleDateFormat("HH:mm:ss", Locale.FRANCE).format(Date())
             lastWhat = (if (report.nothingToDo) "rien à échanger" else "${report.pushed} envoyé(s), ${report.received} reçu(s)") +
-                (lastFiles?.takeIf { it.uploaded + it.downloaded > 0 }?.let { " ; fichiers : ${it.uploaded} envoyé(s), ${it.downloaded} reçu(s)" } ?: "")
+                (lastFiles?.takeIf { it.uploaded + it.downloaded > 0 }?.let { " ; fichiers : ${it.uploaded} envoyé(s), ${it.downloaded} reçu(s)" } ?: "") +
+                (lastFiles?.takeIf { it.failed > 0 }?.let { " ; ${it.failed} fichier(s) non écrit(s) ici, dont ${it.lastFailure}" } ?: "")
             lastError = null
         } catch (e: HubException) {
             lastError = e.message

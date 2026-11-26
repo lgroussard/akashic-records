@@ -120,8 +120,10 @@ class HubClient(hubUrl: String, private val token: String? = null) {
             val temp = java.io.File(target.path + ".part")
             try {
                 val sha = java.security.MessageDigest.getInstance("SHA-256")
+                // A file this phone cannot write is not the hub's fault: said as such (not "hub unreachable").
+                val output = try { temp.outputStream() } catch (e: IOException) { throw IllegalStateException("impossible d'écrire ${target.name} sur ce téléphone (${e.message})") }
                 conn.inputStream.use { input ->
-                    temp.outputStream().use { out ->
+                    output.use { out ->
                         val buffer = ByteArray(81920)
                         while (true) {
                             val n = input.read(buffer)
@@ -133,7 +135,7 @@ class HubClient(hubUrl: String, private val token: String? = null) {
                 }
                 val actual = sha.digest().joinToString("") { "%02x".format(it) }
                 if (actual != hash) throw HubException("Fichier reçu différent de son empreinte : ignoré.")
-                if (!temp.renameTo(target)) throw IOException("impossible d'écrire ${target.name}")
+                if (!temp.renameTo(target)) throw IllegalStateException("impossible d'écrire ${target.name} sur ce téléphone")
                 true
             } finally {
                 temp.delete()
