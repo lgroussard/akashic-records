@@ -17,6 +17,8 @@ public sealed class TestHub : IAsyncDisposable
     public Uri Address { get; private set; } = null!;
     public HubStore Store => _app!.Services.GetRequiredService<HubStore>();
     public List<string> EntityTypes { get; } = new() { "Recipe", "Poem" };
+    /// <summary>Models the hub runs itself. None by default: the tests' fake programs must never be started.</summary>
+    public string ComputeHubModels { get; set; } = "";
 
     public async Task StartAsync()
     {
@@ -26,6 +28,7 @@ public sealed class TestHub : IAsyncDisposable
             Url = $"http://127.0.0.1:{_port}",
             EntityTypes = EntityTypes.ToList(),
             MaxBlobMegabytes = 2,
+            ComputeHubModels = ComputeHubModels,
         };
         _app = HubApp.Build(new[] { "--Logging:LogLevel:Default=Warning" }, options);
         await _app.StartAsync();
