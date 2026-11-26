@@ -111,8 +111,9 @@ fun UpscaleScreen(onClose: () -> Unit) {
                 Spacer(Modifier.width(72.dp))
             }
             Column(Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
-                // ---- Model: what it does, and who would do it now.
-                Box {
+                // ---- Model: what it does, and who would do it now. One model per feature: the chooser only shows
+                // if the hub ever offers several.
+                if ((b?.models?.size ?: 0) > 1) Box {
                     Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Palette.Surface2)
                             .clickable(enabled = b != null) { choosing = true }.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -141,7 +142,7 @@ fun UpscaleScreen(onClose: () -> Unit) {
                     val pcs = m.runners.filter { it != "hub" }
                     val who = when {
                         pcs.isNotEmpty() -> "${pcs.joinToString(", ")} est là : quelques secondes par photo."
-                        m.hub -> "Ton PC n'est pas là : le serveur s'en charge, environ 2 minutes par photo."
+                        m.hub -> "Ton PC n'est pas là : le serveur s'en charge, plus lentement (quelques minutes par photo)."
                         else -> "Attendra que ton PC soit allumé avec Akashic ouvert."
                     }
                     Text("${m.description} $who", fontSize = 12.sp, color = Palette.TextMuted, modifier = Modifier.padding(top = 6.dp))
