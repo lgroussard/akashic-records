@@ -51,15 +51,21 @@ public sealed class ComputeWorkers
 /// <summary>The hub's own worker: takes the jobs of the models it runs, when no device able to do them is around.</summary>
 public sealed class HubComputeWorker(HubOptions options, ComputeStore jobs, ComputeCatalog catalog, ComputeWorkers workers, BlobStore blobs, ComputeAttach attach, RequestLog log) : BackgroundService
 {
+    /// <summary>How long the hub leaves jobs to the devices after it starts (they ask every 4 s).</summary>
+    public static readonly TimeSpan StartupGrace = TimeSpan.FromSeconds(60);
+
     protected override async Task ExecuteAsync(CancellationToken stop)
     {
         var hubModels = options.HubModels.ToHashSet(StringComparer.Ordinal);
+        // Right after a start the hub does not know yet which devices are around (they ask every few seconds): it
+        // waits a little before taking jobs itself, so that a PC that is on gets them instead.
+        var since = DateTime.UtcNow;
         // The tool's results from before the "Agrandies" album: placed in it once.
         try { attach.PlacePastResults(jobs); } catch (Exception ex) { log.Info($"placing past upscale results failed: {ex.Message}"); }
         while (!stop.IsCancellationRequested)
         {
             ComputeJob? job = null;
-            if (hubModels.Count > 0)
+            if (hubModels.Count > 0 && DateTime.UtcNow - since >= StartupGrace)
             {
                 var models = catalog.Models().Where(m => m.Hub).Select(m => m.Name).ToList();
                 if (models.Count > 0)
