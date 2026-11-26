@@ -102,10 +102,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // Coming to the front: fetch what the other devices wrote meanwhile.
+    // Coming to the front: fetch what the other devices wrote meanwhile, at once (not through Android's job
+    // queue, which may wait).
     override fun onStart() {
         super.onStart()
-        com.akashicrecords.sync.SyncService.requestSoon(applicationContext)
+        com.akashicrecords.sync.SyncService.runNow(applicationContext)
     }
 
     // Leaving the app: the widgets reflect what was just written (journal, agenda), and it goes to the hub
