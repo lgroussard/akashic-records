@@ -122,7 +122,8 @@ internal fun SearchPanel(
     var query by rememberSaveable { mutableStateOf("") }
     // yt-dlp ready before the first tap (unpacking, daily update): the tap only has the song to fetch.
     val warmContext = androidx.compose.ui.platform.LocalContext.current
-    LaunchedEffect(Unit) { Downloader.warmUp(warmContext) }
+    // A little later: yt-dlp's start-up is heavy and would compete with the music section opening.
+    LaunchedEffect(Unit) { kotlinx.coroutines.delay(4_000); Downloader.warmUp(warmContext) }
     var tracks by remember { mutableStateOf<List<SimilarTrack>?>(null) }
     var extras by remember { mutableStateOf<OnlineExtras?>(null) }
     var extrasFor by remember { mutableStateOf("") }

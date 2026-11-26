@@ -67,7 +67,7 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
     val askPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
 
     var folder by remember { mutableStateOf(config.musicFolder()) }
-    var tracks by remember { mutableStateOf<List<MusicTrack>>(emptyList()) }
+    var tracks by remember { mutableStateOf(library.lastTracks) }
     var moods by remember { mutableStateOf<List<Mood>>(emptyList()) }
     var selectedMood by remember { mutableStateOf<Int?>(null) }
     var moodTrackIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
@@ -111,14 +111,17 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
     // Everything that can be played: the files on this phone, and the rest of the catalogue from the hub.
     // Without network only what is kept here; the uri check below also reads it.
     val online = rememberOnline()
-    val everything = tracks.filter { library.isLocal(it) || (online && library.uriFor(it) != null) }
-    val playable = if (offlineOnly) everything.filter { library.isLocal(it) } else everything
-    val filtered = playable
-        .filter { selectedMood == null || it.Id in moodTrackIds }
-        .filter {
-            search.isBlank() || it.Title.contains(search, true) || it.Artist.contains(search, true) || it.Album.contains(search, true)
-        }
-        .sortedBy { it.Title.lowercase() }
+    // Worked out in the background when one of its inputs changes, never while the screen is drawn; meanwhile the
+    // lists of the previous visit are shown (MusicLibrary keeps them), so the section opens with nothing to compute.
+    val lists by produceState(library.lastLists ?: MusicLists.EMPTY, tracks, online, offlineOnly, selectedMood, moodTrackIds, search) {
+        value = withContext(Dispatchers.Default) {
+            MusicLists.of(library, tracks, online, offlineOnly, selectedMood, moodTrackIds, search)
+        }.also { library.lastLists = it }
+    }
+    val hasStreamed = lists.hasStreamed
+    val playable = lists.playable
+    val filtered = lists.filtered
+    val albums = lists.albums
 
     fun play(list: List<MusicTrack>, index: Int) {
         player.playQueue(list.mapNotNull { t -> library.uriFor(t)?.let { t to it } }, index)
@@ -189,7 +192,7 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (everything.any { !library.isLocal(it) }) {
+            if (hasStreamed) {
                 FilterChip(selected = offlineOnly, onClick = { offlineOnly = !offlineOnly }, label = { Text("Sur ce téléphone", maxLines = 1) })
                 Spacer(Modifier.width(10.dp))
             }
@@ -217,7 +220,8 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
         )
 
-        if (playable.isEmpty()) {
+        // (MusicLists.EMPTY: not worked out yet, a few milliseconds; nothing to say about it.)
+        if (playable.isEmpty() && lists !== MusicLists.EMPTY) {
             Text(
                 if (scanning) "Scan en cours…"
                 else if (offlineOnly) "Aucun titre gardé sur ce téléphone. L'onglet « Hors ligne » sert à en garder."
@@ -235,10 +239,7 @@ fun MusicSection(db: AkashicDatabase, config: ConfigStore, player: PlayerConnect
 
         LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
             if (showAlbums) {
-                val groups = playable.groupBy { it.Album }
-                    .toSortedMap(compareBy { if (it.isEmpty()) "￿" else it.lowercase() })
-                groups.forEach { (album, list) ->
-                    val albumTracks = list.sortedBy { it.Title.lowercase() }
+                albums.forEach { (album, albumTracks) ->
                     item(key = "album:$album") {
                         Row(
                             Modifier.fillMaxWidth()
@@ -519,13 +520,20 @@ fun MiniStrip(player: PlayerConnection, onExpand: () -> Unit) {
                 contentAlignment = Alignment.Center,
             ) { Text(if (ui.isPlaying) "❚❚" else "▶", fontSize = 12.sp, color = Palette.Accent) }
         }
-        if (ui.durationMs > 0) {
-            LinearProgressIndicator(
-                progress = { (ui.positionMs.toFloat() / ui.durationMs).coerceIn(0f, 1f) },
-                modifier = Modifier.fillMaxWidth().height(2.dp), color = Palette.Accent,
-            )
-        }
+        PlayheadLine(player, Modifier.fillMaxWidth().height(2.dp))
     }
+}
+
+// How far the song is, as a thin line. Its own small composable reading only the playhead (which moves twice a
+// second): the bar around it is not redrawn for it.
+@Composable
+private fun PlayheadLine(player: PlayerConnection, modifier: Modifier) {
+    val known by remember { derivedStateOf { player.playhead.durationMs > 0 } }
+    if (!known) return
+    LinearProgressIndicator(
+        progress = { player.playhead.let { (it.positionMs.toFloat() / it.durationMs).coerceIn(0f, 1f) } },
+        modifier = modifier, color = Palette.Accent,
+    )
 }
 // Persistent bar at the bottom of every section once something is queued; a tap on the song opens the full player
 // (FullPlayer: shuffle, position, À suivre, Similaires).
@@ -581,12 +589,36 @@ fun MiniPlayer(player: PlayerConnection, db: AkashicDatabase, onCollapse: () -> 
             }
         }
         // Where the song is, as a thin line (the full player has the slider).
-        if (ui.durationMs > 0) {
-            LinearProgressIndicator(
-                progress = { (ui.positionMs.toFloat() / ui.durationMs).coerceIn(0f, 1f) },
-                modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp).height(2.dp),
-                color = Palette.Accent,
-            )
+        PlayheadLine(player, Modifier.fillMaxWidth().padding(bottom = 2.dp).height(2.dp))
+    }
+}
+
+// What the library tab shows, derived from the catalogue: computed off the main thread (see MusicSection).
+class MusicLists(
+    val playable: List<MusicTrack>,
+    val hasStreamed: Boolean,
+    val filtered: List<MusicTrack>,
+    val albums: Map<String, List<MusicTrack>>,
+) {
+    companion object {
+        val EMPTY = MusicLists(emptyList(), false, emptyList(), emptyMap())
+
+        fun of(
+            library: MusicLibrary, tracks: List<MusicTrack>, online: Boolean, offlineOnly: Boolean,
+            mood: Int?, moodTrackIds: Set<Int>, search: String,
+        ): MusicLists {
+            // Everything that can be played: the files on this phone, and (with the hub answering) the rest.
+            val everything = tracks.filter { library.isLocal(it) || (online && library.uriFor(it) != null) }
+            val playable = if (offlineOnly) everything.filter { library.isLocal(it) } else everything
+            val filtered = playable
+                .filter { mood == null || it.Id in moodTrackIds }
+                .filter { search.isBlank() || it.Title.contains(search, true) || it.Artist.contains(search, true) || it.Album.contains(search, true) }
+                .sortedBy { it.Title.lowercase() }
+            // Albums, each with its tracks in order (the library's default view).
+            val albums = playable.groupBy { it.Album }
+                .toSortedMap(compareBy { if (it.isEmpty()) "￿" else it.lowercase() })
+                .mapValues { (_, list) -> list.sortedBy { it.Title.lowercase() } }
+            return MusicLists(playable, everything.any { !library.isLocal(it) }, filtered, albums)
         }
     }
 }

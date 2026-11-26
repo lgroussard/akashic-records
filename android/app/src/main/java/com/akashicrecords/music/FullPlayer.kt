@@ -33,7 +33,6 @@ fun FullPlayer(db: AkashicDatabase, player: PlayerConnection, startOnSimilar: Bo
         value = withContext(Dispatchers.IO) { db.musicTrackDao().getAll() }.filter { library.uriFor(it) != null }
     }
     var section by remember { mutableStateOf(if (startOnSimilar) "Similar" else "Queue") }
-    var dragging by remember { mutableStateOf<Float?>(null) }
     val saveUrl = ui.suggestionTitle?.let { Downloader.searchQuery(it, ui.suggestionArtist ?: "") }
     var saved by remember(saveUrl) { mutableStateOf(false) }
     LaunchedEffect(saveUrl) {
@@ -58,20 +57,7 @@ fun FullPlayer(db: AkashicDatabase, player: PlayerConnection, startOnSimilar: Bo
             )
 
             // Position
-            if (ui.durationMs > 0) {
-                val pos = dragging ?: ui.positionMs.toFloat()
-                Slider(
-                    value = pos.coerceIn(0f, ui.durationMs.toFloat()),
-                    onValueChange = { dragging = it },
-                    onValueChangeFinished = { dragging?.let { player.seekTo(it.toLong()) }; dragging = null },
-                    valueRange = 0f..ui.durationMs.toFloat(),
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                )
-                Row(Modifier.fillMaxWidth()) {
-                    Text(formatTime(pos / 1000.0), fontSize = 11.sp, color = Palette.TextFaint, modifier = Modifier.weight(1f))
-                    Text(formatTime(ui.durationMs / 1000.0), fontSize = 11.sp, color = Palette.TextFaint)
-                }
-            }
+            PositionSlider(player)
 
             // Controls
             Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
@@ -110,5 +96,25 @@ fun FullPlayer(db: AkashicDatabase, player: PlayerConnection, startOnSimilar: Bo
                 }
             }
         }
+    }
+}
+
+// The position slider: on its own, so the playhead moving twice a second redraws only this, not the whole player.
+@Composable
+private fun PositionSlider(player: PlayerConnection) {
+    val head = player.playhead
+    if (head.durationMs <= 0) return
+    var dragging by remember { mutableStateOf<Float?>(null) }
+    val pos = dragging ?: head.positionMs.toFloat()
+    Slider(
+        value = pos.coerceIn(0f, head.durationMs.toFloat()),
+        onValueChange = { dragging = it },
+        onValueChangeFinished = { dragging?.let { player.seekTo(it.toLong()) }; dragging = null },
+        valueRange = 0f..head.durationMs.toFloat(),
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+    )
+    Row(Modifier.fillMaxWidth()) {
+        Text(formatTime(pos / 1000.0), fontSize = 11.sp, color = Palette.TextFaint, modifier = Modifier.weight(1f))
+        Text(formatTime(head.durationMs / 1000.0), fontSize = 11.sp, color = Palette.TextFaint)
     }
 }
