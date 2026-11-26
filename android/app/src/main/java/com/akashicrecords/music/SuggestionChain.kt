@@ -30,6 +30,10 @@ object PlayerItems {
     const val REMOTE_PREFIX = "remote:"
     const val EXTRA_TITLE = "akashic.title"
     const val EXTRA_ARTIST = "akashic.artist"
+    // A catalogue track read from the hub, not from this phone (☁ in the queue and the players).
+    const val EXTRA_STREAMED = "akashic.streamed"
+
+    fun isStreamed(item: MediaItem?) = item?.mediaMetadata?.extras?.getBoolean(EXTRA_STREAMED) == true
 
     fun local(t: MusicTrack, uri: Uri): MediaItem = MediaItem.Builder()
         .setMediaId(t.Id.toString())
@@ -39,6 +43,7 @@ object PlayerItems {
                 .setTitle(t.Title.ifBlank { "(sans titre)" })
                 .setArtist(t.Artist)
                 .setAlbumTitle(t.Album)
+                .apply { if (HubStream.isStream(uri)) setExtras(Bundle().apply { putBoolean(EXTRA_STREAMED, true) }) }
                 .build(),
         )
         .build()

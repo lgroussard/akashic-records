@@ -354,6 +354,7 @@ internal object SavedQueue {
                 .setTitle(o.optString("title"))
                 .setArtist(o.optString("artist"))
                 .setAlbumTitle(o.optString("album"))
+            if (uri.scheme == "akashic") md.setExtras(Bundle().apply { putBoolean(PlayerItems.EXTRA_STREAMED, true) })
             if (o.has("xTitle")) {
                 md.setExtras(Bundle().apply {
                     putString(PlayerItems.EXTRA_TITLE, o.optString("xTitle"))

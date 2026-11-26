@@ -201,7 +201,9 @@ object SyncService {
         if (!_state.value.paired) return
         WorkManager.getInstance(context).enqueueUniqueWork(
             "akashic-sync-now",
-            ExistingWorkPolicy.REPLACE,
+            // Queued after a run in progress, never in its place: replacing it cancelled the sync half-way (rows in,
+            // screens never told, files left for later) each time the app was left and opened again quickly.
+            ExistingWorkPolicy.APPEND_OR_REPLACE,
             OneTimeWorkRequestBuilder<SyncWorker>().setConstraints(online).setInitialDelay(delaySeconds, TimeUnit.SECONDS).build(),
         )
     }
