@@ -44,6 +44,9 @@ public static class HubApp
         builder.Services.AddSingleton(store);
         builder.Services.AddSingleton(blobs);
         builder.Services.AddSingleton(log);
+        var board = new DownloadStore(options.DownloadsDbPath);
+        builder.Services.AddSingleton(board);
+        if (options.Downloads) builder.Services.AddHostedService<DownloadWorker>();
 
         var app = builder.Build();
         var lastTouch = new ConcurrentDictionary<string, long>();
@@ -178,6 +181,8 @@ public static class HubApp
             return Results.File(blobs.PathOf(hash), "application/octet-stream", enableRangeProcessing: true,
                 entityTag: new Microsoft.Net.Http.Headers.EntityTagHeaderValue($"\"{hash}\""));
         });
+
+        DownloadRoutes.Map(app, store, board, options);
 
         log.Info($"hub {Version} starting on {options.EffectiveUrl}, data in {options.DataDir}, {options.EntityTypes.Count} entity types");
         return app;
