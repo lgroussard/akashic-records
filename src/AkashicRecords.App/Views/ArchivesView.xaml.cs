@@ -41,17 +41,42 @@ public partial class ArchivesView : UserControl, ISearchNavigable, IRemembersVie
     // Loads fully into memory and releases the file handle immediately, so the image file can be
     // deleted/replaced afterwards without "file in use" errors. decodePixelWidth > 0 downsamples
     // the decode (used for grid thumbnails) to keep memory low; 0 loads full resolution.
-    private static BitmapImage LoadImage(string fullPath, int decodePixelWidth = 0)
+    // Null when the picture cannot be shown here: its file not arrived yet (pictures sync apart from the rows),
+    // or a format Windows cannot read without an extension (HEIC/HEIF from a phone). One picture must never stop
+    // the section from opening: the caller shows a placeholder instead.
+    private static BitmapImage? LoadImage(string fullPath, int decodePixelWidth = 0)
     {
-        var bitmap = new BitmapImage();
-        bitmap.BeginInit();
-        bitmap.CacheOption = BitmapCacheOption.OnLoad;
-        if (decodePixelWidth > 0) bitmap.DecodePixelWidth = decodePixelWidth;
-        bitmap.UriSource = new Uri(fullPath);
-        bitmap.EndInit();
-        bitmap.Freeze();
-        return bitmap;
+        try
+        {
+            if (!File.Exists(fullPath)) return null;
+            var bitmap = new BitmapImage();
+            bitmap.BeginInit();
+            bitmap.CacheOption = BitmapCacheOption.OnLoad;
+            if (decodePixelWidth > 0) bitmap.DecodePixelWidth = decodePixelWidth;
+            bitmap.UriSource = new Uri(fullPath);
+            bitmap.EndInit();
+            bitmap.Freeze();
+            return bitmap;
+        }
+        catch (Exception ex) when (ex is IOException or NotSupportedException or System.Runtime.InteropServices.COMException or ArgumentException or InvalidOperationException or FileFormatException)
+        {
+            return null;
+        }
     }
+
+    // What a picture that cannot be shown leaves in its place.
+    private static FrameworkElement Placeholder(Photo photo, double size) => new Border
+    {
+        Width = size, Height = size, Background = new SolidColorBrush(Color.FromRgb(0x2A, 0x2A, 0x45)),
+        Child = new TextBlock
+        {
+            Text = File.Exists(MediaStorage.ResolveFullPath(photo.ImagePath))
+                ? "Format non lisible sur ce PC (" + Path.GetExtension(photo.ImagePath).TrimStart('.').ToUpperInvariant() + ")"
+                : "Photo en cours d'arrivée",
+            Foreground = new SolidColorBrush(Color.FromRgb(0x9A, 0x9A, 0xB5)), FontSize = 11, TextWrapping = TextWrapping.Wrap,
+            TextAlignment = TextAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8),
+        },
+    };
 
     public ArchivesView(AppConfig config)
     {
@@ -232,14 +257,9 @@ public partial class ArchivesView : UserControl, ISearchNavigable, IRemembersVie
 
     private Button CreateThumbnail(Photo photo)
     {
-        var image = new Image
-        {
-            Source = LoadImage(MediaStorage.ResolveFullPath(photo.ImagePath), ThumbnailDecodeWidth),
-            Stretch = Stretch.UniformToFill
-        };
-
+        var source = LoadImage(MediaStorage.ResolveFullPath(photo.ImagePath), ThumbnailDecodeWidth);
         var content = new Grid { Width = ThumbnailSize, Height = ThumbnailSize };
-        content.Children.Add(image);
+        content.Children.Add(source is null ? Placeholder(photo, ThumbnailSize) : new Image { Source = source, Stretch = Stretch.UniformToFill });
 
         // Favorite star, top-right.
         if (photo.IsFavorite)

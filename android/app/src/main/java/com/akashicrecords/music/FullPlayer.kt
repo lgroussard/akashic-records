@@ -47,7 +47,7 @@ fun FullPlayer(db: AkashicDatabase, player: PlayerConnection, startOnSimilar: Bo
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).padding(horizontal = 16.dp)) {
             // The song
             Text(
-                (if (ui.streamed) "☁ " else "") + ui.title.ifBlank { "Aucune piste" }, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                ui.title.ifBlank { "Aucune piste" }, fontSize = 22.sp, fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth(),
             )
             Text(

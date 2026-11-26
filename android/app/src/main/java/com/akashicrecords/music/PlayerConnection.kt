@@ -81,7 +81,7 @@ class PlayerConnection(context: Context) {
             streamed = PlayerItems.isStreamed(c.currentMediaItem),
             queue = (0 until c.mediaItemCount).map { i ->
                 val item = c.getMediaItemAt(i)
-                (item.mediaId.toIntOrNull() ?: -1) to ((if (PlayerItems.isStreamed(item)) "☁ " else "") + (item.mediaMetadata.title?.toString() ?: ""))
+                (item.mediaId.toIntOrNull() ?: -1) to (item.mediaMetadata.title?.toString() ?: "")
             },
             order = c.currentTimeline.playOrder(c.shuffleModeEnabled),
             currentIndex = if (c.mediaItemCount == 0) -1 else c.currentMediaItemIndex,
