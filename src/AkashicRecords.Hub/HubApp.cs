@@ -189,6 +189,19 @@ public static class HubApp
                 entityTag: new Microsoft.Net.Http.Headers.EntityTagHeaderValue($"\"{hash}\""));
         });
 
+        // A small JPEG preview of a picture (see Thumbnails.cs): galleries show these, the original opens on demand.
+        var thumbs = new Thumbnails(options, blobs);
+        app.MapGet("/media/{hash}/thumb", async (string hash, HttpContext ctx) =>
+        {
+            hash = hash.ToLowerInvariant();
+            if (!BlobStore.IsHash(hash)) return Results.BadRequest(new { error = "hash must be 64 hex characters (SHA-256)" });
+            if (!blobs.Exists(hash)) return Results.NotFound(new { error = "unknown blob" });
+            var file = await thumbs.GetAsync(hash, ctx.RequestAborted);
+            if (file is null) return Results.Json(new { error = "not_a_picture" }, statusCode: StatusCodes.Status415UnsupportedMediaType);
+            ctx.Response.Headers.CacheControl = "private, max-age=31536000, immutable";
+            return Results.File(file, "image/jpeg");
+        });
+
         DownloadRoutes.Map(app, store, board, options);
         ComputeRoutes.Map(app, computeJobs, computeCatalog, computeWorkers, blobs, options);
 

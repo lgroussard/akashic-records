@@ -31,6 +31,11 @@ if ! command -v ffmpeg >/dev/null; then
         echo "ffmpeg absent : installe-le pour que le hub puisse telecharger de la musique." >&2
     fi
 fi
+# Previews of the Archives' pictures (Thumbnails.cs): vipsthumbnail also reads iPhone HEIC photos.
+if ! command -v vipsthumbnail >/dev/null && command -v apt-get >/dev/null; then
+    echo "Installation de libvips (apercus des photos)..."
+    apt-get install -y -qq libvips-tools >/dev/null || echo "libvips n'a pas pu etre installe : apercus des photos HEIC indisponibles." >&2
+fi
 
 if ! id akashic >/dev/null 2>&1; then
     useradd --system --no-create-home --home-dir "$DATA" --shell /usr/sbin/nologin akashic

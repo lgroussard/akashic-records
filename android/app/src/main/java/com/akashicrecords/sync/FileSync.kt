@@ -139,6 +139,8 @@ class FileSync(
                 }
             } else if (file(path).exists()) {
                 continue
+            } else if (isOnDemand(path) && l.keep != 1L) {
+                continue // an Archives photo: seen from the hub, fetched only when kept here
             }
             wanted += Listed(path, l.hash.lowercase(), l.wasHere, l.keep)
         }
@@ -263,6 +265,9 @@ class FileSync(
 
         fun isMusic(normalized: String) = normalized.startsWith("music/", ignoreCase = true)
 
+        /** The Archives' photos: like the music, shown from the hub and only stored here when kept ("Garder"). */
+        fun isOnDemand(normalized: String) = normalized.startsWith("media/archive/", ignoreCase = true)
+
         fun setKeepList(db: SupportSQLiteDatabase, kind: String, name: String, keep: Boolean) {
             ensureSchema(db)
             if (keep) db.execSQL("INSERT OR IGNORE INTO sync_keep_list(kind, name) VALUES (?, ?)", arrayOf<Any?>(kind, name))
@@ -283,6 +288,11 @@ class FileSync(
                 db.query(
                     "SELECT FilePath FROM MusicTrack WHERE Album IN (SELECT name FROM sync_keep_list WHERE kind = 'album') " +
                         "OR Id IN (SELECT TrackId FROM TrackMood WHERE CAST(MoodId AS TEXT) IN (SELECT name FROM sync_keep_list WHERE kind = 'mood'))",
+                ).use { c -> buildList { while (c.moveToNext()) add(c.getString(0)) } }
+            }.getOrDefault(emptyList()) + runCatching {
+                // Photo albums kept here, by name (album ids differ from one device to the other).
+                db.query(
+                    "SELECT ImagePath FROM Photo WHERE AlbumId IN (SELECT Id FROM PhotoAlbum WHERE Name IN (SELECT name FROM sync_keep_list WHERE kind = 'photoalbum'))",
                 ).use { c -> buildList { while (c.moveToNext()) add(c.getString(0)) } }
             }.getOrDefault(emptyList())
             for (p in paths) db.execSQL("INSERT OR IGNORE INTO sync_keep(path, keep) VALUES (?, 1)", arrayOf<Any?>(MusicFiles.key(p)))

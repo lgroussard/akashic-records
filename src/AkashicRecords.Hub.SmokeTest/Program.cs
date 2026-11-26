@@ -1,3 +1,4 @@
+﻿using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -634,6 +635,37 @@ await Scenario("14. Calcul partage : le hub garde les modeles et la liste, les a
     Check(seen.OtherCanRun("nomos-webphoto-4x", HubStore.HubDevice) && !seen.OtherCanRun("autre-4x", HubStore.HubDevice)
           && !seen.OtherCanRun("nomos-webphoto-4x", "pc"),
         "le hub laisse un modele au PC present qui sait le faire tourner, et le fait lui-meme sinon");
+});
+
+await Scenario("15. Apercus des photos : le hub fait une petite image a la demande", async hub =>
+{
+    var phone = await hub.Device("phone");
+    async Task<string> Upload(byte[] data)
+    {
+        var r = await phone.Http.PostAsync("/media", new ByteArrayContent(data));
+        return (await r.Content.ReadFromJsonAsync<MediaResponse>(SimDevice.Wire))!.Hash;
+    }
+
+    var notPicture = await Upload(Encoding.UTF8.GetBytes("pas une image"));
+    var refused = await phone.Http.GetAsync($"/media/{notPicture}/thumb");
+    Check(refused.StatusCode == HttpStatusCode.UnsupportedMediaType, "fichier qui n'est pas une image -> 415");
+    Check((await phone.Http.GetAsync($"/media/{new string('c', 64)}/thumb")).StatusCode == HttpStatusCode.NotFound, "apercu d'un fichier inconnu -> 404");
+
+    // A real picture, when ffmpeg is around to draw one (and to shrink it, if vipsthumbnail is absent).
+    var ffmpeg = Environment.GetEnvironmentVariable("AKASHIC_HUB_FFMPEG");
+    if (string.IsNullOrEmpty(ffmpeg)) { Console.WriteLine("    (AKASHIC_HUB_FFMPEG absent : apercu d'une vraie photo non verifie)"); return; }
+    var jpg = Path.Combine(hub.DataDir, "grande.jpg");
+    var draw = Process.Start(new ProcessStartInfo(ffmpeg, $"-v error -y -f lavfi -i testsrc=size=2400x1600 -frames:v 1 \"{jpg}\"") { UseShellExecute = false })!;
+    await draw.WaitForExitAsync();
+    var original = await File.ReadAllBytesAsync(jpg);
+    var hash = await Upload(original);
+    var t = await phone.Http.GetAsync($"/media/{hash}/thumb");
+    var thumb = await t.Content.ReadAsByteArrayAsync();
+    Check(t.StatusCode == HttpStatusCode.OK && t.Content.Headers.ContentType?.MediaType == "image/jpeg" && thumb.Length > 1000 && thumb.Length < original.Length / 3,
+        $"apercu JPEG bien plus leger que l'original ({thumb.Length / 1024} Ko contre {original.Length / 1024} Ko)");
+    var again = await phone.Http.GetByteArrayAsync($"/media/{hash}/thumb");
+    Check(again.AsSpan().SequenceEqual(thumb) && File.Exists(Path.Combine(hub.DataDir, "thumbs", hash[..2], hash + ".jpg")),
+        "garde sur le disque du hub : la 2e demande renvoie le meme apercu sans le refaire");
 });
 
 Console.WriteLine($"\n{passed} verifications reussies, {failures} en echec.");

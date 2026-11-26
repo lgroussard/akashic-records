@@ -90,22 +90,41 @@ private val imageCache = object : LruCache<String, CachedImage>(
 @Composable
 fun LocalImage(relativePath: String?, modifier: Modifier = Modifier, maxSide: Int = 1024, crop: Boolean = true) {
     val context = LocalContext.current
-    val key = "$relativePath|$maxSide"
+    FileImage("$relativePath", modifier, maxSide, crop) { MediaFiles.resolve(context, relativePath) }
+}
+
+/** The memory-cached image of [name] at [maxSide], if it was shown recently (no file access). */
+fun cachedImage(name: String, maxSide: Int): ImageBitmap? = imageCache.get("$name|$maxSide")?.image
+
+/**
+ * An image read from a file that [file] finds (possibly fetching it first), decoded once and kept in memory
+ * under [name]. [placeholder] shows while nothing is decoded yet (null: an empty tile, then "image absente").
+ */
+@Composable
+fun FileImage(
+    name: String,
+    modifier: Modifier = Modifier,
+    maxSide: Int = 1024,
+    crop: Boolean = true,
+    placeholder: ImageBitmap? = null,
+    file: suspend () -> File?,
+) {
+    val key = "$name|$maxSide"
     // Starts on the cached image when there is one: no placeholder flash, no decode.
     var image by remember(key) { mutableStateOf(imageCache.get(key)?.image) }
     var missing by remember(key) { mutableStateOf(false) }
     LaunchedEffect(key) {
         val loaded = withContext(Dispatchers.IO) {
-            val file = MediaFiles.resolve(context, relativePath) ?: return@withContext null
-            val modified = file.lastModified()
+            val f = runCatching { file() }.getOrNull()?.takeIf { it.isFile } ?: return@withContext null
+            val modified = f.lastModified()
             imageCache.get(key)?.takeIf { it.modified == modified }
-                ?: MediaFiles.decode(file, maxSide)?.let { CachedImage(it.asImageBitmap(), it.byteCount, modified) }
+                ?: MediaFiles.decode(f, maxSide)?.let { CachedImage(it.asImageBitmap(), it.byteCount, modified) }
                     ?.also { imageCache.put(key, it) }
         }
         image = loaded?.image
         missing = loaded == null
     }
-    val shown = image
+    val shown = image ?: placeholder
     if (shown != null) {
         Image(
             shown,
