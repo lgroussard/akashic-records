@@ -1,0 +1,11 @@
+[Unit]
+Description=Akashic hub: nightly copy to the external disk (03:30)
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+# A night missed (mini-PC off) runs at the next start.
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target
