@@ -12,6 +12,11 @@ public sealed class AppConfig
     // reopening Journaux returns them there instead of defaulting to the personal diary.
     public string? JournauxActiveTab { get; set; }
 
+    // Journaux was split in two sections (2026-11): "Quotidien" (Personal, Recipes) and "Art" (Poetry, Artistic,
+    // References). Each remembers its own last tab.
+    public string? QuotidienActiveTab { get; set; }
+    public string? ArtActiveTab { get; set; }
+
     // The specific journaux item the user last viewed, so reopening Journaux returns them
     // to the exact page (not just the tab). Serialized as "<tab>:<kind>:<id>" where id is
     // optional (personal diary uses a date, stored as an ISO string).

@@ -11,6 +11,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Checkbox
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.size
@@ -47,6 +49,8 @@ fun SettingsDialog(
     config: ConfigStore,
     disabledModules: Set<String>,
     onModulesChanged: (Set<String>) -> Unit,
+    bar: List<String> = DEFAULT_BAR,
+    onBarChanged: (List<String>) -> Unit = {},
     onDismiss: () -> Unit,
     onImported: () -> Unit,
 ) {
@@ -109,6 +113,8 @@ fun SettingsDialog(
         title = { Text("Réglages") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
+                BarChoice(bar, disabledModules, onBarChanged)
+                HorizontalDivider(color = Palette.BorderStrong, modifier = Modifier.padding(vertical = 12.dp))
                 ModuleSwitches(disabledModules) { key, on -> onModulesChanged(config.setModuleEnabled(key, on)) }
                 HorizontalDivider(color = Palette.BorderStrong, modifier = Modifier.padding(vertical = 12.dp))
                 HomeIconButtons()
@@ -206,6 +212,27 @@ fun SettingsDialog(
 
 // One switch per section, its sub-tabs indented below it (greyed while the section itself is off).
 // Each switch shows its own entry; a section left on with every sub-tab off is hidden all the same.
+// The bottom bar: up to BAR_SIZE sections, ticked here; the others are reached through "Plus".
+@Composable
+private fun BarChoice(bar: List<String>, disabled: Set<String>, onChange: (List<String>) -> Unit) {
+    Text("Barre du bas", fontSize = 15.sp)
+    Text("Jusqu'à $BAR_SIZE sections ; les autres sont dans « Plus ».", fontSize = 12.sp, color = Palette.TextMuted)
+    SECTION_LABELS.forEach { (key, label) ->
+        if (!Modules.isEnabled(disabled, key)) return@forEach
+        val on = key in bar
+        Row(
+            Modifier.fillMaxWidth().clickable(enabled = on || bar.size < BAR_SIZE) {
+                onChange(if (on) bar - key else SECTION_LABELS.keys.filter { it in bar || it == key })
+            }.padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(checked = on, onCheckedChange = null, enabled = on || bar.size < BAR_SIZE)
+            Spacer(Modifier.width(6.dp))
+            Text(label, color = if (on || bar.size < BAR_SIZE) Palette.Text else Palette.TextFaint)
+        }
+    }
+}
+
 @Composable
 private fun ModuleSwitches(disabled: Set<String>, onToggle: (String, Boolean) -> Unit) {
     Text("Modules de ce téléphone", fontSize = 15.sp)

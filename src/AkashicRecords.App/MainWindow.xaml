@@ -65,9 +65,12 @@
                     <ToggleButton x:Name="OrganisationNav" Content="Organisation"
                                   Style="{StaticResource NavButtonStyle}"
                                   Click="NavButton_OnClick" Tag="Organisation"/>
-                    <ToggleButton x:Name="JournauxNav" Content="Journaux"
+                    <ToggleButton x:Name="JournauxNav" Content="Quotidien"
                                   Style="{StaticResource NavButtonStyle}"
                                   Click="NavButton_OnClick" Tag="Journaux"/>
+                    <ToggleButton x:Name="ArtNav" Content="Art"
+                                  Style="{StaticResource NavButtonStyle}"
+                                  Click="NavButton_OnClick" Tag="Art"/>
                     <ToggleButton x:Name="CollectionsNav" Content="Collections"
                                   Style="{StaticResource NavButtonStyle}"
                                   Click="NavButton_OnClick" Tag="Collections"/>
