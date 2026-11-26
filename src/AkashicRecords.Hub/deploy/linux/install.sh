@@ -36,6 +36,10 @@ if ! command -v vipsthumbnail >/dev/null && command -v apt-get >/dev/null; then
     echo "Installation de libvips (apercus des photos)..."
     apt-get install -y -qq libvips-tools >/dev/null || echo "libvips n'a pas pu etre installe : apercus des photos HEIC indisponibles." >&2
 fi
+# iPhone photos (HEIC) are HEVC inside: on Ubuntu 24.04 libheif's HEVC decoder is a separate package.
+if command -v apt-get >/dev/null && apt-cache show libheif-plugin-libde265 >/dev/null 2>&1; then
+    apt-get install -y -qq libheif-plugin-libde265 >/dev/null || true
+fi
 
 if ! id akashic >/dev/null 2>&1; then
     useradd --system --no-create-home --home-dir "$DATA" --shell /usr/sbin/nologin akashic
