@@ -207,6 +207,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
     var miniCollapsed by remember { mutableStateOf(config.miniPlayerCollapsed()) }
     // The Billets list over the app: null = closed, true = opened by the shortcut (straight to today's tickets).
     var ticketsHub by remember { mutableStateOf<Boolean?>(null) }
+    var ticketFocus by remember { mutableStateOf<Int?>(null) } // a ticket to open in it (the next-ticket widget)
     // Bumped after a PC import (and on deep links) so the section re-reads its state.
     var dataVersion by remember { mutableStateOf(0) }
 
@@ -229,6 +230,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
     fun handle(l: Launch) {
         // The « Billets » shortcut: today's tickets (or the next ones) at once, over whatever screen was open.
         if (l.section == Launch.TICKETS) {
+            ticketFocus = l.item
             ticketsHub = true
             return
         }
@@ -356,7 +358,9 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
     }
 
     ticketsHub?.let { current ->
-        com.akashicrecords.tickets.TicketsHub(db, onClose = { ticketsHub = null }, openCurrent = current)
+        com.akashicrecords.tickets.TicketsHub(
+            db, onClose = { ticketsHub = null; ticketFocus = null }, openCurrent = current, openId = ticketFocus.takeIf { current },
+        )
     }
 
     fullPlayer?.let { similar ->

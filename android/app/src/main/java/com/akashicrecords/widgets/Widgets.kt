@@ -130,6 +130,12 @@ object Widgets {
 
     suspend fun refreshMusic(context: Context) = bump(context, MusicWidget::class.java, MusicWidget())
 
+    // The next-ticket widget (its alarm, a ticket added / changed / synced). No widget placed: no alarm left behind.
+    suspend fun refreshTicket(context: Context) {
+        if (!NextTicket.hasWidget(context)) { NextTicket.arm(context, null); return }
+        bump(context, TicketWidget::class.java, TicketWidget())
+    }
+
     suspend fun refreshAll(context: Context) {
         bump(context, AgendaWidget::class.java, AgendaWidget())
         bump(context, JournalWidget::class.java, JournalWidget())
@@ -140,6 +146,7 @@ object Widgets {
         bump(context, OrganisationWidget::class.java, OrganisationWidget())
         bump(context, PhotoWidget::class.java, PhotoWidget())
         bump(context, CrosswordWidget::class.java, CrosswordWidget())
+        refreshTicket(context)
     }
 }
 

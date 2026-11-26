@@ -16,6 +16,7 @@ import com.akashicrecords.data.Ticket
 import com.akashicrecords.journaux.nowIso
 import com.akashicrecords.media.MediaFiles
 import java.io.File
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.util.UUID
 
@@ -70,6 +71,7 @@ object TicketStore {
     private fun changed(context: Context) {
         bump()
         com.akashicrecords.calendar.Reminders.checkNow(context.applicationContext)
+        com.akashicrecords.journaux.AppScope.launch { com.akashicrecords.widgets.Widgets.refreshTicket(context.applicationContext) }
     }
 
     private fun bump() = android.os.Handler(android.os.Looper.getMainLooper()).post { changes++ }
