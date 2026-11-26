@@ -115,6 +115,8 @@ public sealed class SyncService
             _gate.Release();
         }
 
+        // Download requests made while the hub could not be reached: it can now.
+        if (report is not null) _ = HubDownloadQueue.SendQueuedAsync();
         StateChanged?.Invoke();
         if (report is not null && report.Inserted + report.Updated + report.Deleted + (LastFiles?.Downloaded ?? 0) > 0) DataChanged?.Invoke(report);
         return report;

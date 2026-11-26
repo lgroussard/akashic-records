@@ -22,6 +22,16 @@ if [ "$(id -u)" -ne 0 ]; then echo "A lancer avec sudo : sudo bash install.sh" >
 if [ ! -f "$SRC/AkashicRecords.Hub" ]; then echo "AkashicRecords.Hub introuvable a cote de ce script (dossier linux-x64 attendu)." >&2; exit 1; fi
 if ! command -v systemctl >/dev/null; then echo "systemd est requis (Debian, Ubuntu, Fedora...)." >&2; exit 1; fi
 
+# Music downloads done by the hub: yt-dlp fetches it itself (into $DATA/bin), but converting to mp3 needs ffmpeg.
+if ! command -v ffmpeg >/dev/null; then
+    if command -v apt-get >/dev/null; then
+        echo "Installation de ffmpeg (pour les telechargements de musique)..."
+        apt-get update -qq && apt-get install -y -qq ffmpeg >/dev/null || echo "ffmpeg n'a pas pu etre installe : les telechargements echoueront." >&2
+    else
+        echo "ffmpeg absent : installe-le pour que le hub puisse telecharger de la musique." >&2
+    fi
+fi
+
 if ! id akashic >/dev/null 2>&1; then
     useradd --system --no-create-home --home-dir "$DATA" --shell /usr/sbin/nologin akashic
     echo "Utilisateur systeme 'akashic' cree."

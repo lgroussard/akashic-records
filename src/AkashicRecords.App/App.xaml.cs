@@ -207,6 +207,23 @@ public partial class App : Application
             return;
         }
 
+        // The hub's download board (needs this copy paired with a hub: config\sync.json).
+        if (section == "Telechargements")
+        {
+            var board = new HubDownloadsWindow { Left = 0, Top = 0 };
+            board.Show();
+            var boardSettle = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(3000) };
+            boardSettle.Tick += (_, _) =>
+            {
+                boardSettle.Stop();
+                try { CaptureElement((FrameworkElement)board.Content, outputPath); }
+                catch (Exception ex) { LogCrash(ex); }
+                finally { board.ForceClose(); Shutdown(); }
+            };
+            boardSettle.Start();
+            return;
+        }
+
         var window = new MainWindow(screenshotMode: true)
         {
             WindowStartupLocation = WindowStartupLocation.Manual,

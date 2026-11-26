@@ -101,7 +101,7 @@ public sealed class DownloadStore
     public List<DownloadZone> Zones()
     {
         using var c = Open();
-        return Query(c, $"SELECT {ZoneColumns} FROM dl_zone ORDER BY created_at DESC", ReadZone);
+        return Query(c, $"SELECT {ZoneColumns} FROM dl_zone ORDER BY rowid DESC", ReadZone);
     }
 
     /// <summary>Everything still to do or failed, and the last finished ones.</summary>

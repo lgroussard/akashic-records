@@ -1,0 +1,146 @@
+<Window x:Class="AkashicRecords.App.HubDownloadsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Téléchargements"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ResizeMode="CanResizeWithGrip"
+        Width="980" Height="620" MinWidth="560" MinHeight="380"
+        WindowStartupLocation="Manual"
+        Closing="Window_OnClosing">
+    <Window.Resources>
+        <SolidColorBrush x:Key="Panel" Color="#1A1A2E"/>
+        <SolidColorBrush x:Key="Card" Color="#26263F"/>
+        <SolidColorBrush x:Key="Muted" Color="#9A9AB5"/>
+        <SolidColorBrush x:Key="Faint" Color="#6B6B85"/>
+        <SolidColorBrush x:Key="Accent" Color="#3B82F6"/>
+
+        <Style x:Key="Btn" TargetType="Button">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Padding" Value="10,5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="#2E2E4D" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#3B82F6"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.4"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource Btn}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="#3B82F6" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#5B9BFF"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.4"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="Flat" TargetType="Button" BasedOn="{StaticResource Btn}">
+            <Setter Property="Padding" Value="6,2"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="Transparent" CornerRadius="5" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#33FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border Background="#F21A1A2E" CornerRadius="12" BorderBrush="#553B82F6" BorderThickness="1" Padding="16">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Title bar: drag the window by it. -->
+            <Grid Grid.Row="0" Background="Transparent" MouseLeftButtonDown="TitleBar_OnMouseLeftButtonDown" Margin="0,0,0,10">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="TÉLÉCHARGEMENTS" FontWeight="Bold" Foreground="White" FontSize="14"/>
+                    <TextBlock Text="  ·  sur le serveur, pour tous tes appareils" Foreground="{StaticResource Faint}" FontSize="12" VerticalAlignment="Center"/>
+                </StackPanel>
+                <Button Content="✕" HorizontalAlignment="Right" Style="{StaticResource Flat}" Click="Close_OnClick" ToolTip="Fermer"/>
+            </Grid>
+
+            <!-- Add: what (one link or "title artist" per line), and where it goes, side by side. -->
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Grid>
+                    <TextBox x:Name="InputBox" AcceptsReturn="True" TextWrapping="NoWrap" MinHeight="58" MaxHeight="120"
+                             VerticalScrollBarVisibility="Auto" Background="#12121F" Foreground="White" BorderBrush="#3A3A5A"
+                             CaretBrush="White" Padding="8,6" FontSize="13" PreviewKeyDown="InputBox_OnPreviewKeyDown"/>
+                    <TextBlock x:Name="InputHint" Text="Un lien, ou « titre artiste », par ligne   (Ctrl+Entrée pour ajouter)"
+                               Foreground="{StaticResource Faint}" Margin="11,8,0,0" IsHitTestVisible="False" FontSize="13"/>
+                </Grid>
+                <StackPanel Grid.Column="1" Margin="10,0,0,0" Width="250">
+                    <Button x:Name="TargetButton" Style="{StaticResource Btn}" HorizontalContentAlignment="Left" Click="TargetButton_OnClick"
+                            ToolTip="Où ranger ce que tu ajoutes : une zone en cours, un dossier de ta musique, ou une nouvelle zone">
+                        <StackPanel>
+                            <TextBlock Text="RANGER DANS" FontSize="9" Foreground="{StaticResource Muted}"/>
+                            <TextBlock x:Name="TargetText" Text="📁 Musique (sans dossier)  ▾" FontWeight="Bold" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="AddButton" Content="Ajouter" Style="{StaticResource Primary}" Margin="0,6,0,0" Click="AddButton_OnClick"/>
+                </StackPanel>
+            </Grid>
+
+            <TextBlock Grid.Row="2" x:Name="StatusText" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,10,0,8" TextWrapping="Wrap"/>
+
+            <!-- The board: one column per zone, the newest first (next to the add box); "no folder" last. -->
+            <ScrollViewer Grid.Row="3" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                <StackPanel x:Name="BoardPanel" Orientation="Horizontal"/>
+            </ScrollViewer>
+
+            <!-- Finished tracks, folded. -->
+            <StackPanel Grid.Row="4" Margin="0,8,0,0">
+                <DockPanel>
+                    <Button x:Name="DoneToggle" DockPanel.Dock="Left" Style="{StaticResource Flat}" Click="DoneToggle_OnClick"/>
+                    <Button x:Name="ClearDoneButton" DockPanel.Dock="Right" Content="Vider" Style="{StaticResource Flat}" HorizontalAlignment="Right" Click="ClearDone_OnClick"/>
+                    <TextBlock x:Name="ToolText" Foreground="{StaticResource Faint}" FontSize="10" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,10,0"/>
+                </DockPanel>
+                <ScrollViewer x:Name="DoneScroll" MaxHeight="140" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+                    <StackPanel x:Name="DonePanel"/>
+                </ScrollViewer>
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

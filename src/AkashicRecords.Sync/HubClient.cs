@@ -14,6 +14,11 @@ public sealed record HubLogRow(long Seq, string EntityType, string EntityId, lon
 public sealed record HubPullResponse(List<HubLogRow> Rows, long NextCursor, bool HasMore, long HeadSeq);
 public sealed record HubPairResponse(string DeviceId, string Token);
 public sealed record HubHealth(string Status, string? Version, long HeadSeq);
+public sealed record HubDownloadZone(string Id, string Name, string Folder);
+public sealed record HubDownloadJob(string Id, string Query, string Label, string? ZoneId, string Status, string? Error,
+    string AddedBy, string? Folder, string? TrackPath, string? FinishedAt);
+public sealed record HubDownloadTool(string? Version, string? Problem, string? Current);
+public sealed record HubDownloadBoard(bool Enabled, HubDownloadTool Tool, List<HubDownloadZone> Zones, List<HubDownloadJob> Jobs, List<string> Folders);
 
 public sealed class HubException(string message, HttpStatusCode? status = null) : Exception(message)
 {
@@ -63,6 +68,36 @@ public sealed class HubClient : IDisposable
 
     public async Task<HubPullResponse> PullAsync(long since, int limit, CancellationToken ct = default) =>
         await Read<HubPullResponse>(await Send(() => _http.GetAsync($"sync/pull?since={since}&limit={limit}", ct)), ct);
+
+    // ---- The download board shared by every device; the hub itself downloads (see the hub's Downloads.cs).
+
+    public async Task<HubDownloadBoard> DownloadsAsync(CancellationToken ct = default) =>
+        await Read<HubDownloadBoard>(await Send(() => _http.GetAsync("downloads", ct)), ct);
+
+    public async Task AddDownloadAsync(string query, string label, string? zoneId, CancellationToken ct = default) =>
+        await Ensure(await Send(() => _http.PostAsJsonAsync("downloads/jobs", new { query, label, zone_id = zoneId }, Wire, ct)), ct);
+
+    public async Task MoveDownloadAsync(string id, string? zoneId, CancellationToken ct = default) =>
+        await Ensure(await Send(() => _http.PostAsJsonAsync($"downloads/jobs/{id}/zone", new { zone_id = zoneId }, Wire, ct)), ct);
+
+    public async Task RetryDownloadAsync(string id, CancellationToken ct = default) =>
+        await Ensure(await Send(() => _http.PostAsJsonAsync($"downloads/jobs/{id}/retry", new { }, Wire, ct)), ct);
+
+    public async Task RemoveDownloadAsync(string id, CancellationToken ct = default) =>
+        await Ensure(await Send(() => _http.DeleteAsync($"downloads/jobs/{id}", ct)), ct);
+
+    public async Task ClearDoneDownloadsAsync(CancellationToken ct = default) =>
+        await Ensure(await Send(() => _http.PostAsJsonAsync("downloads/clear-done", new { }, Wire, ct)), ct);
+
+    /// <summary>The zone for a folder (existing music folder or new one); the hub reuses the zone it may already have.</summary>
+    public async Task<HubDownloadZone> AddZoneAsync(string? name, string? folder, CancellationToken ct = default) =>
+        await Read<HubDownloadZone>(await Send(() => _http.PostAsJsonAsync("downloads/zones", new { name, folder }, Wire, ct)), ct);
+
+    public async Task RenameZoneAsync(string id, string name, CancellationToken ct = default) =>
+        await Ensure(await Send(() => _http.PostAsJsonAsync($"downloads/zones/{id}", new { name }, Wire, ct)), ct);
+
+    public async Task RemoveZoneAsync(string id, CancellationToken ct = default) =>
+        await Ensure(await Send(() => _http.DeleteAsync($"downloads/zones/{id}", ct)), ct);
 
     // ---- Files (blobs addressed by the SHA-256 of their content). A file can be large and slow to move:
     // these calls have their own, much longer, time limit.
@@ -136,6 +171,17 @@ public sealed class HubClient : IDisposable
         try { return await call(); }
         catch (HttpRequestException ex) { throw new HubException("Hub injoignable : " + ex.Message); }
         catch (TaskCanceledException) { throw new HubException("Hub injoignable : delai depasse."); }
+    }
+
+    private static async Task Ensure(HttpResponseMessage resp, CancellationToken ct)
+    {
+        using (resp)
+        {
+            if (resp.StatusCode == HttpStatusCode.Unauthorized)
+                throw new HubException("Le hub refuse ce jeton : appareil non appaire ou revoque.", resp.StatusCode);
+            if (!resp.IsSuccessStatusCode)
+                throw new HubException($"Le hub a repondu {(int)resp.StatusCode} : {await resp.Content.ReadAsStringAsync(ct)}", resp.StatusCode);
+        }
     }
 
     private static async Task<T> Read<T>(HttpResponseMessage resp, CancellationToken ct)

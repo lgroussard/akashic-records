@@ -1040,6 +1040,8 @@ public partial class MusicPlayerWindow : Window
             FolderId = ZoneFor(string.IsNullOrWhiteSpace(album) ? _runAlbum : album)
         });
         DownloadQueued?.Invoke();
+        // Paired: the hub downloads it, for every device (see HubDownloadQueue).
+        _ = AkashicRecords.App.Sync.HubDownloadQueue.SendQueuedAsync();
     }
 
     // The downloader zone pointing at the run's album folder, created on first use so the board
