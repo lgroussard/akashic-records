@@ -18,7 +18,8 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
     <!-- Image upscaling (OnnxUpscaler.cs): the model engine, on the processor here, and image reading/writing. -->
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
-    <PackageReference Include="SixLabors.ImageSharp" Version="3.2.1" />
+    <PackageReference Include="SkiaSharp" Version="3.116.1" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="3.116.1" />
     <!-- Lets the same exe run as a Windows service (no effect on Linux or in a console). -->
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
   </ItemGroup>
