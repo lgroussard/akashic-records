@@ -1178,6 +1178,14 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
             DeleteElement(element, border);
         };
 
+        // Right-click on a picture: have the hub upscale it; the ×4 version lands on this canvas, next to it.
+        if (element.Type == CanvasElementType.Image && !string.IsNullOrEmpty(element.ImagePath) && UpscaleAction.Available)
+        {
+            var upscaleItem = new MenuItem { Header = UpscaleAction.Label };
+            upscaleItem.Click += async (_, _) => await UpscaleAction.RequestAsync(upscaleItem, "CanvasElement", element.Id);
+            border.ContextMenu = new ContextMenu { Items = { upscaleItem } };
+        }
+
         Point? resizeStart = null;
         double resizeStartWidth = 0, resizeStartHeight = 0;
 
@@ -1598,8 +1606,16 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
             image.MouseLeftButtonUp += (_, _) =>
             {
                 var paths = photos.Select(p => MediaStorage.ResolveFullPath(p.ImagePath)).ToList();
-                new PhotoViewerWindow(paths, photos.ToList().IndexOf(photo)) { Owner = Window.GetWindow(this) }.ShowDialog();
+                var ids = photos.Select(p => (long)p.Id).ToList();
+                new PhotoViewerWindow(paths, photos.ToList().IndexOf(photo), "JournalPhoto", ids) { Owner = Window.GetWindow(this) }.ShowDialog();
             };
+            if (UpscaleAction.Available)
+            {
+                // Right-click: upscale without opening it.
+                var upscaleItem = new MenuItem { Header = UpscaleAction.Label };
+                upscaleItem.Click += async (_, _) => await UpscaleAction.RequestAsync(image, "JournalPhoto", photo.Id);
+                image.ContextMenu = new ContextMenu { Items = { upscaleItem } };
+            }
 
             var deleteButton = new Button
             {

@@ -27,6 +27,7 @@ object HubCompute {
         val id: String, val model: String, val inputHash: String, val inputName: String, val status: String,
         val addedAt: String, val workerName: String?, val seconds: Double?, val resultHash: String?,
         val resultSize: Long?, val resultName: String?, val error: String?,
+        val attachType: String? = null, val attachedPath: String? = null, val attachError: String? = null,
     ) {
         val waiting get() = status == "queued"
         val running get() = status == "running"
@@ -66,7 +67,8 @@ object HubCompute {
                 Job(it.getString("id"), it.getString("model"), it.getString("input_hash"), it.getString("input_name"),
                     it.getString("status"), it.optString("added_at"), it.str("worker_name"),
                     if (it.isNull("seconds")) null else it.optDouble("seconds"), it.str("result_hash"),
-                    if (it.isNull("result_size")) null else it.optLong("result_size"), it.str("result_name"), it.str("error"))
+                    if (it.isNull("result_size")) null else it.optLong("result_size"), it.str("result_name"), it.str("error"),
+                    it.str("attach_type"), it.str("attached_path"), it.str("attach_error"))
             },
         )
     }
@@ -117,6 +119,45 @@ object HubCompute {
         } finally {
             temp.delete()
         }
+    }
+
+    /** The kinds of rows whose picture can be upscaled in place (same names as the tables and the hub's). */
+    val inPlaceKinds = setOf("Photo", "JournalPhoto", "RefImage", "CanvasElement")
+
+    /**
+     * Upscales a picture already in the app (a row of Photo, JournalPhoto, RefImage or CanvasElement): the PC or the
+     * hub does the work and the hub adds the result next to the original (same album, entry, board or canvas); it
+     * reaches this phone at a sync. A row not yet on the hub is synchronised first. Returns null when it went,
+     * else a message for the user.
+     */
+    suspend fun requestFrom(context: Context, table: String, localId: Long): String? = withContext(Dispatchers.IO) {
+        if (table !in inPlaceKinds) return@withContext "Ce type d'image ne peut pas être agrandi."
+        val hub = hub(context) ?: return@withContext "Ce téléphone n'est pas appairé au serveur (Réglages → Synchronisation)."
+        var syncId = syncIdOf(context, table, localId)
+        if (syncId == null) {
+            SyncService.run(context) // just added here: it goes to the hub first, with its file
+            syncId = syncIdOf(context, table, localId) ?: return@withContext "Cette image n'a pas encore pu être envoyée au serveur : réessaie dans un moment."
+        }
+        try {
+            hub.addComputeJobFrom(table, syncId)
+            refresh(context)
+            null
+        } catch (e: Exception) {
+            e.message ?: e.javaClass.simpleName
+        }
+    }
+
+    /** [requestFrom] as the line to show the user, for the « Agrandir ×4 » buttons of the viewers. */
+    suspend fun upscaleNote(context: Context, table: String, localId: Long): String =
+        requestFrom(context, table, localId) ?: "Envoyée : la version ×4 arrivera à côté de l'original."
+
+    /** The id a row has on the hub (sync_map), or null when it has not been synchronised yet. */
+    private fun syncIdOf(context: Context, table: String, localId: Long): String? = try {
+        com.akashicrecords.data.AkashicDatabase.get(context.applicationContext).openHelper.readableDatabase
+            .query("SELECT sync_id FROM sync_map WHERE entity_type = ? AND local_id = ? AND deleted = 0 LIMIT 1", arrayOf<Any>(table, localId))
+            .use { c -> if (c.moveToFirst()) c.getString(0) else null }
+    } catch (e: android.database.sqlite.SQLiteException) {
+        null // never synchronised: no sync_map yet
     }
 
     /** A picture kept on the hub (an original or a result), as a file here: fetched once, then kept in the cache. */

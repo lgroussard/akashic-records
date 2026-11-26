@@ -67,6 +67,15 @@ class HubClient(hubUrl: String, private val token: String? = null) {
     fun addComputeJob(model: String, inputHash: String, inputName: String): JSONObject =
         call("POST", "/compute/jobs", JSONObject().put("model", model).put("input_hash", inputHash).put("input_name", inputName))
 
+    /** Asks for a picture already in the app to be upscaled (its table and hub id); the hub reads the original itself
+     * and puts the result next to it. A refusal (not on the hub yet...) comes back with the hub's own message. */
+    fun addComputeJobFrom(entityType: String, entityId: String): JSONObject = try {
+        call("POST", "/compute/jobs/from", JSONObject().put("entity_type", entityType).put("entity_id", entityId))
+    } catch (e: HubException) {
+        val said = if (e.status == 422) Regex("\"error\"\\s*:\\s*\"(.*?)\"").find(e.message.orEmpty())?.groupValues?.get(1) else null
+        throw if (said != null) HubException(said, 422) else e
+    }
+
     fun retryCompute(id: String): JSONObject = call("POST", "/compute/jobs/$id/retry", JSONObject())
     fun removeCompute(id: String): JSONObject = call("DELETE", "/compute/jobs/$id", null)
 

@@ -19,10 +19,12 @@ public sealed class PhotoViewerWindow : Window
     private readonly TextBlock _counter = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 12, 0) };
     private readonly Button _previous;
     private readonly Button _next;
+    private readonly IReadOnlyList<long>? _ids; // the rows behind _paths, for "Agrandir ×4"
 
-    public PhotoViewerWindow(IReadOnlyList<string> fullPaths, int startIndex)
+    public PhotoViewerWindow(IReadOnlyList<string> fullPaths, int startIndex, string? upscaleTable = null, IReadOnlyList<long>? ids = null)
     {
         _paths = fullPaths;
+        _ids = ids is not null && ids.Count == fullPaths.Count ? ids : null;
         _index = Math.Clamp(startIndex, 0, Math.Max(0, fullPaths.Count - 1));
 
         Title = "Photo";
@@ -45,6 +47,15 @@ public sealed class PhotoViewerWindow : Window
         bar.Children.Add(new Border { Width = 28 });
         bar.Children.Add(save);
         bar.Children.Add(new Border { Width = 8 });
+        if (upscaleTable is not null && _ids is not null && UpscaleAction.Available)
+        {
+            var rowIds = _ids;
+            Button? upscale = null;
+            upscale = BarButton(UpscaleAction.Label, async () => await UpscaleAction.RequestAsync(upscale, upscaleTable, rowIds[_index]));
+            upscale.ToolTip = "Demande au serveur une version 4 fois plus grande, ajoutée à côté de l'originale";
+            bar.Children.Add(upscale);
+            bar.Children.Add(new Border { Width = 8 });
+        }
         bar.Children.Add(close);
 
         var layout = new Grid();

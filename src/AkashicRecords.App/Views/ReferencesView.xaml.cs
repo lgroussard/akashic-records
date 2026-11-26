@@ -351,6 +351,8 @@ public partial class ReferencesView : UserControl
         ViewerDeleteButton.Visibility = Visibility.Visible;
         ViewerObservationsButton.Visibility = Visibility.Visible;
         ViewerObservationsButton.Content = ObservationsDialog.ButtonLabel(Observation.RefImageOwner, img.Id);
+        ViewerUpscaleButton.Visibility = UpscaleAction.Available ? Visibility.Visible : Visibility.Collapsed;
+        ViewerStatus.Visibility = Visibility.Collapsed;
         ViewerSourceButton.Visibility = (img.PageUrl ?? img.SourceUrl) is null ? Visibility.Collapsed : Visibility.Visible;
         FillBoardCombo(img.BoardId);
         ViewerImage.Source = null;
@@ -371,6 +373,8 @@ public partial class ReferencesView : UserControl
         ViewerSaveButton.Content = saved ? "✓ Enregistrée" : "Enregistrer";
         ViewerDeleteButton.Visibility = Visibility.Collapsed;
         ViewerObservationsButton.Visibility = Visibility.Collapsed; // a search hit is not saved yet
+        ViewerUpscaleButton.Visibility = Visibility.Collapsed;
+        ViewerStatus.Visibility = Visibility.Collapsed;
         ViewerSourceButton.Visibility = hit.PageUrl is null ? Visibility.Collapsed : Visibility.Visible;
         FillBoardCombo(_filter >= 0 ? _filter : null);
         ViewerImage.Source = RemoteCache.TryGetValue(hit.ThumbUrl, out var thumb) ? thumb : null;
@@ -442,6 +446,18 @@ public partial class ReferencesView : UserControl
         if (_viewing is not { } img) return;
         ObservationsDialog.Open(this, Observation.RefImageOwner, img.Id, img.Title.Length > 0 ? img.Title : "(image sans titre)");
         ViewerObservationsButton.Content = ObservationsDialog.ButtonLabel(Observation.RefImageOwner, img.Id);
+    }
+
+    private async void ViewerUpscale_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_viewing is not { } img) return;
+        ViewerStatus.Visibility = Visibility.Collapsed;
+        await UpscaleAction.RequestAsync(ViewerUpscaleButton, "RefImage", img.Id, message =>
+        {
+            if (_viewing != img) { SetStatus(message); return; } // the viewer moved on: said under the boards
+            ViewerStatus.Text = message;
+            ViewerStatus.Visibility = Visibility.Visible;
+        });
     }
 
     // Opens a saved image in the viewer by id (a global-search hit, or a card of a project's Fil).

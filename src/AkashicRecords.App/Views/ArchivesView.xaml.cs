@@ -616,6 +616,8 @@ public partial class ArchivesView : UserControl, ISearchNavigable, IRemembersVie
         ViewerImage.Source = LoadImage(MediaStorage.ResolveFullPath(photo.ImagePath));
         ViewerCounterText.Text = $"{_viewerIndex + 1} / {_filteredPhotos.Count}";
         ViewerObservationsButton.Content = ObservationsDialog.ButtonLabel(Observation.PhotoOwner, photo.Id);
+        ViewerUpscaleButton.Visibility = UpscaleAction.Available ? Visibility.Visible : Visibility.Collapsed;
+        ViewerUpscaleStatus.Visibility = Visibility.Collapsed;
 
         _isRebuildingCombos = true;
         RebuildViewerAlbums();
@@ -791,6 +793,17 @@ public partial class ArchivesView : UserControl, ISearchNavigable, IRemembersVie
     }
 
     private void DeletePhotoButton_OnClick(object sender, RoutedEventArgs e) => DeleteCurrentPhoto();
+
+    private async void ViewerUpscaleButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (CurrentPhoto is not { } photo) return;
+        ViewerUpscaleStatus.Visibility = Visibility.Collapsed;
+        await UpscaleAction.RequestAsync(ViewerUpscaleButton, "Photo", photo.Id, message =>
+        {
+            ViewerUpscaleStatus.Text = message;
+            ViewerUpscaleStatus.Visibility = Visibility.Visible;
+        });
+    }
 
     private void ViewerObservationsButton_OnClick(object sender, RoutedEventArgs e)
     {
