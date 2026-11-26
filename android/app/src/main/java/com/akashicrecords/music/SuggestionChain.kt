@@ -40,7 +40,9 @@ object PlayerItems {
         .setUri(uri)
         .setMediaMetadata(
             MediaMetadata.Builder()
-                .setTitle(t.Title.ifBlank { "(sans titre)" })
+                // ☁ in the title itself: it shows wherever Android shows the track (notification, lock screen,
+                // widgets), not only in the app.
+                .setTitle((if (HubStream.isStream(uri)) "☁ " else "") + t.Title.ifBlank { "(sans titre)" })
                 .setArtist(t.Artist)
                 .setAlbumTitle(t.Album)
                 .apply { if (HubStream.isStream(uri)) setExtras(Bundle().apply { putBoolean(EXTRA_STREAMED, true) }) }

@@ -990,7 +990,7 @@ public partial class MainWindow : Window
     private void NavButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (sender is not ToggleButton clicked || clicked.Tag is not string sectionName) return;
-        foreach (var button in new[] { OrganisationNav, JournauxNav, CollectionsNav, ArchivesNav, BudgetNav, CalendarNav })
+        foreach (var button in new[] { OrganisationNav, JournauxNav, ArtNav, CollectionsNav, ArchivesNav, BudgetNav, CalendarNav })
         {
             if (button != clicked) button.IsChecked = false;
         }
@@ -1133,7 +1133,7 @@ public partial class MainWindow : Window
     {
         if (e.Key != Key.Escape || _activeSection is null) return;
 
-        foreach (var button in new[] { OrganisationNav, JournauxNav, CollectionsNav, ArchivesNav, BudgetNav, CalendarNav })
+        foreach (var button in new[] { OrganisationNav, JournauxNav, ArtNav, CollectionsNav, ArchivesNav, BudgetNav, CalendarNav })
         {
             button.IsChecked = false;
         }

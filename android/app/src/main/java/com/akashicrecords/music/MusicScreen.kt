@@ -511,7 +511,7 @@ fun MiniStrip(player: PlayerConnection, onExpand: () -> Unit) {
                 Text("⌃", fontSize = 13.sp, color = Palette.TextFaint)
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    listOf((if (ui.streamed) "☁ " else "") + ui.title.ifBlank { "Aucune piste" }, ui.artist).filter { it.isNotBlank() }.joinToString(" — "),
+                    listOf(ui.title.ifBlank { "Aucune piste" }, ui.artist).filter { it.isNotBlank() }.joinToString(" — "),
                     fontSize = 11.sp, color = Palette.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
@@ -562,7 +562,7 @@ fun MiniPlayer(player: PlayerConnection, db: AkashicDatabase, onCollapse: () -> 
                 contentAlignment = Alignment.Center,
             ) { Text("⌄", fontSize = 20.sp, color = Palette.TextFaint) }
             Column(Modifier.weight(1f).clickable(onClick = onOpen)) {
-                Text((if (ui.streamed) "☁ " else "") + ui.title.ifBlank { "Aucune piste" }, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold)
+                Text(ui.title.ifBlank { "Aucune piste" }, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold)
                 if (ui.artist.isNotBlank()) Text(ui.artist, fontSize = 11.sp, color = Palette.TextMuted, maxLines = 1)
             }
             if (saveUrl != null) {

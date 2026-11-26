@@ -14,7 +14,9 @@ object HomeIcons {
 
     val all = listOf(
         Icon("pin_music", "Musique", "Ta bibliothèque musicale", R.drawable.pin_music, R.drawable.g_white_music, 0xFFF06CA8, "Musique", "Library"),
-        Icon("pin_poetry", "Poésie", "Le recueil de poésie", R.drawable.pin_poetry, R.drawable.g_white_poetry, 0xFF9B7BFF, "Journaux", "Poetry"),
+        Icon("pin_poetry", "Poésie", "Le recueil de poésie", R.drawable.pin_poetry, R.drawable.g_white_poetry, 0xFF9B7BFF, "Art", "Poetry"),
+        // The Art section (in "Plus" by default): poetry, artistic archive, references.
+        Icon("pin_art", "Art", "Poésie, archive artistique, références", R.drawable.pin_art, R.drawable.g_white_art, 0xFFE0607E, "Art", null),
         Icon("pin_calendar", "Calendrier", "Le planning et les événements", R.drawable.pin_calendar, R.drawable.g_white_calendar, 0xFF34C77B, "Calendrier", null),
         Icon("pin_reading", "Lecture", "Reprendre le livre en cours", R.drawable.pin_reading, R.drawable.g_white_book, 0xFFE8A33D, "Lecture", null),
         // Opens today's tickets (or the next ones) straight away, full screen.
