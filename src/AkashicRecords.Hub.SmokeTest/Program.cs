@@ -745,5 +745,76 @@ await Scenario("16. Agrandir une image de l'app : le resultat se range a cote de
         "image d'un canevas : la copie se pose a cote (meme projet, meme taille), sans ecraser le -x4 deja la");
 });
 
+await Scenario("17. Images agrandies depuis l'outil : rangees dans l'album Agrandies des Archives", async hub =>
+{
+    hub.EntityTypes.AddRange(["MediaFile", "Photo", "PhotoAlbum"]);
+    await hub.RestartAsync();
+    var pc = await hub.Device("pc");
+    var models = Path.Combine(hub.DataDir, "compute", "models");
+    Directory.CreateDirectory(models);
+    File.WriteAllText(Path.Combine(models, "nomos-webphoto-4x.onnx"), "fake model");
+
+    byte[] Picture(SkiaSharp.SKEncodedImageFormat format, int side, SkiaSharp.SKColor color)
+    {
+        using var bmp = new SkiaSharp.SKBitmap(side, side);
+        bmp.Erase(color);
+        using var img = SkiaSharp.SKImage.FromBitmap(bmp);
+        return img.Encode(format, 90).ToArray();
+    }
+    JsonElement Json(HttpResponseMessage r) => JsonDocument.Parse(r.Content.ReadAsStringAsync().Result).RootElement;
+    async Task<string> Upload(byte[] bytes) =>
+        (await (await pc.Http.PostAsync("/media", new ByteArrayContent(bytes))).Content.ReadFromJsonAsync<MediaResponse>(SimDevice.Wire))!.Hash;
+    async Task<JsonElement> Run(string name, SkiaSharp.SKColor color)
+    {
+        var input = await Upload(Picture(SkiaSharp.SKEncodedImageFormat.Jpeg, 8, color));
+        var job = Json(await pc.Http.PostAsJsonAsync("/compute/jobs", new { input_hash = input, input_name = name }, SimDevice.Wire));
+        await pc.Http.PostAsJsonAsync("/compute/claim", new { name = "LOHAN", rid = "win-x64", models = new[] { "nomos-webphoto-4x" } }, SimDevice.Wire);
+        var result = await Upload(Picture(SkiaSharp.SKEncodedImageFormat.Png, 32, color));
+        return Json(await pc.Http.PostAsJsonAsync($"/compute/jobs/{job.GetProperty("id").GetString()}/complete", new { result_hash = result, seconds = 5.0 }, SimDevice.Wire));
+    }
+    List<JsonElement> Live(string type) => hub.Store.Snapshot(type, null, null, 100).Entities.Where(e => !e.Deleted).Select(e => e.Payload!.Value).ToList();
+
+    var first = await Run("vacances.webp", SkiaSharp.SKColors.Teal);
+    var second = await Run("chat.png", SkiaSharp.SKColors.Gold);
+    var albums = hub.Store.Snapshot("PhotoAlbum", null, null, 10).Entities.Where(e => !e.Deleted).ToList();
+    var photos = Live("Photo");
+    Check(albums.Count == 1 && albums[0].Payload!.Value.GetProperty("Name").GetString() == "Agrandies"
+          && photos.Count == 2 && photos.All(p => p.GetProperty("AlbumId").GetString() == albums[0].EntityId)
+          && photos.Select(p => p.GetProperty("Title").GetString()).OrderBy(t => t).SequenceEqual(new[] { "chat", "vacances" }),
+        "deux images de l'outil : un seul album Agrandies, une photo chacune, avec leur nom");
+    var path = first.GetProperty("attached_path").GetString()!;
+    var listed = Live("MediaFile").Single(f => f.GetProperty("Path").GetString() == path.Replace('\\', '/'));
+    var bytes = await pc.Http.GetByteArrayAsync("/media/" + listed.GetProperty("Hash").GetString());
+    Check(path.StartsWith(@"media\archive\") && path.EndsWith(".jpg") && bytes[0] == 0xFF && bytes[1] == 0xD8,
+        "photo rangee avec les autres photos d'Archives, en JPEG, fichier liste et present");
+
+    // Results made before the album existed: placed in it once, at the hub's start (one per image).
+    var older = await Run("ancienne.webp", SkiaSharp.SKColors.Plum);
+    var oldId = older.GetProperty("id").GetString()!;
+    var photoOfOld = Live("Photo").Single(p => p.GetProperty("Title").GetString() == "ancienne");
+    await pc.PushRawAsync([new Mutation(Guid.NewGuid().ToString(), "Photo",
+        hub.Store.Snapshot("Photo", null, null, 100).Entities.Single(e => e.Payload?.GetProperty("Title").GetString() == "ancienne").EntityId,
+        1, null, true)]);
+    using (var c = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(hub.DataDir, "compute.db")}"))
+    {
+        c.Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "UPDATE cp_job SET attached_path = NULL, attach_error = NULL WHERE id = $id";
+        cmd.Parameters.AddWithValue("$id", oldId);
+        cmd.ExecuteNonQuery();
+    }
+    Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+    await hub.RestartAsync();
+    string? placed = null;
+    for (var i = 0; i < 50 && placed is null; i++)
+    {
+        await Task.Delay(100);
+        placed = Json(await pc.Http.GetAsync("/compute")).GetProperty("jobs").EnumerateArray()
+            .First(j => j.GetProperty("id").GetString() == oldId).GetProperty("attached_path").GetString();
+    }
+    Check(placed is not null && Live("Photo").Count(p => p.GetProperty("Title").GetString() == "ancienne") == 1 && Live("PhotoAlbum").Count == 1,
+        "resultat d'avant l'album : range une fois au demarrage du hub, dans le meme album");
+});
+
 Console.WriteLine($"\n{passed} verifications reussies, {failures} en echec.");
 return failures == 0 ? 0 : 1;
