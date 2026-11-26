@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -666,6 +666,83 @@ await Scenario("15. Apercus des photos : le hub fait une petite image a la deman
     var again = await phone.Http.GetByteArrayAsync($"/media/{hash}/thumb");
     Check(again.AsSpan().SequenceEqual(thumb) && File.Exists(Path.Combine(hub.DataDir, "thumbs", hash[..2], hash + ".jpg")),
         "garde sur le disque du hub : la 2e demande renvoie le meme apercu sans le refaire");
+});
+
+await Scenario("16. Agrandir une image de l'app : le resultat se range a cote de l'original", async hub =>
+{
+    hub.EntityTypes.AddRange(["MediaFile", "Photo", "PhotoAlbum", "CanvasElement"]);
+    await hub.RestartAsync();
+    var pc = await hub.Device("pc");
+    var phone = await hub.Device("phone");
+    var models = Path.Combine(hub.DataDir, "compute", "models");
+    Directory.CreateDirectory(models);
+    File.WriteAllText(Path.Combine(models, "nomos-webphoto-4x.onnx"), "fake model");
+
+    byte[] Picture(SkiaSharp.SKEncodedImageFormat format, int side)
+    {
+        using var bmp = new SkiaSharp.SKBitmap(side, side);
+        bmp.Erase(SkiaSharp.SKColors.Coral);
+        using var img = SkiaSharp.SKImage.FromBitmap(bmp);
+        return img.Encode(format, 90).ToArray();
+    }
+    JsonElement Json(HttpResponseMessage r) => JsonDocument.Parse(r.Content.ReadAsStringAsync().Result).RootElement;
+    async Task<string> Upload(SimDevice d, byte[] bytes) =>
+        (await (await d.Http.PostAsync("/media", new ByteArrayContent(bytes))).Content.ReadFromJsonAsync<MediaResponse>(SimDevice.Wire))!.Hash;
+    Mutation Row(string type, string id, object payload) =>
+        new(Guid.NewGuid().ToString(), type, id, 0, JsonSerializer.SerializeToElement(payload), false);
+
+    // The PC has an Archives photo (in an album) and a picture on a canvas, both synchronised.
+    var original = Picture(SkiaSharp.SKEncodedImageFormat.Jpeg, 16);
+    var originalHash = await Upload(pc, original);
+    var album = Guid.NewGuid().ToString();
+    var photo = Guid.NewGuid().ToString();
+    var element = Guid.NewGuid().ToString();
+    await pc.PushRawAsync([
+        Row("PhotoAlbum", album, new { Name = "Plage", CreatedAt = "2026-11-20T10:00:00.0000000" }),
+        Row("MediaFile", Guid.NewGuid().ToString(), new { Path = "media/archive/plage.jpg", Hash = originalHash, Size = original.Length }),
+        Row("Photo", photo, new { ImagePath = @"media\archive\plage.jpg", Title = "Plage", Description = "", TakenDate = (string?)null, Tags = "", IsFavorite = 0, AlbumId = album, ImportedAt = "2026-11-20T10:00:00.0000000" }),
+        Row("CanvasElement", element, new { ProjectId = "proj", Type = 1, X = 100.0, Y = 50.0, TextContent = (string?)null, ImagePath = @"media\archive\plage.jpg", ObservationId = (string?)null, Width = 300.0, Height = 200.0 }),
+    ]);
+
+    // The phone asks for that photo to be upscaled: the hub takes the original from its own copy.
+    var bad = await phone.Http.PostAsJsonAsync("/compute/jobs/from", new { entity_type = "Photo", entity_id = Guid.NewGuid().ToString() }, SimDevice.Wire);
+    var wrongKind = await phone.Http.PostAsJsonAsync("/compute/jobs/from", new { entity_type = "Recipe", entity_id = photo }, SimDevice.Wire);
+    Check(bad.StatusCode == HttpStatusCode.UnprocessableEntity && Json(bad).GetProperty("error").GetString()!.Contains("synchronise")
+          && wrongKind.StatusCode == HttpStatusCode.BadRequest,
+        "image inconnue du hub -> 422 avec un message clair ; type sans image -> 400");
+    var asked = await phone.Http.PostAsJsonAsync("/compute/jobs/from", new { entity_type = "Photo", entity_id = photo }, SimDevice.Wire);
+    var job = Json(asked);
+    Check(asked.StatusCode == HttpStatusCode.Created && job.GetProperty("input_hash").GetString() == originalHash
+          && job.GetProperty("input_name").GetString() == "plage.jpg" && job.GetProperty("attach_type").GetString() == "Photo",
+        "demande depuis l'app : l'original est pris sur le hub, sans nouvel envoi");
+
+    // The PC does it and sends a (pretend) result back.
+    await pc.Http.PostAsJsonAsync("/compute/claim", new { name = "LOHAN", rid = "win-x64", models = new[] { "nomos-webphoto-4x" } }, SimDevice.Wire);
+    var resultHash = await Upload(pc, Picture(SkiaSharp.SKEncodedImageFormat.Png, 64));
+    var done = Json(await pc.Http.PostAsJsonAsync($"/compute/jobs/{job.GetProperty("id").GetString()}/complete", new { result_hash = resultHash, seconds = 9.5 }, SimDevice.Wire));
+    Check(done.GetProperty("attached_path").GetString() == @"media\archive\plage-x4.jpg" && done.GetProperty("attach_error").ValueKind == JsonValueKind.Null,
+        "resultat range : meme dossier, meme style de chemin, nom en -x4.jpg");
+
+    // What every device then receives.
+    var photos = hub.Store.Snapshot("Photo", null, null, 50).Entities.Where(e => !e.Deleted).ToList();
+    var added = photos.Single(e => e.EntityId != photo).Payload!.Value;
+    Check(photos.Count == 2 && added.GetProperty("AlbumId").GetString() == album && added.GetProperty("Title").GetString() == "Plage"
+          && added.GetProperty("ImagePath").GetString() == @"media\archive\plage-x4.jpg" && added.GetProperty("ImportedAt").GetString() != "2026-11-20T10:00:00.0000000",
+        "une 2e photo dans le meme album, l'original intact");
+    var file = hub.Store.Snapshot("MediaFile", null, null, 50).Entities.Select(e => e.Payload!.Value)
+        .Single(p => p.GetProperty("Path").GetString() == "media/archive/plage-x4.jpg");
+    var jpeg = await phone.Http.GetByteArrayAsync("/media/" + file.GetProperty("Hash").GetString());
+    Check(jpeg.Length > 0 && jpeg[0] == 0xFF && jpeg[1] == 0xD8 && file.GetProperty("Size").GetInt64() == jpeg.Length,
+        "son fichier est liste et sur le hub, en JPEG");
+
+    // A picture on a canvas: the copy goes beside it.
+    var again = Json(await phone.Http.PostAsJsonAsync("/compute/jobs/from", new { entity_type = "CanvasElement", entity_id = element }, SimDevice.Wire));
+    await pc.Http.PostAsJsonAsync("/compute/claim", new { name = "LOHAN", rid = "win-x64", models = new[] { "nomos-webphoto-4x" } }, SimDevice.Wire);
+    var second = Json(await pc.Http.PostAsJsonAsync($"/compute/jobs/{again.GetProperty("id").GetString()}/complete", new { result_hash = resultHash, seconds = 9.5 }, SimDevice.Wire));
+    var copy = hub.Store.Snapshot("CanvasElement", null, null, 50).Entities.Where(e => e.EntityId != element).Single().Payload!.Value;
+    Check(second.GetProperty("attached_path").GetString() == @"media\archive\plage-x4-2.jpg" && copy.GetProperty("X").GetDouble() == 424
+          && copy.GetProperty("ProjectId").GetString() == "proj" && copy.GetProperty("Width").GetDouble() == 300,
+        "image d'un canevas : la copie se pose a cote (meme projet, meme taille), sans ecraser le -x4 deja la");
 });
 
 Console.WriteLine($"\n{passed} verifications reussies, {failures} en echec.");

@@ -49,7 +49,7 @@ public sealed class ComputeWorkers
 }
 
 /// <summary>The hub's own worker: takes the jobs of the models it runs, when no device able to do them is around.</summary>
-public sealed class HubComputeWorker(HubOptions options, ComputeStore jobs, ComputeCatalog catalog, ComputeWorkers workers, BlobStore blobs, RequestLog log) : BackgroundService
+public sealed class HubComputeWorker(HubOptions options, ComputeStore jobs, ComputeCatalog catalog, ComputeWorkers workers, BlobStore blobs, ComputeAttach attach, RequestLog log) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stop)
     {
@@ -89,6 +89,7 @@ public sealed class HubComputeWorker(HubOptions options, ComputeStore jobs, Comp
                 MediaResponse saved;
                 await using (var s = File.OpenRead(output)) saved = await blobs.SaveAsync(s, null, long.MaxValue, stop);
                 jobs.Complete(job.Id, HubStore.HubDevice, saved.Hash, saved.Size, OnnxUpscaler.ResultName(job.InputName), clock.Elapsed.TotalSeconds);
+                attach.Attach(jobs, jobs.Job(job.Id)!);
                 log.Info($"upscale done by the hub: {job.InputName} ({job.Model}) in {clock.Elapsed.TotalSeconds:F1} s");
             }
             catch (OperationCanceledException) when (stop.IsCancellationRequested)
@@ -115,8 +116,9 @@ public static class ComputeRoutes
     public sealed record ClaimRequest(string? Name, string? Rid, List<string>? Models);
     public sealed record CompleteRequest(string? ResultHash, double? Seconds);
     public sealed record FailRequest(string? Error);
+    public sealed record FromRequest(string? EntityType, string? EntityId);
 
-    public static void Map(WebApplication app, ComputeStore jobs, ComputeCatalog catalog, ComputeWorkers workers, BlobStore blobs, HubOptions options)
+    public static void Map(WebApplication app, ComputeStore jobs, ComputeCatalog catalog, ComputeWorkers workers, BlobStore blobs, ComputeAttach attach, HubOptions options)
     {
         static string Device(HttpContext ctx) => (string)ctx.Items[HubApp.DeviceItem]!;
         IResult Disabled() => Results.Json(new { error = "compute_disabled" }, statusCode: StatusCodes.Status403Forbidden);
@@ -161,6 +163,27 @@ public static class ComputeRoutes
             return Results.Json(job, statusCode: StatusCodes.Status201Created);
         });
 
+        // Upscale an image already in the app: the hub reads the original itself, and puts the result next to it
+        // when the job is done (ComputeAttach).
+        app.MapPost("/compute/jobs/from", async (FromRequest? req, HttpContext ctx) =>
+        {
+            if (!options.Compute) return Disabled();
+            var model = catalog.Models().FirstOrDefault();
+            if (model is null) return Results.BadRequest(new { error = "no model" });
+            if (req?.EntityType is null || req.EntityId is null || !ComputeAttach.Kinds.ContainsKey(req.EntityType))
+                return Results.BadRequest(new { error = "entity_type: Photo, JournalPhoto, RefImage or CanvasElement; entity_id required" });
+            try
+            {
+                var (hash, name, size) = await attach.InputAsync(req.EntityType, req.EntityId, ctx.RequestAborted);
+                var job = jobs.AddJob(model.Name, hash, name, size, Device(ctx), req.EntityType, req.EntityId);
+                return Results.Json(job, statusCode: StatusCodes.Status201Created);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status422UnprocessableEntity);
+            }
+        });
+
         // A device asks for work, saying what it can run. 204 = nothing for it now.
         app.MapPost("/compute/claim", (ClaimRequest? req, HttpContext ctx) =>
         {
@@ -182,8 +205,10 @@ public static class ComputeRoutes
             var hash = req?.ResultHash?.ToLowerInvariant();
             if (!BlobStore.IsHash(hash) || !blobs.Exists(hash!)) return Results.BadRequest(new { error = "result_hash: send the result to /media first" });
             var size = new FileInfo(blobs.PathOf(hash!)).Length;
-            return jobs.Complete(id, device, hash!, size, OnnxUpscaler.ResultName(job.InputName), Math.Max(0, req!.Seconds ?? 0))
-                ? Results.Ok(jobs.Job(id)) : Results.Conflict(new { error = "not your job (or not running)" });
+            if (!jobs.Complete(id, device, hash!, size, OnnxUpscaler.ResultName(job.InputName), Math.Max(0, req!.Seconds ?? 0)))
+                return Results.Conflict(new { error = "not your job (or not running)" });
+            attach.Attach(jobs, jobs.Job(id)!);
+            return Results.Ok(jobs.Job(id));
         });
 
         app.MapPost("/compute/jobs/{id}/fail", (string id, FailRequest? req, HttpContext ctx) =>
