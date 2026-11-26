@@ -15,6 +15,7 @@ import com.akashicrecords.data.AkashicDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -106,7 +107,10 @@ object SyncService {
         val url = p.getString("hubUrl", "").orEmpty()
         val token = p.getString("token", "").orEmpty()
         if (url.isEmpty() || token.isEmpty()) return null
-        if (!mutex.tryLock()) return null
+        if (!mutex.tryLock()) {
+            again = true // a run is going: one more right after it, for what this request wanted
+            return null
+        }
         var report: SyncReport? = null
         try {
             publish(app, busy = true)
@@ -146,6 +150,8 @@ object SyncService {
         if (report != null && report.setAside > 0) refreshConflicts(app)
         // Download requests made while the hub could not be reached: it can now.
         if (report != null) runCatching { com.akashicrecords.music.HubDownloads.send(app, AkashicDatabase.get(app)) }
+        // Asked for while this run was going: once more now (never in its place, never cancelling it).
+        if (again) { again = false; requestSoon(app, 1) }
         lastFiles?.let { f ->
             // A kept track has arrived: the music library rescans. And a run that stopped at its time budget
             // after moving something goes on right away, so a batch of tracks does not wait for the next period.
@@ -196,15 +202,27 @@ object SyncService {
         )
     }
 
+    @Volatile
+    private var again = false
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Default)
+
+    /** A sync right now, in the app's own scope (not tied to a screen, so leaving the app does not cancel it). */
+    fun runNow(context: Context) {
+        if (!_state.value.paired) return
+        val app = context.applicationContext
+        scope.launch { run(app) }
+    }
+
     /** A sync soon, outside the periodic pace: app brought to the front (no delay) or left (what was just
      * written, a few seconds later so the last auto-save has landed). Collapses repeated requests. */
     fun requestSoon(context: Context, delaySeconds: Long = 0) {
         if (!_state.value.paired) return
+        // A run is going: it is never replaced (that cancelled it half-way: rows in, screens never told) nor
+        // queued behind (a queue that could stay stuck): it runs once more by itself when it ends.
+        if (_state.value.busy) { again = true; return }
         WorkManager.getInstance(context).enqueueUniqueWork(
             "akashic-sync-now",
-            // Queued after a run in progress, never in its place: replacing it cancelled the sync half-way (rows in,
-            // screens never told, files left for later) each time the app was left and opened again quickly.
-            ExistingWorkPolicy.APPEND_OR_REPLACE,
+            ExistingWorkPolicy.REPLACE,
             OneTimeWorkRequestBuilder<SyncWorker>().setConstraints(online).setInitialDelay(delaySeconds, TimeUnit.SECONDS).build(),
         )
     }
