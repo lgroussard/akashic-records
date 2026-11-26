@@ -277,9 +277,11 @@ fun TicketViewer(db: AkashicDatabase, tickets: List<Ticket>, start: Int, onClose
             }
             SwipePages(
                 count = list.size, page = page, onPageChange = { page = it }, modifier = Modifier.fillMaxWidth().weight(1f),
-                key = { list[it].Id }, userScrollEnabled = !zoomedIn,
+                // getOrNull: right after a delete the pager may still ask for the page that just went (crashed).
+                key = { list.getOrNull(it)?.Id ?: "gone$it" }, userScrollEnabled = !zoomedIn,
             ) { i ->
-                TicketPages(list[i]) { z -> if (i == page) zoomedIn = z }
+                val t = list.getOrNull(i) ?: return@SwipePages
+                TicketPages(t) { z -> if (i == page) zoomedIn = z }
             }
         }
         if (confirm) ConfirmDelete("le billet « ${current.Title} »", onConfirm = {
