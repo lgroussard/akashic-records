@@ -143,6 +143,8 @@ object SyncService {
         }
         if (report != null && report.received + (lastFiles?.downloaded ?: 0) > 0) _dataVersion.value++
         if (report != null && report.setAside > 0) refreshConflicts(app)
+        // Download requests made while the hub could not be reached: it can now.
+        if (report != null) runCatching { com.akashicrecords.music.HubDownloads.send(app, AkashicDatabase.get(app)) }
         lastFiles?.let { f ->
             // A kept track has arrived: the music library rescans. And a run that stopped at its time budget
             // after moving something goes on right away, so a batch of tracks does not wait for the next period.

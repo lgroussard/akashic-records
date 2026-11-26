@@ -516,6 +516,12 @@ internal object RemoteImages {
 // manual add (link or "title artist"), run, yt-dlp update.
 @Composable
 internal fun DownloadsPanel(db: AkashicDatabase, musicFolder: String, onLibraryChanged: () -> Unit) {
+    // Paired: the board the hub keeps for every device (the hub downloads). Otherwise this phone downloads itself.
+    val sync by com.akashicrecords.sync.SyncService.state.collectAsState()
+    if (sync.paired) {
+        HubDownloadsPanel(onLibraryChanged)
+        return
+    }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by Downloader.state.collectAsState()

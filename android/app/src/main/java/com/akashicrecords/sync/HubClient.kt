@@ -37,6 +37,27 @@ class HubClient(hubUrl: String, private val token: String? = null) {
 
     fun pull(since: Long, limit: Int): JSONObject = call("GET", "/sync/pull?since=$since&limit=$limit", null)
 
+    // ---- The download board shared by every device; the hub itself downloads (see the hub's Downloads.cs).
+
+    fun downloads(): JSONObject = call("GET", "/downloads", null)
+
+    fun addDownload(query: String, label: String, zoneId: String?): JSONObject =
+        call("POST", "/downloads/jobs", JSONObject().put("query", query).put("label", label).put("zone_id", zoneId ?: JSONObject.NULL))
+
+    fun moveDownload(id: String, zoneId: String?): JSONObject =
+        call("POST", "/downloads/jobs/$id/zone", JSONObject().put("zone_id", zoneId ?: JSONObject.NULL))
+
+    fun retryDownload(id: String): JSONObject = call("POST", "/downloads/jobs/$id/retry", JSONObject())
+    fun removeDownload(id: String): JSONObject = call("DELETE", "/downloads/jobs/$id", null)
+    fun clearDoneDownloads(): JSONObject = call("POST", "/downloads/clear-done", JSONObject())
+
+    /** The zone for [folder] (an existing music folder, or a new one): the hub reuses the zone it may already have. */
+    fun addZone(name: String?, folder: String?): JSONObject =
+        call("POST", "/downloads/zones", JSONObject().put("name", name ?: JSONObject.NULL).put("folder", folder ?: JSONObject.NULL))
+
+    fun renameZone(id: String, name: String): JSONObject = call("POST", "/downloads/zones/$id", JSONObject().put("name", name))
+    fun removeZone(id: String): JSONObject = call("DELETE", "/downloads/zones/$id", null)
+
     // ---- Files (blobs addressed by the SHA-256 of their content). They can be large and slow to move, so these
     // calls stream and have a much longer time limit.
 
