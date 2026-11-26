@@ -37,6 +37,8 @@ import com.akashicrecords.media.LocalImage
 import com.akashicrecords.media.MediaFiles
 import com.akashicrecords.media.cachedImage
 import com.akashicrecords.music.rememberOnline
+import com.akashicrecords.sync.HubCompute
+import com.akashicrecords.sync.SyncService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -216,6 +218,10 @@ private fun Viewer(
     // Local copy, so ★ and deletions show at once.
     var list by remember { mutableStateOf(photos) }
     var confirm by remember { mutableStateOf(false) }
+    val paired = remember { SyncService.credentials(context) != null }
+    var upscaling by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf<String?>(null) } // the answer to « ×4 », under the photo
+    LaunchedEffect(page) { note = null }
     if (list.isEmpty()) { onClose(); return }
     val current = list[page.coerceIn(0, list.lastIndex)]
 
@@ -234,6 +240,13 @@ private fun Viewer(
                 kept = if (keep) kept + k else kept - k
                 scope.launch { withContext(Dispatchers.IO) { HubPhotos.setKept(context, db, current, keep, hash) }; onChanged() }
             }) { Text(if (isKept) "✓ Gardée" else "⤓ Garder", fontSize = 13.sp, color = if (isKept) Palette.Accent else Palette.Text) }
+            // Upscale ×4 on the PC or the hub: the result is added to the same album, here at the next sync.
+            if (paired) TextButton(enabled = !upscaling, onClick = {
+                val id = current.Id
+                upscaling = true
+                note = "Envoi pour agrandissement…"
+                scope.launch { note = HubCompute.upscaleNote(context, "Photo", id.toLong()); upscaling = false }
+            }) { Text("×4", fontSize = 13.sp) }
             TextButton(onClick = {
                 val updated = current.copy(IsFavorite = !current.IsFavorite)
                 list = list.map { if (it.Id == updated.Id) updated else it }
@@ -246,6 +259,7 @@ private fun Viewer(
             Thumb(p, state.hashes[HubPhotos.key(p)], remember(p.Id, kept) { HubPhotos.isHere(context, p) }, Modifier.fillMaxSize(), full = true)
         }
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            note?.let { Text(it, fontSize = 12.sp, color = Palette.Accent, modifier = Modifier.padding(bottom = 4.dp)) }
             if (current.Title.isNotBlank()) Text(current.Title, fontSize = 16.sp)
             val date = current.TakenDate?.let(::datePart)
             if (date != null) Text(frenchDate(date), fontSize = 12.sp, color = Palette.TextMuted)

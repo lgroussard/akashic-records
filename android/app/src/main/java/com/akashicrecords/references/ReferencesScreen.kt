@@ -44,6 +44,8 @@ import com.akashicrecords.journaux.REF_IMAGES_SHARED
 import com.akashicrecords.journaux.nowIso
 import com.akashicrecords.media.LocalImage
 import com.akashicrecords.music.RemoteImages
+import com.akashicrecords.sync.HubCompute
+import com.akashicrecords.sync.SyncService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -320,6 +322,10 @@ private fun ImageViewer(
 ) {
     val context = LocalContext.current
     var confirm by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val paired = remember { SyncService.credentials(context) != null }
+    var upscaling by remember { mutableStateOf(false) }
+    var note by remember(img.Id) { mutableStateOf<String?>(null) } // the answer to « Agrandir ×4 »
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(Modifier.fillMaxSize().background(Color(0xF00E0E12)).padding(12.dp)) {
             Box(Modifier.weight(1f).fillMaxWidth().clickable(onClick = onClose), contentAlignment = Alignment.Center) {
@@ -334,10 +340,18 @@ private fun ImageViewer(
                 BoardMenu(boards, img.BoardId, onPick = onMove, onNewBoard = onNewBoard)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     (img.PageUrl ?: img.SourceUrl)?.let { url -> TextButton(onClick = { open(context, url) }) { Text("Source ↗") } }
+                    // Upscale ×4 on the PC or the hub: the result joins the same board, here at the next sync.
+                    if (paired) TextButton(enabled = !upscaling, onClick = {
+                        val id = img.Id
+                        upscaling = true
+                        note = "Envoi pour agrandissement…"
+                        scope.launch { note = HubCompute.upscaleNote(context, "RefImage", id.toLong()); upscaling = false }
+                    }) { Text("Agrandir ×4") }
                     TextButton(onClick = { confirm = true }) { Text("Supprimer", color = Palette.TextMuted) }
                     Spacer(Modifier.weight(1f))
                     TextButton(onClick = onClose) { Text("Fermer") }
                 }
+                note?.let { Text(it, fontSize = 12.sp, color = Palette.Accent) }
             }
         }
     }

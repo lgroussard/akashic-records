@@ -29,6 +29,8 @@ import androidx.compose.ui.window.DialogProperties
 import com.akashicrecords.Palette
 import com.akashicrecords.media.LocalImage
 import com.akashicrecords.media.MediaFiles
+import com.akashicrecords.sync.HubCompute
+import com.akashicrecords.sync.SyncService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -37,11 +39,18 @@ import kotlinx.coroutines.withContext
 // copy of the shown one in the phone's gallery (Pictures/Akashic). The controls are in the bar above the photo,
 // never over it.
 @Composable
-internal fun PhotoViewer(paths: List<String>, start: Int, onDismiss: () -> Unit) {
+internal fun PhotoViewer(
+    paths: List<String>, start: Int, onDismiss: () -> Unit,
+    // The rows the pictures come from (same order as [paths]): with them, and once paired, « ×4 » asks the hub
+    // to upscale the shown one (HubCompute.requestFrom); the result arrives next to it at a sync.
+    table: String? = null, ids: List<Int>? = null,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val pager = rememberPagerState(initialPage = start.coerceIn(0, (paths.size - 1).coerceAtLeast(0))) { paths.size }
     var message by remember { mutableStateOf<String?>(null) }
+    val paired = remember { SyncService.credentials(context) != null }
+    var sending by remember { mutableStateOf(false) }
 
     // Before Android 10 the gallery cannot be written to without a storage permission: the user picks the place.
     val saveAs = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/*")) { uri ->
@@ -67,6 +76,15 @@ internal fun PhotoViewer(paths: List<String>, start: Int, onDismiss: () -> Unit)
                     textAlign = TextAlign.Center,
                     modifier = Modifier.weight(1f),
                 )
+                val id = ids?.getOrNull(pager.currentPage)
+                if (paired && table != null && id != null) TextButton(enabled = !sending, onClick = {
+                    sending = true
+                    message = "Envoi…"
+                    scope.launch {
+                        message = HubCompute.upscaleNote(context, table, id.toLong())
+                        sending = false
+                    }
+                }) { Text("Agrandir ×4") }
                 TextButton(onClick = {
                     val path = paths[pager.currentPage]
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

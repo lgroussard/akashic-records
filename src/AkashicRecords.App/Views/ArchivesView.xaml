@@ -199,6 +199,12 @@
                                 Padding="10,6" HorizontalAlignment="Left" Cursor="Hand" Margin="0,0,0,12"
                                 ToolTip="Ce que cette photo représente — et la lier à un projet artistique"/>
 
+                        <Button x:Name="ViewerUpscaleButton" Content="Agrandir ×4" Click="ViewerUpscaleButton_OnClick"
+                                Padding="10,6" HorizontalAlignment="Left" Cursor="Hand" Margin="0,0,0,4"
+                                ToolTip="Demande au serveur une version 4 fois plus grande, ajoutée à côté de l'originale"/>
+                        <TextBlock x:Name="ViewerUpscaleStatus" FontSize="11" Foreground="#AAAAAA" TextWrapping="Wrap"
+                                   Margin="0,0,0,12" Visibility="Collapsed"/>
+
                         <Button Content="Supprimer la photo" Click="DeletePhotoButton_OnClick"
                                 Foreground="White" Background="#7A2A2A" BorderThickness="0"
                                 Padding="10,6" HorizontalAlignment="Left" Cursor="Hand"/>

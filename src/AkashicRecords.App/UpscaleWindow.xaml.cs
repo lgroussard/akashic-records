@@ -173,7 +173,7 @@ public partial class UpscaleWindow : Window
         {
             "queued" => ("En attente", Muted),
             "running" => ($"En cours sur {Who(j.WorkerName)}…", Accent),
-            "done" => ($"Fait par {Who(j.WorkerName)} en {Seconds(j.Seconds)} · {Mb(j.ResultSize)}", Good),
+            "done" => ($"Fait par {Who(j.WorkerName)} en {Seconds(j.Seconds)} · {Mb(j.ResultSize)}" + Placed(j), j.AttachError is null ? Good : Warn),
             "failed" => ($"Échec : {j.Error}", Warn),
             _ => (j.Status, Muted),
         };
@@ -213,6 +213,10 @@ public partial class UpscaleWindow : Window
 
     /// <summary>The hub works under the name "hub": shown as the server.</summary>
     private static string Who(string? name) => name is null or "hub" ? "le serveur" : name;
+
+    /// <summary>For a picture of the app: whether the result was put next to its original.</summary>
+    private static string Placed(HubComputeJob j) =>
+        j.AttachType is null ? "" : j.AttachError is not null ? $" · pas rangée : {j.AttachError}" : j.AttachedPath is not null ? " · rangée à côté de l'original" : "";
 
     private static string Seconds(double? s) => s is null ? "?" : s < 60 ? $"{s:0.#} s" : $"{(int)(s / 60)} min {(int)(s % 60):00} s";
     private static string Mb(long? bytes) => bytes is null ? "" : $"{bytes / 1024d / 1024d:0.#} Mo";

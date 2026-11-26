@@ -147,6 +147,12 @@ private fun CanvasPage(db: AkashicDatabase, project: ArtisticProject, onBack: ()
     var observations by remember { mutableStateOf<Map<Int, Observation>>(emptyMap()) }
     // Observation id -> the title of the item it is about (an artwork, a poem, a journal day…).
     var ownerTitles by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
+    // The canvas pictures, for the large view opened by a tap on one (its bar has « Agrandir ×4 » when paired).
+    val images = elements.filter { it.Type == 1 && !it.ImagePath.isNullOrBlank() }
+    var viewing by remember { mutableStateOf<Int?>(null) } // index in [images]
+    viewing?.let { i ->
+        PhotoViewer(images.map { it.ImagePath!! }, i, onDismiss = { viewing = null }, table = "CanvasElement", ids = images.map { it.Id })
+    }
     LaunchedEffect(project.Id) {
         withContext(Dispatchers.IO) {
             elements = db.canvasElementDao().forProject(project.Id)
@@ -236,7 +242,14 @@ private fun CanvasPage(db: AkashicDatabase, project: ArtisticProject, onBack: ()
                             .background(Palette.Surface1).border(1.dp, Palette.BorderStrong, RoundedCornerShape(8.dp)),
                     ) {
                         when (e.Type) {
-                            1 -> LocalImage(e.ImagePath, Modifier.fillMaxSize(), maxSide = 800, crop = false)
+                            1 -> {
+                                val index = images.indexOfFirst { it.Id == e.Id }
+                                LocalImage(
+                                    e.ImagePath,
+                                    if (index >= 0) Modifier.fillMaxSize().clickable { viewing = index } else Modifier.fillMaxSize(),
+                                    maxSide = 800, crop = false,
+                                )
+                            }
                             2 -> {
                                 val o = e.ObservationId?.let { observations[it] }
                                 Column(Modifier.padding(8.dp)) {

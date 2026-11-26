@@ -25,7 +25,8 @@ public sealed record HubComputeModel(string Name, string Label, string Descripti
 public sealed record HubComputeWorker(string Device, string Name, string Rid, int Models, bool Busy, int SeenSecondsAgo);
 public sealed record HubComputeJob(string Id, string Model, string InputHash, string InputName, long InputSize, string Status,
     string AddedAt, string AddedBy, string? Worker, string? WorkerName, string? StartedAt, string? FinishedAt,
-    double? Seconds, string? ResultHash, long? ResultSize, string? ResultName, string? Error);
+    double? Seconds, string? ResultHash, long? ResultSize, string? ResultName, string? Error,
+    string? AttachType = null, string? AttachId = null, string? AttachedPath = null, string? AttachError = null);
 public sealed record HubComputeBoard(bool Enabled, List<HubComputeModel> Models, List<HubComputeWorker> Workers, List<HubComputeJob> Jobs);
 public sealed record HubComputeFile(string Path, string Hash, long Size);
 public sealed record HubComputeModelFiles(string Name, string Label, bool Hub, List<HubComputeFile> Files);
@@ -127,6 +128,24 @@ public sealed class HubClient : IDisposable
     {
         var resp = await Send(() => _http.PostAsJsonAsync("compute/claim", new { name, rid, models }, Wire, ct));
         if (resp.StatusCode == HttpStatusCode.NoContent) { resp.Dispose(); return null; }
+        return await Read<HubComputeJob>(resp, ct);
+    }
+
+    /// <summary>Asks for an image already in the app to be upscaled (entity type and its sync id); the hub reads the
+    /// original itself and puts the result next to it. A refusal comes back as a HubException with the hub's message.</summary>
+    public async Task<HubComputeJob> AddComputeJobFromAsync(string entityType, string entityId, CancellationToken ct = default)
+    {
+        var resp = await Send(() => _http.PostAsJsonAsync("compute/jobs/from", new { entity_type = entityType, entity_id = entityId }, Wire, ct));
+        if (resp.StatusCode == HttpStatusCode.UnprocessableEntity)
+        {
+            using (resp)
+            {
+                var body = await resp.Content.ReadAsStringAsync(ct);
+                string? message = null;
+                try { message = JsonDocument.Parse(body).RootElement.GetProperty("error").GetString(); } catch (Exception) { }
+                throw new HubException(message ?? body, resp.StatusCode);
+            }
+        }
         return await Read<HubComputeJob>(resp, ct);
     }
 

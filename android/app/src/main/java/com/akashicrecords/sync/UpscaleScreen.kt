@@ -190,7 +190,7 @@ private fun JobCard(job: HubCompute.Job, label: String, onOpen: () -> Unit, onRe
     val (status, color) = when {
         job.waiting -> "En attente" to Palette.TextMuted
         job.running -> "En cours sur ${HubCompute.who(job.workerName)}…" to Palette.Accent
-        job.done -> "Fait par ${HubCompute.who(job.workerName)} en ${seconds(job.seconds)} · ${mb(job.resultSize)}" to Good
+        job.done -> ("Fait par ${HubCompute.who(job.workerName)} en ${seconds(job.seconds)} · ${mb(job.resultSize)}" + placed(job)) to (if (job.attachError == null) Good else Warn)
         else -> "Échec : ${job.error ?: "inconnu"}" to Warn
     }
     Row(
@@ -212,6 +212,14 @@ private fun JobCard(job: HubCompute.Job, label: String, onOpen: () -> Unit, onRe
             }
         }
     }
+}
+
+/** For a picture of the app: whether the result was put next to its original. */
+private fun placed(job: HubCompute.Job) = when {
+    job.attachType == null -> ""
+    job.attachError != null -> " · pas rangée : ${job.attachError}"
+    job.attachedPath != null -> " · rangée à côté de l'original"
+    else -> ""
 }
 
 private fun seconds(s: Double?) = when {

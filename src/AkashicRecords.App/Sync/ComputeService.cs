@@ -193,6 +193,9 @@ public sealed class ComputeService
             var hash = await HashAsync(output);
             await hub.UploadFileAsync(output, hash);
             await hub.CompleteComputeAsync(job.Id, hash, clock.Elapsed.TotalSeconds);
+            // A picture of the app: the hub has just put the result next to it; fetch it now rather than at the next pass.
+            if (job.AttachType is not null)
+                _ = System.Windows.Application.Current?.Dispatcher.InvokeAsync(() => SyncService.Instance.RunAsync());
             // Keep it: opening it here then needs no download.
             Directory.CreateDirectory(ResultsDir);
             File.Copy(output, ResultPath(hash), overwrite: true);
@@ -266,6 +269,46 @@ public sealed class ComputeService
         using var hub = new HubClient(s.HubUrl, s.Token);
         if (!await hub.DownloadFileAsync(hash, target)) throw new HubException("Ce fichier n'est plus sur le serveur.");
         return target;
+    }
+
+    /// <summary>The kinds of rows whose picture can be upscaled in place (same names as the tables and the hub's).</summary>
+    public static readonly string[] InPlaceKinds = ["Photo", "JournalPhoto", "RefImage", "CanvasElement"];
+
+    /// <summary>
+    /// Upscales a picture already in the app (a row of Photo, JournalPhoto, RefImage or CanvasElement): the hub reads
+    /// the original itself and, once done, adds the result next to it (same album, entry, board or canvas); it
+    /// reaches this computer at a sync. A row not yet on the hub is synchronised first. Throws HubException with a
+    /// message fit for the user.
+    /// </summary>
+    public async Task<HubComputeJob> RequestFromAsync(string table, long localId)
+    {
+        if (!InPlaceKinds.Contains(table)) throw new HubException("Ce type d'image ne peut pas être agrandi.");
+        var s = SyncService.Instance.Settings;
+        if (!s.IsPaired) throw new HubException("Cet ordinateur n'est pas appairé au serveur (Réglages → Synchronisation).");
+        var syncId = SyncIdOf(table, localId);
+        if (syncId is null)
+        {
+            // Just added here: it goes to the hub first, with its file.
+            await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => SyncService.Instance.RunAsync()).Task.Unwrap();
+            syncId = SyncIdOf(table, localId) ?? throw new HubException("Cette image n'a pas encore pu être envoyée au serveur : réessaie dans un moment.");
+        }
+        using var hub = new HubClient(s.HubUrl, s.Token);
+        return await hub.AddComputeJobFromAsync(table, syncId);
+    }
+
+    /// <summary>The id a row has on the hub (sync_map), or null when it has not been synchronised yet.</summary>
+    private static string? SyncIdOf(string table, long localId)
+    {
+        var db = Path.Combine(AppContext.BaseDirectory, "data", "akashic.db");
+        if (!File.Exists(db)) return null;
+        using var c = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = db }.ToString());
+        c.Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT sync_id FROM sync_map WHERE entity_type = $t AND local_id = $id AND deleted = 0 LIMIT 1";
+        cmd.Parameters.AddWithValue("$t", table);
+        cmd.Parameters.AddWithValue("$id", localId);
+        try { return cmd.ExecuteScalar() as string; }
+        catch (Microsoft.Data.Sqlite.SqliteException) { return null; } // never synchronised: no sync_map yet
     }
 
     /// <summary>Sends an image to the hub and asks for it to be upscaled.</summary>
