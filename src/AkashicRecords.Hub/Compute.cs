@@ -54,6 +54,8 @@ public sealed class HubComputeWorker(HubOptions options, ComputeStore jobs, Comp
     protected override async Task ExecuteAsync(CancellationToken stop)
     {
         var hubModels = options.HubModels.ToHashSet(StringComparer.Ordinal);
+        // The tool's results from before the "Agrandies" album: placed in it once.
+        try { attach.PlacePastResults(jobs); } catch (Exception ex) { log.Info($"placing past upscale results failed: {ex.Message}"); }
         while (!stop.IsCancellationRequested)
         {
             ComputeJob? job = null;

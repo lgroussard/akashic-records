@@ -6,7 +6,8 @@ using SkiaSharp;
 namespace AkashicRecords.Hub;
 
 /// <summary>
-/// Upscaling an image that is already in the app (an Archives photo, a journal photo, an Art picture), and putting
+/// Putting upscaled images in the app. An image upscaled from outside the app (dropped in the tool) goes into the
+/// Archives album "Agrandies". An image that is already in the app (an Archives photo, a journal photo, an Art picture) gets
 /// the result next to it: same album, same journal entry, same board or canvas, as a new picture beside the
 /// original (which is never touched). Done by the hub, once for every device: the original is read from the
 /// hub's own copy (no upload), and the result goes into the catalogue like any synchronised row, so every device
@@ -57,18 +58,92 @@ public sealed class ComputeAttach(HubStore store, BlobStore blobs, HubOptions op
     }
 
     /// <summary>Puts a finished job's result next to its original. Never throws: what happened is recorded on the job.</summary>
+    /// <summary>The Archives album where the images upscaled from outside the app (dropped in the tool) go.</summary>
+    public const string AlbumName = "Agrandies";
+
+    private readonly object _albumLock = new();
+
+    /// <summary>Puts a finished job's result in the app: next to its original when it came from the app, else in the
+    /// "Agrandies" album. Never throws: what happened is recorded on the job.</summary>
     public void Attach(ComputeStore jobs, ComputeJob job)
     {
-        if (job.AttachType is null || job.AttachId is null || job.ResultHash is null) return;
+        if (job.ResultHash is null) return;
         try
         {
-            jobs.Attached(job.Id, Add(job.AttachType, job.AttachId, job.ResultHash), null);
+            var path = job.AttachType is not null && job.AttachId is not null
+                ? Add(job.AttachType, job.AttachId, job.ResultHash)
+                : AddToAlbum(job);
+            jobs.Attached(job.Id, path, null);
         }
         catch (Exception ex)
         {
             jobs.Attached(job.Id, null, ex.Message);
-            log.Info($"upscale result not put next to {job.AttachType} {job.AttachId}: {ex.Message}");
+            log.Info($"upscale result of {job.InputName} not put in the app: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Once, at start: the results of the tool made before the album existed go into it too. One per image (the
+    /// newest result when the same image was upscaled several times); the other ones are only marked as handled.
+    /// </summary>
+    public void PlacePastResults(ComputeStore jobs)
+    {
+        var waiting = jobs.Jobs(1000).Where(j => j.Status == "done" && j.ResultHash is not null && j.AttachType is null
+                                                  && j.AttachedPath is null && j.AttachError is null).ToList();
+        foreach (var group in waiting.GroupBy(j => j.InputHash))
+        {
+            var ordered = group.OrderByDescending(j => j.FinishedAt, StringComparer.Ordinal).ToList();
+            Attach(jobs, ordered[0]);
+            foreach (var older in ordered.Skip(1)) jobs.Attached(older.Id, "(même image, version plus récente rangée)", null);
+        }
+        if (waiting.Count > 0) log.Info($"upscale results placed in the album {AlbumName}: {waiting.GroupBy(j => j.InputHash).Count()}");
+    }
+
+    private string AddToAlbum(ComputeJob job)
+    {
+        var (hash, size) = Jpeg(job.ResultHash!);
+        var now = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fffffff");
+        lock (_albumLock)
+        {
+            var album = store.FindLive("PhotoAlbum", "Name", AlbumName);
+            var mutations = new List<Mutation>();
+            if (album is null)
+            {
+                album = Guid.NewGuid().ToString();
+                mutations.Add(new Mutation(Guid.NewGuid().ToString(), "PhotoAlbum", album, 0,
+                    JsonSerializer.SerializeToElement(new Dictionary<string, object?> { ["Name"] = AlbumName, ["CreatedAt"] = now }), false));
+            }
+            // Where the Archives keep their photos, under a name of its own.
+            var path = $"media\\archive\\{Guid.NewGuid():N}.jpg";
+            mutations.Add(new Mutation(Guid.NewGuid().ToString(), "MediaFile", Guid.NewGuid().ToString(), 0,
+                JsonSerializer.SerializeToElement(new Dictionary<string, object?> { ["Path"] = path.Replace('\\', '/'), ["Hash"] = hash, ["Size"] = size }), false));
+            mutations.Add(new Mutation(Guid.NewGuid().ToString(), "Photo", Guid.NewGuid().ToString(), 0,
+                JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+                {
+                    ["ImagePath"] = path,
+                    ["Title"] = Path.GetFileNameWithoutExtension(job.InputName),
+                    ["Description"] = "",
+                    ["TakenDate"] = null,
+                    ["Tags"] = "",
+                    ["IsFavorite"] = 0,
+                    ["AlbumId"] = album,
+                    ["ImportedAt"] = now,
+                }), false));
+            var result = store.Push(HubStore.HubDevice, mutations);
+            if (result.Results.Any(r => r.Status == MutationStatus.Conflict)) throw new InvalidOperationException("Le catalogue a refusé l'image.");
+            return path;
+        }
+    }
+
+    /// <summary>In the app a picture is a JPEG (a tenth of the PNG kept in the history, no visible difference).</summary>
+    private (string Hash, long Size) Jpeg(string resultHash)
+    {
+        using var bitmap = SKBitmap.Decode(blobs.PathOf(resultHash)) ?? throw new InvalidOperationException("Résultat illisible.");
+        using var image = SKImage.FromBitmap(bitmap);
+        using var jpeg = image.Encode(SKEncodedImageFormat.Jpeg, 92);
+        using var s = jpeg.AsStream();
+        var saved = blobs.SaveAsync(s, null, long.MaxValue, CancellationToken.None).GetAwaiter().GetResult();
+        return (saved.Hash, saved.Size);
     }
 
     private string Add(string kind, string entityId, string resultHash)
@@ -77,17 +152,7 @@ public sealed class ComputeAttach(HubStore store, BlobStore blobs, HubOptions op
         var original = store.Current(kind, entityId) ?? throw new InvalidOperationException("L'original a été supprimé entre-temps.");
         var path = original.GetProperty(field).GetString()!;
 
-        // In the app the picture is a JPEG (a tenth of the PNG kept in the history, no visible difference).
-        string hash;
-        long size;
-        using (var bitmap = SKBitmap.Decode(blobs.PathOf(resultHash)) ?? throw new InvalidOperationException("Résultat illisible."))
-        using (var image = SKImage.FromBitmap(bitmap))
-        using (var jpeg = image.Encode(SKEncodedImageFormat.Jpeg, 92))
-        using (var s = jpeg.AsStream())
-        {
-            var saved = blobs.SaveAsync(s, null, long.MaxValue, CancellationToken.None).GetAwaiter().GetResult();
-            (hash, size) = (saved.Hash, saved.Size);
-        }
+        var (hash, size) = Jpeg(resultHash);
 
         // Same folder and same slash style as the original, its name with "-x4".
         var sep = path.Contains('\\') ? '\\' : '/';
