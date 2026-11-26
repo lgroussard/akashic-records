@@ -33,6 +33,7 @@ data class PlayerUi(
     val suggestionArtist: String? = null,
     val fromSimilarTab: Boolean = false, // started by a tap in Similaires (not chained)
     val isPlaying: Boolean = false,
+    val streamed: Boolean = false, // the playing track is read from the server (☁)
     val queue: List<Pair<Int, String>> = emptyList(), // trackId -> label
     val order: List<Int> = emptyList(), // queue indices in the order they play (shuffled in shuffle)
     val currentIndex: Int = -1,
@@ -77,9 +78,10 @@ class PlayerConnection(context: Context) {
             suggestionArtist = if (PlayerItems.isSuggestion(c.currentMediaItem)) md.extras?.getString(PlayerItems.EXTRA_ARTIST) ?: "" else null,
             fromSimilarTab = c.currentMediaItem?.mediaId?.startsWith(PREVIEW_PREFIX) == true,
             isPlaying = c.isPlaying,
+            streamed = PlayerItems.isStreamed(c.currentMediaItem),
             queue = (0 until c.mediaItemCount).map { i ->
                 val item = c.getMediaItemAt(i)
-                (item.mediaId.toIntOrNull() ?: -1) to (item.mediaMetadata.title?.toString() ?: "")
+                (item.mediaId.toIntOrNull() ?: -1) to ((if (PlayerItems.isStreamed(item)) "☁ " else "") + (item.mediaMetadata.title?.toString() ?: ""))
             },
             order = c.currentTimeline.playOrder(c.shuffleModeEnabled),
             currentIndex = if (c.mediaItemCount == 0) -1 else c.currentMediaItemIndex,

@@ -180,7 +180,7 @@ private val NAV = listOf(
 private val MORE = listOf("Organisation", "Collections", "Archives", "Jeux")
 private val SECTIONS = NAV.map { it.section } + MORE
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaunchHandled: () -> Unit) {
     val context = LocalContext.current
@@ -327,8 +327,17 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
             }
         },
     ) { padding ->
+        // Something arrived from another device: these sections are drawn again from the database (the journal
+        // and the music reload themselves; reading and games keep their place). Not while the keyboard is open:
+        // what is being typed is never thrown away, the reload waits until it closes.
+        val synced by com.akashicrecords.sync.SyncService.dataVersion.collectAsState()
+        // The keyboard's real height on screen (isImeVisible stays true on some phones once it has been opened).
+        val typing = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
+        var shownSync by remember { mutableStateOf(synced) }
+        LaunchedEffect(synced, typing) { if (!typing) shownSync = synced }
+        val syncKey = if (section in setOf("Organisation", "Calendrier", "Collections", "Archives")) shownSync else 0
         Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
-            key(dataVersion) {
+            key(dataVersion, syncKey) {
                 Column(Modifier.fillMaxSize().padding(top = 4.dp)) {
                     when (section) {
                         "Organisation" -> OrganisationSection(db, config)
