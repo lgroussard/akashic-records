@@ -58,6 +58,18 @@ class HubClient(hubUrl: String, private val token: String? = null) {
     fun renameZone(id: String, name: String): JSONObject = call("POST", "/downloads/zones/$id", JSONObject().put("name", name))
     fun removeZone(id: String): JSONObject = call("DELETE", "/downloads/zones/$id", null)
 
+    // ---- Shared computing (the hub's Compute.cs). The phone only asks and looks: it never takes jobs, the PC or
+    // the hub run them.
+
+    fun compute(): JSONObject = call("GET", "/compute", null)
+
+    /** Asks for an image already sent with [uploadStream] to be upscaled with [model]. */
+    fun addComputeJob(model: String, inputHash: String, inputName: String): JSONObject =
+        call("POST", "/compute/jobs", JSONObject().put("model", model).put("input_hash", inputHash).put("input_name", inputName))
+
+    fun retryCompute(id: String): JSONObject = call("POST", "/compute/jobs/$id/retry", JSONObject())
+    fun removeCompute(id: String): JSONObject = call("DELETE", "/compute/jobs/$id", null)
+
     // ---- Files (blobs addressed by the SHA-256 of their content). They can be large and slow to move, so these
     // calls stream and have a much longer time limit.
 

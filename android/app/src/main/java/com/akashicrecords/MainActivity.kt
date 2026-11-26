@@ -224,6 +224,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
     val player = rememberPlayerConnection()
     var showSettings by remember { mutableStateOf(false) }
     var showMore by remember { mutableStateOf(false) }
+    var showUpscale by remember { mutableStateOf(false) }
     // The full player (from the mini-player, or a link to the old Queue / Similar tabs); null = closed.
     var fullPlayer by remember { mutableStateOf<Boolean?>(null) }
     var miniCollapsed by remember { mutableStateOf(config.miniPlayerCollapsed()) }
@@ -401,10 +402,15 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
             Column(Modifier.padding(bottom = 24.dp)) {
                 moreItems.forEach { s -> MoreRow(SECTION_LABELS[s] ?: s, MORE_SUBTITLES[s] ?: "") { showMore = false; go(s) } }
                 HorizontalDivider(color = Palette.BorderStrong, modifier = Modifier.padding(vertical = 6.dp))
+                // Upscaling is done by the PC or the server: only offered when this phone is paired with the hub.
+                if (com.akashicrecords.sync.SyncService.credentials(context) != null)
+                    MoreRow("Agrandir des images", "Le PC ou le serveur affine tes photos") { showMore = false; showUpscale = true }
                 MoreRow("Réglages", "Modules, widgets, import des données du PC") { showMore = false; showSettings = true }
             }
         }
     }
+
+    if (showUpscale) com.akashicrecords.sync.UpscaleScreen(onClose = { showUpscale = false })
 
     if (showSettings) {
         SettingsDialog(
