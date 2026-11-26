@@ -9,10 +9,10 @@ namespace AkashicRecords.App.Sync;
 
 /// <summary>
 /// This computer's part in the hub's shared computing (the hub's Compute.cs): while Akashic runs and is paired,
-/// it asks the hub for upscale jobs, saying which models it can run. The program and the models come from the hub
-/// the first time a job needs them and are kept in &lt;app&gt;\compute (nothing to install by hand). The work runs on
-/// this computer's graphics card, the result goes back to the hub, where every device can fetch it. The hub only
-/// does a job itself when no device able to do it is around.
+/// it asks the hub for upscale jobs, saying which models it can run. The model (one .onnx, NomosWebPhoto) comes from
+/// the hub the first time a job needs it and is kept in &lt;app&gt;\compute; the engine (OnnxUpscaler) is part of the
+/// app. The work runs on this computer's graphics card, the result goes back to the hub, where every device can
+/// fetch it. The hub only does a job itself (slowly, on its processor) when no device able to do it is around.
 /// </summary>
 public sealed class ComputeService
 {
@@ -45,7 +45,6 @@ public sealed class ComputeService
 
     public static string Rid => RuntimeInformation.RuntimeIdentifier.StartsWith("win", StringComparison.OrdinalIgnoreCase) ? "win-x64" : RuntimeInformation.RuntimeIdentifier;
 
-    private string ToolDir => Path.Combine(_root, "tools", "realesrgan");
     private string ModelsDir => Path.Combine(_root, "models");
     private string ResultsDir => Path.Combine(_root, "results");
     private string WorkDir => Path.Combine(_root, "work");
@@ -79,6 +78,14 @@ public sealed class ComputeService
     {
         if (_started) return;
         _started = true;
+        // What the older engine left here (its program and .param/.bin models): no longer used.
+        try
+        {
+            if (Directory.Exists(Path.Combine(_root, "tools"))) Directory.Delete(Path.Combine(_root, "tools"), recursive: true);
+            if (Directory.Exists(ModelsDir))
+                foreach (var old in Directory.EnumerateFiles(ModelsDir).Where(f => f.EndsWith(".param") || f.EndsWith(".bin"))) File.Delete(old);
+        }
+        catch (IOException) { }
         _ = Task.Run(LoopAsync);
     }
 
@@ -95,7 +102,7 @@ public sealed class ComputeService
             try
             {
                 var outcome = await OnceAsync(settings);
-                if (outcome == Outcome.NoTool) await Task.Delay(TimeSpan.FromMinutes(1));
+                if (outcome == Outcome.NoModel) await Task.Delay(TimeSpan.FromMinutes(1));
                 else if (outcome == Outcome.Nothing) await Task.Delay(Idle);
             }
             catch (HubException)
@@ -110,7 +117,7 @@ public sealed class ComputeService
         }
     }
 
-    private enum Outcome { Nothing, NoTool, Worked }
+    private enum Outcome { Nothing, NoModel, Worked }
 
     /// <summary>One request for work, and the job if one came.</summary>
     private async Task<Outcome> OnceAsync(SyncSettings settings)
@@ -118,13 +125,13 @@ public sealed class ComputeService
         using var hub = new HubClient(settings.HubUrl, settings.Token);
         if (_manifest is null || DateTime.UtcNow - _manifestAt > ManifestAge)
         {
-            _manifest = await hub.ComputeManifestAsync(Rid);
+            _manifest = await hub.ComputeManifestAsync();
             _manifestAt = DateTime.UtcNow;
         }
-        if (_manifest.ToolFiles.Count == 0)
+        if (_manifest.Models.Count == 0)
         {
-            SetProblem($"Le serveur n'a pas le programme d'agrandissement pour cet ordinateur ({Rid}).");
-            return Outcome.NoTool;
+            SetProblem("Le serveur n'a pas encore de modèle d'agrandissement.");
+            return Outcome.NoModel;
         }
         var models = _manifest.Models.Select(m => m.Name).ToList();
         var job = await hub.ClaimComputeAsync(string.IsNullOrEmpty(settings.DeviceName) ? Environment.MachineName : settings.DeviceName, Rid, models);
@@ -158,23 +165,29 @@ public sealed class ComputeService
         var work = Path.Combine(WorkDir, job.Id);
         try
         {
-            Current = $"{job.InputName} ({job.Model})";
+            Current = job.InputName;
             StateChanged?.Invoke();
 
-            // The program and the model, fetched from the hub when missing or changed.
-            var tool = await EnsureAsync(hub, manifest.ToolFiles, ToolDir);
-            var exe = Path.Combine(ToolDir, OperatingSystem.IsWindows() ? "realesrgan-ncnn-vulkan.exe" : "realesrgan-ncnn-vulkan");
-            if (!File.Exists(exe)) throw new InvalidOperationException("Le programme reçu du serveur est incomplet.");
+            // The model, fetched from the hub when missing or changed. The engine is part of the app.
             var model = manifest.Models.FirstOrDefault(m => m.Name == job.Model) ?? throw new InvalidOperationException($"Modèle {job.Model} inconnu du serveur.");
             await EnsureAsync(hub, model.Files, ModelsDir);
+            var modelPath = Path.Combine(ModelsDir, model.Files[0].Path);
 
             Directory.CreateDirectory(work);
             var input = Path.Combine(work, "input" + Path.GetExtension(job.InputName).ToLowerInvariant());
             if (!await hub.DownloadFileAsync(job.InputHash, input)) throw new InvalidOperationException("L'image n'est plus sur le serveur.");
             var output = Path.Combine(work, "result.png");
 
+            Current = job.InputName;
+            StateChanged?.Invoke();
             var clock = Stopwatch.StartNew();
-            await RunToolAsync(exe, job.Model, input, output);
+            var onGpu = await Task.Run(() =>
+            {
+                // Loaded for the job only: the graphics card's memory is given back between jobs.
+                using var upscaler = AkashicRecords.Hub.OnnxUpscaler.Load(modelPath, preferGpu: true);
+                upscaler.Run(input, output);
+                return upscaler.OnGpu;
+            });
             clock.Stop();
 
             var hash = await HashAsync(output);
@@ -183,7 +196,7 @@ public sealed class ComputeService
             // Keep it: opening it here then needs no download.
             Directory.CreateDirectory(ResultsDir);
             File.Copy(output, ResultPath(hash), overwrite: true);
-            SetProblem(null);
+            SetProblem(onGpu ? null : "Fait sur le processeur : la carte graphique n'a pas pu être utilisée (lent).");
         }
         catch (HubException)
         {
@@ -238,33 +251,6 @@ public sealed class ComputeService
         var hash = Convert.ToHexString(await SHA256.HashDataAsync(s)).ToLowerInvariant();
         lock (_hashes) _hashes[path] = (info.Length, info.LastWriteTimeUtc.Ticks, hash);
         return hash;
-    }
-
-    private async Task RunToolAsync(string exe, string model, string input, string output)
-    {
-        var psi = new ProcessStartInfo(exe)
-        {
-            RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
-            WorkingDirectory = Path.GetDirectoryName(exe)!,
-        };
-        foreach (var a in new[] { "-i", input, "-o", output, "-n", model, "-s", "4", "-m", ModelsDir }) psi.ArgumentList.Add(a);
-        using var p = Process.Start(psi) ?? throw new InvalidOperationException("Le programme d'agrandissement n'a pas démarré.");
-        var stdout = p.StandardOutput.ReadToEndAsync();
-        var stderr = p.StandardError.ReadToEndAsync();
-        using var limit = new CancellationTokenSource(TimeSpan.FromMinutes(30));
-        try { await p.WaitForExitAsync(limit.Token); }
-        catch (OperationCanceledException)
-        {
-            try { p.Kill(entireProcessTree: true); } catch { }
-            throw new TimeoutException("L'agrandissement a pris plus de 30 minutes.");
-        }
-        await stdout;
-        var err = await stderr;
-        if (!File.Exists(output) || new FileInfo(output).Length == 0)
-        {
-            var why = err.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Where(l => !l.EndsWith('%')).LastOrDefault();
-            throw new InvalidOperationException(why ?? $"Le programme d'agrandissement a échoué (code {p.ExitCode}).");
-        }
     }
 
     // ------------------------------------------------------------------ for the window

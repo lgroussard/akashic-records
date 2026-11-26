@@ -194,18 +194,17 @@ de requêtes. Code de sortie 0 si tout passe.
 
 ## Calcul partagé (agrandissement d'images)
 
-Le hub garde le programme d'agrandissement (Real-ESRGAN, version ncnn-vulkan) et ses modèles dans
-`<DataDir>/compute`, et la liste des demandes dans `compute.db`. Les appareils appairés qui savent faire
-tourner un modèle demandent du travail (`POST /compute/claim`), récupèrent le programme et le modèle auprès du
-hub la première fois, font le calcul et renvoient le résultat, qui reste sur le hub. Le hub fait lui-même les
-modèles listés dans `ComputeHubModels` (par défaut `high-fidelity-4x`), mais seulement quand aucun autre
-appareil capable n'est là : un PC avec une carte graphique le fait en quelques secondes, le mini-PC en deux minutes.
+Le hub garde le modèle d'agrandissement (un seul : NomosWebPhoto, fichier `.onnx`) dans
+`<DataDir>/compute/models`, et la liste des demandes dans `compute.db`. Le moteur (ONNX Runtime) est intégré au
+hub et à l'app PC : rien d'autre à installer. Un PC appairé qui fait tourner Akashic demande du travail
+(`POST /compute/claim`), récupère le modèle auprès du hub la première fois, calcule sur sa carte graphique et
+renvoie le résultat, qui reste sur le hub. Le hub calcule lui-même (sur son processeur, beaucoup plus lentement)
+les modèles listés dans `ComputeHubModels` (par défaut `nomos-webphoto-4x`), seulement quand aucun appareil
+capable n'est là. Le téléphone demande et regarde, il ne calcule jamais.
 
-Mise en place (une fois, puis pour ajouter des modèles) :
+Mise en place (une fois, puis si le modèle change) :
 
 1. Sur le PC : `.\build-compute-seed.ps1` (prépare `D:\workspace\akashic-hub\compute-seed`).
-2. Copier ce dossier sur le mini-PC, puis `sudo bash ~/compute-seed/setup-compute.sh ~/compute-seed`
-   (pilote Vulkan, accès du compte `akashic` à la puce graphique, copie des fichiers, redémarrage du hub).
+2. Copier ce dossier sur le mini-PC, puis `sudo bash ~/compute-seed/setup-compute.sh ~/compute-seed`.
 
-Ajouter un modèle = déposer sa paire `.param` + `.bin` dans `<DataDir>/compute/models`. Réglages :
-`"Compute": false` coupe tout, `"ComputeHubModels": ""` empêche le hub de calculer lui-même.
+Réglages : `"Compute": false` coupe tout, `"ComputeHubModels": ""` empêche le hub de calculer lui-même.

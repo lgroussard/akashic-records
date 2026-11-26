@@ -35,8 +35,8 @@ public sealed partial class HubOptions
     /// <summary>Shared computing (see Compute.cs): the hub keeps the tools and models, devices run the jobs they
     /// can. On by default.</summary>
     public bool Compute { get; set; } = true;
-    /// <summary>Models the hub runs itself when no stronger device is around (comma list; empty = none).</summary>
-    public string ComputeHubModels { get; set; } = "high-fidelity-4x";
+    /// <summary>Models the hub runs itself (on its processor) when no device able to run them is around (comma list; empty = none).</summary>
+    public string ComputeHubModels { get; set; } = "nomos-webphoto-4x";
 
     /// <summary>Full listen URL; overrides Listen/Port. Used by the smoke test (port 0).</summary>
     public string? Url { get; set; }

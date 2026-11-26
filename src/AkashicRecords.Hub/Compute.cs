@@ -5,11 +5,11 @@ namespace AkashicRecords.Hub;
 
 /// <summary>
 /// Shared computing: "everything is on the hub, each device takes what it can chew". The hub keeps the upscale
-/// program and its models (ComputeCatalog) and the list of requested jobs (ComputeStore). Any paired device that
-/// can run a model asks the hub for work (POST /compute/claim, saying which models it can run), downloads the
-/// program and the model from the hub the first time, does the job and sends the result back. The hub runs
-/// light models itself (ComputeHubModels), but only when no other device able to run the job is around: a
-/// strong PC does it in seconds, the hub in a couple of minutes.
+/// model (ComputeCatalog: one .onnx, NomosWebPhoto) and the list of requested jobs (ComputeStore). A paired PC asks
+/// the hub for work (POST /compute/claim, saying which models it can run), downloads the model the first time,
+/// runs it on its graphics card and sends the result back. The hub runs the model itself, on its processor and
+/// much more slowly, only when no device able to do the job is around. The engine (OnnxUpscaler) is built into
+/// the hub and the desktop app: nothing to install apart from the model.
 /// </summary>
 public sealed class ComputeWorkers
 {
@@ -48,57 +48,7 @@ public sealed class ComputeWorkers
         }).ToList();
 }
 
-/// <summary>Runs realesrgan-ncnn-vulkan once (same program on the hub and on a PC).</summary>
-public static class UpscaleRunner
-{
-    public static readonly string[] InputExtensions = [".jpg", ".jpeg", ".png", ".webp"];
-
-    public static string ResultName(string inputName, string model) =>
-        $"{Path.GetFileNameWithoutExtension(inputName)}-{model}.png";
-
-    /// <summary>Upscales `input` (which must keep its extension: the program picks its decoder from it) into `output`.</summary>
-    public static async Task RunAsync(string tool, string modelsDir, string model, string input, string output, CancellationToken ct)
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            var mode = File.GetUnixFileMode(tool);
-            if (!mode.HasFlag(UnixFileMode.UserExecute))
-                File.SetUnixFileMode(tool, mode | UnixFileMode.UserExecute | UnixFileMode.GroupExecute);
-        }
-        var psi = new ProcessStartInfo(tool)
-        {
-            RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
-            WorkingDirectory = Path.GetDirectoryName(tool)!,
-        };
-        foreach (var a in new[] { "-i", input, "-o", output, "-n", model, "-s", "4", "-m", modelsDir }) psi.ArgumentList.Add(a);
-        using var p = Process.Start(psi) ?? throw new InvalidOperationException("Le programme d'agrandissement n'a pas démarré.");
-        var stdout = p.StandardOutput.ReadToEndAsync(ct);
-        var stderr = p.StandardError.ReadToEndAsync(ct);
-        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        limit.CancelAfter(TimeSpan.FromMinutes(30));
-        try
-        {
-            await p.WaitForExitAsync(limit.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            try { p.Kill(entireProcessTree: true); } catch { }
-            if (ct.IsCancellationRequested) throw;
-            throw new TimeoutException("L'agrandissement a pris plus de 30 minutes.");
-        }
-        await stdout;
-        var err = await stderr;
-        if (!File.Exists(output) || new FileInfo(output).Length == 0)
-        {
-            // Its stderr is mostly progress lines ("12.50%"): keep what looks like a message.
-            var why = err.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Where(l => !l.EndsWith('%')).LastOrDefault();
-            throw new InvalidOperationException(why ?? $"Le programme d'agrandissement a échoué (code {p.ExitCode}).");
-        }
-    }
-}
-
-/// <summary>The hub's own worker: takes the jobs of the models it runs, when no stronger device is around.</summary>
+/// <summary>The hub's own worker: takes the jobs of the models it runs, when no device able to do them is around.</summary>
 public sealed class HubComputeWorker(HubOptions options, ComputeStore jobs, ComputeCatalog catalog, ComputeWorkers workers, BlobStore blobs, RequestLog log) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stop)
@@ -107,12 +57,14 @@ public sealed class HubComputeWorker(HubOptions options, ComputeStore jobs, Comp
         while (!stop.IsCancellationRequested)
         {
             ComputeJob? job = null;
-            var tool = catalog.HubTool();
-            if (tool is not null && hubModels.Count > 0)
+            if (hubModels.Count > 0)
             {
                 var models = catalog.Models().Where(m => m.Hub).Select(m => m.Name).ToList();
-                workers.Saw(HubStore.HubDevice, "hub", "hub", models);
-                job = jobs.Claim(HubStore.HubDevice, "hub", j => models.Contains(j.Model) && !workers.OtherCanRun(j.Model, HubStore.HubDevice));
+                if (models.Count > 0)
+                {
+                    workers.Saw(HubStore.HubDevice, "hub", "hub", models);
+                    job = jobs.Claim(HubStore.HubDevice, "hub", j => models.Contains(j.Model) && !workers.OtherCanRun(j.Model, HubStore.HubDevice));
+                }
             }
             if (job is null)
             {
@@ -125,15 +77,18 @@ public sealed class HubComputeWorker(HubOptions options, ComputeStore jobs, Comp
             {
                 if (Directory.Exists(work)) Directory.Delete(work, recursive: true);
                 Directory.CreateDirectory(work);
-                var input = Path.Combine(work, "input" + Path.GetExtension(job.InputName).ToLowerInvariant());
-                File.Copy(blobs.PathOf(job.InputHash), input);
                 var output = Path.Combine(work, "result.png");
                 var clock = Stopwatch.StartNew();
-                await UpscaleRunner.RunAsync(tool!, catalog.ModelsDir, job.Model, input, output, stop);
+                // Off the request threads: minutes of processor work on the hub.
+                await Task.Run(() =>
+                {
+                    using var upscaler = OnnxUpscaler.Load(catalog.ModelPath(job.Model), preferGpu: false);
+                    upscaler.Run(blobs.PathOf(job.InputHash), output, stop);
+                }, stop);
                 clock.Stop();
                 MediaResponse saved;
                 await using (var s = File.OpenRead(output)) saved = await blobs.SaveAsync(s, null, long.MaxValue, stop);
-                jobs.Complete(job.Id, HubStore.HubDevice, saved.Hash, saved.Size, UpscaleRunner.ResultName(job.InputName, job.Model), clock.Elapsed.TotalSeconds);
+                jobs.Complete(job.Id, HubStore.HubDevice, saved.Hash, saved.Size, OnnxUpscaler.ResultName(job.InputName), clock.Elapsed.TotalSeconds);
                 log.Info($"upscale done by the hub: {job.InputName} ({job.Model}) in {clock.Elapsed.TotalSeconds:F1} s");
             }
             catch (OperationCanceledException) when (stop.IsCancellationRequested)
@@ -180,8 +135,7 @@ public static class ComputeRoutes
 
         app.MapGet("/compute", () => Results.Ok(Board()));
 
-        app.MapGet("/compute/manifest", (string? rid) =>
-            ComputeCatalog.IsName(rid) ? Results.Ok(catalog.Manifest(rid!)) : Results.BadRequest(new { error = "rid required" }));
+        app.MapGet("/compute/manifest", () => Results.Ok(catalog.Manifest()));
 
         app.MapGet("/compute/files/{hash}", (string hash) =>
         {
@@ -194,14 +148,16 @@ public static class ComputeRoutes
         app.MapPost("/compute/jobs", (JobRequest? req, HttpContext ctx) =>
         {
             if (!options.Compute) return Disabled();
-            if (req?.Model is null || catalog.Model(req.Model) is null) return Results.BadRequest(new { error = "unknown model" });
-            var hash = req.InputHash?.ToLowerInvariant();
+            // The model may be left out: there is one per feature, the first (only) one is meant.
+            var model = req?.Model is { Length: > 0 } m ? catalog.Model(m) : catalog.Models().FirstOrDefault();
+            if (model is null) return Results.BadRequest(new { error = "unknown model" });
+            var hash = req?.InputHash?.ToLowerInvariant();
             if (!BlobStore.IsHash(hash) || !blobs.Exists(hash!)) return Results.BadRequest(new { error = "input_hash: send the image to /media first" });
-            var name = Path.GetFileName((req.InputName ?? "").Replace('\\', '/').Trim());
+            var name = Path.GetFileName((req!.InputName ?? "").Replace('\\', '/').Trim());
             if (name.Length is 0 or > 200 || name.Any(char.IsControl)) return Results.BadRequest(new { error = "input_name invalid" });
-            if (!UpscaleRunner.InputExtensions.Contains(Path.GetExtension(name).ToLowerInvariant()))
+            if (!OnnxUpscaler.InputExtensions.Contains(Path.GetExtension(name).ToLowerInvariant()))
                 return Results.BadRequest(new { error = "input_name: jpg, jpeg, png or webp" });
-            var job = jobs.AddJob(req.Model, hash!, name, new FileInfo(blobs.PathOf(hash!)).Length, Device(ctx));
+            var job = jobs.AddJob(model.Name, hash!, name, new FileInfo(blobs.PathOf(hash!)).Length, Device(ctx));
             return Results.Json(job, statusCode: StatusCodes.Status201Created);
         });
 
@@ -226,7 +182,7 @@ public static class ComputeRoutes
             var hash = req?.ResultHash?.ToLowerInvariant();
             if (!BlobStore.IsHash(hash) || !blobs.Exists(hash!)) return Results.BadRequest(new { error = "result_hash: send the result to /media first" });
             var size = new FileInfo(blobs.PathOf(hash!)).Length;
-            return jobs.Complete(id, device, hash!, size, UpscaleRunner.ResultName(job.InputName, job.Model), Math.Max(0, req!.Seconds ?? 0))
+            return jobs.Complete(id, device, hash!, size, OnnxUpscaler.ResultName(job.InputName), Math.Max(0, req!.Seconds ?? 0))
                 ? Results.Ok(jobs.Job(id)) : Results.Conflict(new { error = "not your job (or not running)" });
         });
 
