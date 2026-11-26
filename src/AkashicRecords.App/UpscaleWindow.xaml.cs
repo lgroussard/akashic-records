@@ -117,6 +117,8 @@ public partial class UpscaleWindow : Window
             ModelBox.SelectedItem = ModelBox.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == chosen)
                                     ?? ModelBox.Items.OfType<ComboBoxItem>().FirstOrDefault();
         }
+        // One model per feature: nothing to choose, so no chooser (it comes back if the hub ever has several).
+        ModelLabel.Visibility = ModelBox.Visibility = ModelBox.Items.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
         RenderModelHint();
         RenderPicked();
         RenderWorker();

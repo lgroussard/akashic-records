@@ -20,7 +20,7 @@ public sealed record HubDownloadJob(string Id, string Query, string Label, strin
 public sealed record HubDownloadTool(string? Version, string? Problem, string? Current);
 public sealed record HubDownloadBoard(bool Enabled, HubDownloadTool Tool, List<HubDownloadZone> Zones, List<HubDownloadJob> Jobs, List<string> Folders);
 
-// Shared computing (the hub's Compute.cs): the hub keeps the programs and models, devices run what they can.
+// Shared computing (the hub's Compute.cs): the hub keeps the model, devices run it when they can.
 public sealed record HubComputeModel(string Name, string Label, string Description, bool Hub, List<string>? Runners);
 public sealed record HubComputeWorker(string Device, string Name, string Rid, int Models, bool Busy, int SeenSecondsAgo);
 public sealed record HubComputeJob(string Id, string Model, string InputHash, string InputName, long InputSize, string Status,
@@ -29,7 +29,7 @@ public sealed record HubComputeJob(string Id, string Model, string InputHash, st
 public sealed record HubComputeBoard(bool Enabled, List<HubComputeModel> Models, List<HubComputeWorker> Workers, List<HubComputeJob> Jobs);
 public sealed record HubComputeFile(string Path, string Hash, long Size);
 public sealed record HubComputeModelFiles(string Name, string Label, bool Hub, List<HubComputeFile> Files);
-public sealed record HubComputeManifest(string Tool, string Rid, List<HubComputeFile> ToolFiles, List<HubComputeModelFiles> Models);
+public sealed record HubComputeManifest(List<HubComputeModelFiles> Models);
 
 public sealed class HubException(string message, HttpStatusCode? status = null) : Exception(message)
 {
@@ -115,8 +115,8 @@ public sealed class HubClient : IDisposable
     public async Task<HubComputeBoard> ComputeAsync(CancellationToken ct = default) =>
         await Read<HubComputeBoard>(await Send(() => _http.GetAsync("compute", ct)), ct);
 
-    public async Task<HubComputeManifest> ComputeManifestAsync(string rid, CancellationToken ct = default) =>
-        await Read<HubComputeManifest>(await Send(() => _http.GetAsync($"compute/manifest?rid={Uri.EscapeDataString(rid)}", ct)), ct);
+    public async Task<HubComputeManifest> ComputeManifestAsync(CancellationToken ct = default) =>
+        await Read<HubComputeManifest>(await Send(() => _http.GetAsync("compute/manifest", ct)), ct);
 
     /// <summary>Asks for an image (already sent with UploadFileAsync) to be upscaled with a model.</summary>
     public async Task<HubComputeJob> AddComputeJobAsync(string model, string inputHash, string inputName, CancellationToken ct = default) =>
@@ -142,7 +142,7 @@ public sealed class HubClient : IDisposable
     public async Task RemoveComputeAsync(string id, CancellationToken ct = default) =>
         await Ensure(await Send(() => _http.DeleteAsync($"compute/jobs/{id}", ct)), ct);
 
-    /// <summary>Downloads a program or model file of the hub's catalogue (verified against its hash).</summary>
+    /// <summary>Downloads a model file of the hub's catalogue (verified against its hash).</summary>
     public Task<bool> DownloadComputeFileAsync(string hash, string target, CancellationToken ct = default) =>
         DownloadAsync($"compute/files/{hash}", hash, target, ct);
 

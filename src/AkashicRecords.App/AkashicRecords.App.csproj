@@ -9,6 +9,14 @@
   <ItemGroup>
     <!-- Colour emoji in WPF text (WPF alone draws them monochrome, or as boxes for newer ones). -->
     <PackageReference Include="Emoji.Wpf" Version="0.3.4" />
+    <!-- Image upscaling for the hub's shared computing: the model engine on the graphics card (DirectML,
+         processor if that fails) and image reading/writing. The upscaler itself is the hub's own file. -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.20.1" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.2.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\AkashicRecords.Hub\OnnxUpscaler.cs" Link="Sync\OnnxUpscaler.cs" />
   </ItemGroup>
 
   <ItemGroup>
