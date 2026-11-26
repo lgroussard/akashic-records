@@ -46,6 +46,10 @@ object MediaFiles {
         val ext = resolver.getType(source)
             ?.let { MimeTypeMap.getSingleton().getExtensionFromMimeType(it) }
             ?.let { ".$it" } ?: ".jpg"
+        // An early import of the PC's data could leave an empty FILE where this folder goes: moved aside first.
+        for (d in listOf(File(context.filesDir, "media"), File(context.filesDir, "media/$sub"))) {
+            if (d.isFile) { if (d.length() == 0L) d.delete() else d.renameTo(File(d.path + ".ancien")) }
+        }
         val dir = File(context.filesDir, "media/$sub").apply { mkdirs() }
         val name = UUID.randomUUID().toString().replace("-", "") + ext
         resolver.openInputStream(source)!!.use { input ->
