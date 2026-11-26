@@ -35,7 +35,7 @@ install -m 644 "$SRC/akashic-backup.timer" /etc/systemd/system/akashic-backup.ti
 systemctl daemon-reload
 systemctl enable --now akashic-backup.timer
 echo "Sauvegarde programmee chaque nuit a 03:30 :"
-systemctl list-timers akashic-backup.timer --no-pager | head -2
+systemctl list-timers akashic-backup.timer --no-pager | head -2 || true # (head closing the pipe must not stop the script)
 
 if mountpoint -q "$MOUNT"; then
     echo "Premiere sauvegarde maintenant (quelques minutes pour ~25 Go)..."
