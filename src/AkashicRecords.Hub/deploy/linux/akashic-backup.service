@@ -1,0 +1,9 @@
+[Unit]
+Description=Akashic hub: nightly copy to the external disk
+After=local-fs.target akashic-hub.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/akashic-hub/backup.sh
+Nice=10
+IOSchedulingClass=idle
