@@ -12,12 +12,15 @@ object Modules {
     val COLLECTION_KEYS = listOf("Film", "FilmAnimation", "Anime", "Livre", "VideoGame", "TvSeries")
 
     val catalog = listOf(
-        AppModule("Journaux", "Journaux", listOf(
+        // "Journaux" was split in two (2026-11): the everyday (key kept: "Journaux", shown as "Quotidien") and "Art".
+        AppModule("Journaux", "Quotidien", listOf(
             AppModule("Journaux.Personal", "Journal personnel"),
-            AppModule("Journaux.Poetry", "Poésie"),
             AppModule("Journaux.Recipes", "Recettes"),
-            AppModule("Journaux.Artistic", "Archive artistique"),
-            AppModule("Journaux.References", "Références"),
+        )),
+        AppModule("Art", "Art", listOf(
+            AppModule("Art.Poetry", "Poésie"),
+            AppModule("Art.Artistic", "Archive artistique"),
+            AppModule("Art.References", "Références"),
         )),
         AppModule("Musique", "Musique"),
         AppModule("Calendrier", "Calendrier"),

@@ -9,10 +9,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Create
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.AccountBox
+import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
@@ -174,15 +178,29 @@ private data class NavItem(val section: String, val label: String, val icon: Ima
 
 // "Musique" is a floating window on the desktop; on the phone it is a section of its own, with
 // the mini-player above the navigation bar everywhere.
-private val NAV = listOf(
-    NavItem("Journaux", "Journaux", Icons.Filled.Create),
+// Every section, in the order "Plus" lists them. "Journaux" is shown as "Quotidien" since Art was split out of it.
+private val ALL = listOf(
+    NavItem("Journaux", "Quotidien", Icons.Filled.Create),
     NavItem("Musique", "Musique", Icons.Filled.PlayArrow),
     NavItem("Calendrier", "Calendrier", Icons.Filled.DateRange),
     NavItem("Lecture", "Lecture", iconRes = R.drawable.g_book),
+    NavItem("Art", "Art", Icons.Filled.Star),
+    NavItem("Organisation", "Organisation", Icons.Filled.CheckCircle),
+    NavItem("Collections", "Collections", Icons.Filled.Favorite),
+    NavItem("Archives", "Archives", Icons.Filled.AccountBox),
+    NavItem("Jeux", "Jeux", Icons.Filled.Face),
 )
-// Collections moved here when Lecture took its place in the bar (phone only).
-private val MORE = listOf("Organisation", "Collections", "Archives", "Jeux")
-private val SECTIONS = NAV.map { it.section } + MORE
+private val SECTIONS = ALL.map { it.section }
+// The bottom bar holds 4 sections (plus "Plus"); which ones is chosen in the settings (ConfigStore.barSections).
+const val BAR_SIZE = 4
+val DEFAULT_BAR = listOf("Journaux", "Musique", "Calendrier", "Lecture")
+val SECTION_LABELS = mapOf("Journaux" to "Quotidien", "Musique" to "Musique", "Calendrier" to "Calendrier", "Lecture" to "Lecture",
+    "Art" to "Art", "Organisation" to "Organisation", "Collections" to "Collections", "Archives" to "Archives", "Jeux" to "Jeux")
+private val MORE_SUBTITLES = mapOf(
+    "Journaux" to "Journal intime et recettes", "Musique" to "Bibliothèque, recherche, hors ligne", "Calendrier" to "Agenda et billets",
+    "Lecture" to "Livres", "Art" to "Poésie, archive artistique, références", "Organisation" to "Projets et transitions",
+    "Collections" to "Films, séries, livres, jeux — par tier", "Archives" to "Photos et archive familiale", "Jeux" to "Mots croisés",
+)
 
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -190,8 +208,9 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
     val context = LocalContext.current
     // Modules switched off in the settings (this phone only): the bar, the "Plus" sheet and the sub-tabs follow.
     var disabled by remember { mutableStateOf(config.disabledModules()) }
-    val navItems = NAV.filter { Modules.isEnabled(disabled, it.section) }
-    val moreItems = MORE.filter { Modules.isEnabled(disabled, it) }
+    var bar by remember { mutableStateOf(config.barSections() ?: DEFAULT_BAR) }
+    val navItems = bar.mapNotNull { s -> ALL.firstOrNull { it.section == s } }.filter { Modules.isEnabled(disabled, it.section) }.take(BAR_SIZE)
+    val moreItems = ALL.map { it.section }.filter { s -> navItems.none { it.section == s } && Modules.isEnabled(disabled, s) }
     val enabledSections = navItems.map { it.section } + moreItems
     val restored = remember { config.load().lastActiveSection }
     var section by remember {
@@ -242,12 +261,18 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
             if (Modules.isEnabled(disabled, "Musique")) fullPlayer = false
             return
         }
+        // Links and widgets made before the split still say "Journaux" for poetry, the artistic archive and references.
+        val l = if (l.section == "Journaux" && com.akashicrecords.journaux.isArtTab(l.tab)) l.copy(section = "Art") else l
         if (l.section in SECTIONS && Modules.isEnabled(disabled, l.section)) {
             go(l.section)
             when (l.section) {
                 "Calendrier" -> calendarDate = l.date
                 "Journaux" -> {
                     l.tab?.let { config.saveJournauxTab(it) }
+                    journalItem = l.item
+                }
+                "Art" -> {
+                    l.tab?.let { config.saveArtTab(it) }
                     journalItem = l.item
                 }
                 "Musique" -> musicTab = l.tab
@@ -266,11 +291,11 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
     // The same coordinates serve the Fil of an artistic project (kind + id of the item an observation is about).
     fun openItem(kind: String, id: Int, category: Int?) {
         val target = when (kind) {
-            "Poem" -> Launch("Journaux", "Poetry", null, id)
+            "Poem" -> Launch("Art", "Poetry", null, id)
             "Recipe" -> Launch("Journaux", "Recipes", null, id)
             "JournalEntry" -> Launch("Journaux", "Personal", null, null)
-            "ArtisticProject" -> Launch("Journaux", "Artistic", null, null)
-            "RefImage" -> Launch("Journaux", "References", null, null)
+            "ArtisticProject" -> Launch("Art", "Artistic", null, null)
+            "RefImage" -> Launch("Art", "References", null, null)
             "Artwork", "Observation" -> {
                 category?.let { config.saveCollectionsCategory(it.toString()) }
                 Launch("Collections", null, null, null)
@@ -323,10 +348,10 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
                         )
                     }
                     NavigationBarItem(
-                        selected = section in MORE,
+                        selected = section in moreItems,
                         onClick = { showMore = true },
                         icon = { Icon(Icons.Filled.Menu, contentDescription = "Plus") },
-                        label = { Text(if (section in MORE) section else "Plus", fontSize = 11.sp, maxLines = 1) },
+                        label = { Text(if (section in moreItems) SECTION_LABELS[section] ?: section else "Plus", fontSize = 11.sp, maxLines = 1) },
                         colors = navColors(),
                     )
                 }
@@ -348,6 +373,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
                     when (section) {
                         "Organisation" -> OrganisationSection(db, config)
                         "Journaux" -> JournauxSection(db, config, openItem = journalItem, onOpenItem = { kind, id, category -> openItem(kind, id, category) })
+                        "Art" -> com.akashicrecords.journaux.ArtSection(db, config, openItem = journalItem, onOpenItem = { kind, id, category -> openItem(kind, id, category) })
                         "Musique" -> MusicSection(db, config, player, initialTab = musicTab, onOpenPlayer = { similar -> fullPlayer = similar })
                         "Calendrier" -> CalendarSection(db, openDate = calendarDate, onOpenLink = { openCalendarLink(it) }, onOpenTickets = { ticketsHub = false })
                         "Collections" -> CollectionsSection(db, config)
@@ -373,10 +399,7 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
     if (showMore) {
         ModalBottomSheet(onDismissRequest = { showMore = false }, containerColor = Palette.Surface1) {
             Column(Modifier.padding(bottom = 24.dp)) {
-                if ("Organisation" in moreItems) MoreRow("Organisation", "Projets et transitions") { showMore = false; go("Organisation") }
-                if ("Collections" in moreItems) MoreRow("Collections", "Films, séries, livres, jeux — par tier") { showMore = false; go("Collections") }
-                if ("Archives" in moreItems) MoreRow("Archives", "Photos et archive familiale") { showMore = false; go("Archives") }
-                if ("Jeux" in moreItems) MoreRow("Jeux", "Mots croisés") { showMore = false; go("Jeux") }
+                moreItems.forEach { s -> MoreRow(SECTION_LABELS[s] ?: s, MORE_SUBTITLES[s] ?: "") { showMore = false; go(s) } }
                 HorizontalDivider(color = Palette.BorderStrong, modifier = Modifier.padding(vertical = 6.dp))
                 MoreRow("Réglages", "Modules, widgets, import des données du PC") { showMore = false; showSettings = true }
             }
@@ -387,6 +410,8 @@ fun AkashicApp(db: AkashicDatabase, config: ConfigStore, launch: Launch?, onLaun
         SettingsDialog(
             db, config, disabled,
             onModulesChanged = { disabled = it; dataVersion++ },
+            bar = bar,
+            onBarChanged = { bar = it; config.saveBarSections(it) },
             onDismiss = { showSettings = false },
             onImported = { dataVersion++ },
         )

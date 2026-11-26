@@ -44,6 +44,14 @@ class ConfigStore(context: Context) {
     // Where the bubble was dragged, in px from its starting spot.
 
     fun saveJournauxTab(tab: String?) = putString(ConfigKeys.JOURNAUX_ACTIVE_TAB, tab)
+    // "Art" (split out of Journaux): its own last tab.
+    fun artTab(): String? = prefs.getString("art_active_tab", null)
+    fun saveArtTab(tab: String?) = putString("art_active_tab", tab)
+
+    // Phone only: the sections shown in the bottom bar (in this order, 4 at most); the others go in "Plus".
+    // Null = the default bar.
+    fun barSections(): List<String>? = prefs.getString("bar_sections", null)?.split(',')?.filter { it.isNotBlank() }
+    fun saveBarSections(sections: List<String>?) = prefs.edit().apply { if (sections == null) remove("bar_sections") else putString("bar_sections", sections.joinToString(",")) }.apply()
     fun saveJournauxItem(item: String?) = putString(ConfigKeys.JOURNAUX_ACTIVE_ITEM, item)
     fun saveOrganisationTab(tab: String?) = putString(ConfigKeys.ORG_ACTIVE_TAB, tab)
     fun saveArchivesTab(tab: String?) = putString(ConfigKeys.ARCHIVES_ACTIVE_TAB, tab)
