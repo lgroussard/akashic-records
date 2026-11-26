@@ -183,6 +183,18 @@ await Scenario("5. Garde-fous", async lab =>
     await phone2.Sync(); await pc2.Sync();
     Check(pc2.Get("B Recette 1") is null && pc2.Get("B Recette 3") is not null, "2 suppressions voulues passent normalement");
 
+    // Emptying one table while the rest of the base is there (the shopping list cleared): an ordinary use, it goes
+    // through, and the other changes of that sync with it.
+    var (pc3, phone3) = await lab.SeededPair(names.Select(n => "C " + n).ToArray());
+    foreach (var d in new[] { "2026-11-01", "2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06", "2026-11-07", "2026-11-08", "2026-11-09", "2026-11-10", "2026-11-11", "2026-11-12" })
+        pc3.WriteDay(d, "journee " + d);
+    await pc3.Sync(); await phone3.Sync();
+    foreach (var n in names) phone3.DeleteByTitle("C " + n);
+    phone3.Add("C Nouvelle recette");
+    var cleared = await phone3.Sync(); await pc3.Sync();
+    Check(cleared.PushedDeletes == 10 && !pc3.Titles().Any(t => t.StartsWith("C Recette")) && pc3.Get("C Nouvelle recette") is not null,
+        $"une table videe en entier (le reste de la base present) passe, avec les autres changements [{cleared}]");
+
     // A device that already synced, pointed at another (empty) hub.
     await using var other = new Lab();
     await other.StartAsync();
