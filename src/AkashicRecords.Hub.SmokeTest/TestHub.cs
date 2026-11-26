@@ -29,6 +29,7 @@ public sealed class TestHub : IAsyncDisposable
             EntityTypes = EntityTypes.ToList(),
             MaxBlobMegabytes = 2,
             ComputeHubModels = ComputeHubModels,
+            Ffmpeg = Environment.GetEnvironmentVariable("AKASHIC_HUB_FFMPEG") ?? "",
         };
         _app = HubApp.Build(new[] { "--Logging:LogLevel:Default=Warning" }, options);
         await _app.StartAsync();

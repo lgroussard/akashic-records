@@ -230,7 +230,14 @@ class PhotoWidget : AkashicWidget<PhotoData>() {
     override suspend fun load(context: Context, shift: Int): PhotoData {
         val photos = runCatching { AkashicDatabase.get(context).photoDao().getAll() }.getOrDefault(emptyList())
         val p = pickOfDay(photos, shift) { if (it.IsFavorite) 3 else 1 }
-        return PhotoData(p?.Title, p?.let { cover(context, it.ImagePath, 600) }, photos.isNotEmpty())
+        // Not kept on the phone: the hub's preview (when it answers).
+        val bitmap = p?.let { cover(context, it.ImagePath, 600) } ?: p?.let { photo ->
+            runCatching {
+                val hash = com.akashicrecords.archives.HubPhotos.load(AkashicDatabase.get(context)).hashes[com.akashicrecords.archives.HubPhotos.key(photo)]
+                hash?.let { com.akashicrecords.archives.HubPhotos.thumb(context, it) }?.let { com.akashicrecords.media.MediaFiles.decode(it, 600) }
+            }.getOrNull()
+        }
+        return PhotoData(p?.Title, bitmap, photos.isNotEmpty())
     }
 
     @Composable
