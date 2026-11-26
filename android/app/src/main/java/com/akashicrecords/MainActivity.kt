@@ -119,7 +119,10 @@ class MainActivity : ComponentActivity() {
         val app = applicationContext
         com.akashicrecords.journaux.AppScope.launch {
             runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { com.akashicrecords.journaux.PendingEdits.flushAll() } }
-            com.akashicrecords.sync.SyncService.requestSoon(app, delaySeconds = 1)
+            // Sent right now, while the app is still awake: handed to Android's job queue, it could wait for
+            // minutes once the screen is off (sleep, Samsung's battery saver). The queue stays as a backup.
+            com.akashicrecords.sync.SyncService.runNow(app)
+            com.akashicrecords.sync.SyncService.requestSoon(app, delaySeconds = 30)
         }
     }
 
