@@ -19,6 +19,10 @@ import androidx.media3.session.SessionToken
 import com.akashicrecords.data.MusicTrack
 import kotlinx.coroutines.delay
 
+// Where the song is. Kept apart from [PlayerUi]: it moves twice a second while playing, and only the progress
+// bars read it; everything that reads PlayerUi is then redrawn on real events only.
+data class Playhead(val positionMs: Long = 0, val durationMs: Long = 0)
+
 // Snapshot of the player, read by the Compose UI.
 data class PlayerUi(
     val title: String = "",
@@ -29,8 +33,6 @@ data class PlayerUi(
     val suggestionArtist: String? = null,
     val fromSimilarTab: Boolean = false, // started by a tap in Similaires (not chained)
     val isPlaying: Boolean = false,
-    val positionMs: Long = 0,
-    val durationMs: Long = 0,
     val queue: List<Pair<Int, String>> = emptyList(), // trackId -> label
     val order: List<Int> = emptyList(), // queue indices in the order they play (shuffled in shuffle)
     val currentIndex: Int = -1,
@@ -42,6 +44,8 @@ class PlayerConnection(context: Context) {
     var controller: MediaController? by mutableStateOf(null)
         private set
     var ui by mutableStateOf(PlayerUi())
+        private set
+    var playhead by mutableStateOf(Playhead())
         private set
 
     private val listener = object : Player.Listener {
@@ -73,8 +77,6 @@ class PlayerConnection(context: Context) {
             suggestionArtist = if (PlayerItems.isSuggestion(c.currentMediaItem)) md.extras?.getString(PlayerItems.EXTRA_ARTIST) ?: "" else null,
             fromSimilarTab = c.currentMediaItem?.mediaId?.startsWith(PREVIEW_PREFIX) == true,
             isPlaying = c.isPlaying,
-            positionMs = c.currentPosition.coerceAtLeast(0),
-            durationMs = c.duration.takeIf { it > 0 } ?: 0,
             queue = (0 until c.mediaItemCount).map { i ->
                 val item = c.getMediaItemAt(i)
                 (item.mediaId.toIntOrNull() ?: -1) to (item.mediaMetadata.title?.toString() ?: "")
@@ -83,16 +85,17 @@ class PlayerConnection(context: Context) {
             currentIndex = if (c.mediaItemCount == 0) -1 else c.currentMediaItemIndex,
             shuffle = c.shuffleModeEnabled,
         )
+        refreshPosition()
     }
 
-    // The playhead alone, for the twice-a-second ticker. refresh() rebuilds everything, the whole queue
+    // The playhead alone, for the twice-a-second ticker (and at the end of refresh()). refresh() rebuilds everything, the whole queue
     // included (one object per queued track): on a library-sized queue that is thousands of allocations
     // per tick on the main thread, for a value that only moved by half a second.
     fun refreshPosition() {
         val c = controller ?: return
         val position = c.currentPosition.coerceAtLeast(0)
         val duration = c.duration.takeIf { it > 0 } ?: 0
-        if (position != ui.positionMs || duration != ui.durationMs) ui = ui.copy(positionMs = position, durationMs = duration)
+        if (position != playhead.positionMs || duration != playhead.durationMs) playhead = Playhead(position, duration)
     }
 
     // Replaces the queue with [tracks] and starts at [startIndex] (desktop PlayQueue).

@@ -35,6 +35,15 @@ class MusicLibrary(private val context: Context, private val db: AkashicDatabase
     var available: Map<String, Uri> = emptyMap()
         private set
 
+    // The catalogue as of the last scan: shown at once when the music section opens again, while a new scan runs.
+    @Volatile
+    var lastTracks: List<MusicTrack> = emptyList()
+        private set
+
+    // The library tab's lists as last worked out (see MusicLists), shown at once on the next visit.
+    @Volatile
+    var lastLists: MusicLists? = null
+
     suspend fun scanAndSync(folder: String): List<MusicTrack> {
         val files = queryFolder(folder)
         val dao = db.musicTrackDao()
@@ -63,7 +72,7 @@ class MusicLibrary(private val context: Context, private val db: AkashicDatabase
         }
         available = files.associate { normalize(it.relativePath) to it.uri }
         remote = loadRemote()
-        return dao.getAll()
+        return dao.getAll().also { lastTracks = it }
     }
 
     // Catalogue key -> hash of the file on the hub, for the tracks the hub holds (empty when not paired).
@@ -93,7 +102,7 @@ class MusicLibrary(private val context: Context, private val db: AkashicDatabase
     /** What the player opens for a track: its file on this phone, else the hub's copy (streamed), else null. */
     fun uriFor(track: MusicTrack): Uri? {
         val key = normalize(track.FilePath)
-        return available[key] ?: if (key in remote && reachable(context)) HubStream.uri(key) else null
+        return available[key] ?: if (key in remote && hubReachable) HubStream.uri(key) else null
     }
 
     private fun queryFolder(folder: String): List<LocalFile> {
@@ -161,12 +170,11 @@ class MusicLibrary(private val context: Context, private val db: AkashicDatabase
         }
 
         /** Last answer of the hub (see [probe]). Android's own "connected" is not enough: Tailscale's VPN stays up
-         * with mobile data and Wi-Fi off, so the phone looks online while nothing gets through. */
+         * with mobile data and Wi-Fi off, so the phone looks online while nothing gets through. Read for every track of a
+         * list: a plain field, never a call to the system (3000 of those took seconds). */
         @Volatile
         var hubReachable = true
             private set
-
-        fun reachable(context: Context) = online(context) && hubReachable
 
         /** Asks the hub whether it answers (3 s at most); remembers and returns the result. */
         suspend fun probe(context: Context): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -199,7 +207,7 @@ class MusicLibrary(private val context: Context, private val db: AkashicDatabase
 @androidx.compose.runtime.Composable
 fun rememberOnline(): Boolean {
     val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
-    var online by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(MusicLibrary.reachable(context)) }
+    var online by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(MusicLibrary.hubReachable) }
     val changes = androidx.compose.runtime.remember { kotlinx.coroutines.flow.MutableStateFlow(0) }
     androidx.compose.runtime.DisposableEffect(Unit) {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager

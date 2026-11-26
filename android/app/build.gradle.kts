@@ -68,6 +68,9 @@ dependencies {
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-session:1.4.1")
+    // Applies the baseline profiles the Compose and AndroidX libraries ship: without it a side-loaded APK runs
+    // that code interpreted / just-in-time for a long while, and screens open and scroll slower.
+    implementation("androidx.profileinstaller:profileinstaller:1.3.1")
     // yt-dlp + Python + ffmpeg bundled for on-phone downloads (same tool as the desktop downloader).
     implementation("io.github.junkfood02.youtubedl-android:library:0.17.2")
     implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.17.2")
