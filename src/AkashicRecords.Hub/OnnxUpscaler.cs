@@ -1,9 +1,7 @@
 using System.IO;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
+using SkiaSharp;
 using SessionOptions = Microsoft.ML.OnnxRuntime.SessionOptions;
 
 namespace AkashicRecords.Hub;
@@ -57,19 +55,23 @@ public sealed class OnnxUpscaler : IDisposable
     /// <summary>Reads `input` (jpg, png, webp), writes the ×4 result to `output` as PNG.</summary>
     public void Run(string input, string output, CancellationToken ct = default)
     {
-        using var image = Image.Load<Rgb24>(input);
-        var longer = Math.Max(image.Width, image.Height);
-        if (longer > MaxInputSide)
+        using var decoded = SKBitmap.Decode(input) ?? throw new InvalidOperationException("Image illisible.");
+        var longer = Math.Max(decoded.Width, decoded.Height);
+        var f = longer > MaxInputSide ? (double)MaxInputSide / longer : 1.0;
+        int w = Math.Max(1, (int)Math.Round(decoded.Width * f)), h = Math.Max(1, (int)Math.Round(decoded.Height * f));
+        // Drawn once onto plain RGBA (resized if too big, transparency flattened on white): one known layout to read.
+        using var rgba = new SKBitmap(new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul));
+        using (var canvas = new SKCanvas(rgba))
+        using (var image = SKImage.FromBitmap(decoded))
         {
-            var f = (double)MaxInputSide / longer;
-            image.Mutate(x => x.Resize((int)Math.Round(image.Width * f), (int)Math.Round(image.Height * f), KnownResamplers.Lanczos3));
+            canvas.Clear(SKColors.White);
+            canvas.DrawImage(image, new SKRect(0, 0, w, h), new SKSamplingOptions(SKCubicResampler.Mitchell));
         }
-        int w = image.Width, h = image.Height;
-        var src = new Rgb24[w * h];
-        image.CopyPixelDataTo(src);
+        var src = rgba.Bytes;
+        int srcStride = rgba.RowBytes;
 
         int ow = w * Scale, oh = h * Scale;
-        var dst = new Rgb24[ow * oh];
+        var dst = new byte[ow * oh * 4];
         int tile = _fixed > 0 ? _fixed : 192, margin = _fixed > 0 ? Math.Max(4, _fixed / 8) : 16;
         int step = tile - 2 * margin;
 
@@ -87,8 +89,8 @@ public sealed class OnnxUpscaler : IDisposable
             for (int y = 0; y < ph; y++)
             for (int x = 0; x < pw; x++)
             {
-                var p = src[(y0 + Math.Min(y, th - 1)) * w + x0 + Math.Min(x, tw - 1)];
-                t[0, 0, y, x] = p.R / 255f; t[0, 1, y, x] = p.G / 255f; t[0, 2, y, x] = p.B / 255f;
+                int i = (y0 + Math.Min(y, th - 1)) * srcStride + (x0 + Math.Min(x, tw - 1)) * 4;
+                t[0, 0, y, x] = src[i] / 255f; t[0, 1, y, x] = src[i + 1] / 255f; t[0, 2, y, x] = src[i + 2] / 255f;
             }
             using var result = _session.Run([NamedOnnxValue.CreateFromTensor(_input, t)]);
             var o = result.First().AsTensor<float>();
@@ -99,12 +101,17 @@ public sealed class OnnxUpscaler : IDisposable
             for (int x = keepX0 * Scale; x < keepX1 * Scale; x++)
             {
                 int lx = x - x0 * Scale, ly = y - y0 * Scale;
-                dst[y * ow + x] = new Rgb24(Byte(o[0, 0, ly, lx]), Byte(o[0, 1, ly, lx]), Byte(o[0, 2, ly, lx]));
+                int j = (y * ow + x) * 4;
+                dst[j] = Byte(o[0, 0, ly, lx]); dst[j + 1] = Byte(o[0, 1, ly, lx]); dst[j + 2] = Byte(o[0, 2, ly, lx]); dst[j + 3] = 255;
             }
         }
 
-        using var outImage = Image.LoadPixelData<Rgb24>(dst, ow, oh);
-        outImage.SaveAsPng(output);
+        var info = new SKImageInfo(ow, oh, SKColorType.Rgba8888, SKAlphaType.Opaque);
+        using var pixels = SKData.CreateCopy(dst);
+        using var outImage = SKImage.FromPixels(info, pixels, ow * 4);
+        using var png = outImage.Encode(SKEncodedImageFormat.Png, 100);
+        using var file = File.Create(output);
+        png.SaveTo(file);
     }
 
     private static byte Byte(float v) => (byte)Math.Clamp(MathF.Round(v * 255f), 0, 255);
