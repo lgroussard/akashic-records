@@ -123,6 +123,10 @@ Par ordre de priorité croissante :
 | `RetentionDays` | `30` | rétention des pierres tombales (annoncée, pas encore appliquée : aucune purge) |
 | `MaxBlobMegabytes` | `1024` | taille maximale d'un média |
 | `PairCodeMinutes` | `10` | durée de vie d'un code d'appairage |
+| `Downloads` | `true` | téléchargements de musique faits par le hub (tableau partagé `/downloads`) |
+| `YtDlp` | vide | yt-dlp à lancer ; vide = le hub garde sa propre copie dans `<DataDir>/bin`, récupérée sur GitHub au premier usage et mise à jour chaque jour (variable `AKASHIC_HUB_YTDLP`) |
+| `Ffmpeg` | vide | ffmpeg (fichier ou dossier) ; vide = celui du PATH (installé par `install.sh` sous Linux ; variable `AKASHIC_HUB_FFMPEG`) |
+| `DownloadArgs` | `-x --audio-format mp3 --embed-thumbnail --add-metadata` | arguments yt-dlp d'un téléchargement |
 
 Après un changement : redémarrer le service (`Restart-Service AkashicHub` / `sudo systemctl restart akashic-hub`).
 
@@ -131,6 +135,8 @@ Dossier de données :
 ```
 hub.db            journal (sync_log), état courant (entities), appareils (jetons hachés)
 blobs\ab\abcd…    médias, un fichier par empreinte SHA-256
+downloads.db      tableau des téléchargements (zones, titres demandés)
+bin\yt-dlp        la copie de yt-dlp du hub
 logs\hub-AAAA-MM-JJ.log   une ligne par requête (30 jours gardés)
 ```
 
@@ -149,6 +155,10 @@ Tout sauf `/health` et `/auth/pair` exige `Authorization: Bearer <token>` (sinon
 | `GET /snapshot?limit=n[&entity_type=…][&after_type=…&after_id=…]` | état courant complet, paginé, tombales comprises. Prendre `head_seq` de la **première** page, lire toutes les pages (`next_after_type` / `next_after_id`), puis reprendre `pull` à ce `head_seq`. |
 | `POST /media[?hash=<sha256>]` | corps = octets bruts. `201` si nouveau, `200` si déjà connu ; `400 hash_mismatch` si le contenu ne correspond pas à l'empreinte annoncée ; `413` au-delà de la limite |
 | `GET /media/{hash}` (et `HEAD`) | le média ; immuable, `Range` accepté (reprise, lecture audio) |
+| `GET /downloads` | le tableau partagé : `{ enabled, tool, zones, jobs, folders }` (`folders` = dossiers de musique déjà au catalogue) |
+| `POST /downloads/jobs` | `{ query, label, zone_id? }` ; `query` = un lien http(s) ou une recherche `ytsearch1:…`. Le hub attend 10 s (le temps de changer de zone), télécharge, garde le fichier et ajoute `MediaFile` + `MusicTrack` au catalogue (appareil `hub`) |
+| `POST /downloads/jobs/{id}/zone`, `…/retry`, `DELETE /downloads/jobs/{id}`, `POST /downloads/clear-done` | ranger ailleurs, réessayer, retirer, vider les terminés |
+| `POST /downloads/zones` | `{ name?, folder }` → la zone de ce dossier (réutilisée si elle existe) ; `POST /downloads/zones/{id}` `{ name }` renomme, `DELETE` retire. Une zone dont tous les titres sont téléchargés quitte le tableau d.elle-même. |
 
 ## 6. Tester
 

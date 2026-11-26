@@ -23,6 +23,15 @@ public sealed partial class HubOptions
     /// <summary>Accepted entity types. "*" accepts any well-formed name.</summary>
     public List<string> EntityTypes { get; set; } = new();
 
+    /// <summary>Music downloads done by the hub (see Downloads.cs). On by default.</summary>
+    public bool Downloads { get; set; } = true;
+    /// <summary>yt-dlp to run. Empty: the hub keeps its own copy in DataDir/bin (fetched once, updated daily).</summary>
+    public string YtDlp { get; set; } = "";
+    /// <summary>ffmpeg (file or folder). Empty: looked up on the PATH.</summary>
+    public string Ffmpeg { get; set; } = "";
+    /// <summary>yt-dlp arguments for a download (same defaults as the desktop downloader).</summary>
+    public string DownloadArgs { get; set; } = "-x --audio-format mp3 --embed-thumbnail --add-metadata";
+
     /// <summary>Full listen URL; overrides Listen/Port. Used by the smoke test (port 0).</summary>
     public string? Url { get; set; }
 
@@ -31,6 +40,9 @@ public sealed partial class HubOptions
     public string BlobDir => Path.Combine(DataDir, "blobs");
     public string LogDir => Path.Combine(DataDir, "logs");
     public long MaxBlobBytes => MaxBlobMegabytes * 1024L * 1024L;
+    public string DownloadsDbPath => Path.Combine(DataDir, "downloads.db");
+    public string ToolDir => Path.Combine(DataDir, "bin");
+    public string DownloadWorkDir => Path.Combine(DataDir, "downloads-work");
 
     public bool AcceptsEntityType(string? type) =>
         type is not null && TypeName().IsMatch(type) && (EntityTypes.Contains("*") || EntityTypes.Contains(type));
@@ -64,11 +76,17 @@ public sealed partial class HubOptions
         o.RetentionDays = Int(section["RetentionDays"], o.RetentionDays, "Hub:RetentionDays");
         o.MaxBlobMegabytes = Int(section["MaxBlobMegabytes"], o.MaxBlobMegabytes, "Hub:MaxBlobMegabytes");
         o.PairCodeMinutes = Int(section["PairCodeMinutes"], o.PairCodeMinutes, "Hub:PairCodeMinutes");
+        if (bool.TryParse(section["Downloads"], out var downloads)) o.Downloads = downloads;
+        o.YtDlp = section["YtDlp"] ?? o.YtDlp;
+        o.Ffmpeg = section["Ffmpeg"] ?? o.Ffmpeg;
+        o.DownloadArgs = section["DownloadArgs"] ?? o.DownloadArgs;
 
         Func<string, string?> env = Environment.GetEnvironmentVariable;
         if (env("AKASHIC_HUB_LISTEN") is { Length: > 0 } l) o.Listen = l;
         if (env("AKASHIC_HUB_DATA") is { Length: > 0 } d) o.DataDir = d;
         if (env("AKASHIC_HUB_PORT") is { Length: > 0 } p) o.Port = Int(p, o.Port, "AKASHIC_HUB_PORT");
+        if (env("AKASHIC_HUB_YTDLP") is { Length: > 0 } y) o.YtDlp = y;
+        if (env("AKASHIC_HUB_FFMPEG") is { Length: > 0 } f) o.Ffmpeg = f;
         if (env("AKASHIC_HUB_ENTITY_TYPES") is { Length: > 0 } t)
             o.EntityTypes = t.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 
@@ -88,6 +106,8 @@ public sealed partial class HubOptions
         if (MaxBlobMegabytes < 1) MaxBlobMegabytes = 1;
         if (PairCodeMinutes < 1) PairCodeMinutes = 1;
         DataDir = Path.GetFullPath(DataDir, AppContext.BaseDirectory);
+        if (YtDlp.Length > 0) YtDlp = Path.GetFullPath(YtDlp, AppContext.BaseDirectory);
+        if (Ffmpeg.Length > 0 && (Ffmpeg.Contains('/') || Ffmpeg.Contains('\\'))) Ffmpeg = Path.GetFullPath(Ffmpeg, AppContext.BaseDirectory);
         return this;
     }
 

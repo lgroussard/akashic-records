@@ -216,6 +216,21 @@ object Downloader {
     // Processes every queued item in order (desktop "Télécharger maintenant"), then rescans.
     fun runQueue(context: Context, db: AkashicDatabase, musicFolder: String, onLibraryChanged: () -> Unit = {}) {
         if (_state.value.running) return
+        // Paired with the hub: the hub downloads (no battery, no mobile data, and the track reaches every device).
+        // A request that cannot reach it waits here and goes at the next sync.
+        if (com.akashicrecords.sync.SyncService.credentials(context) != null) {
+            scope.launch {
+                set { copy(running = true, current = null, message = "Envoi au serveur…") }
+                val msg = try {
+                    val n = HubDownloads.send(context, db)
+                    if (n == 0) "Rien à envoyer." else "$n titre(s) envoyé(s) au serveur : il les télécharge."
+                } catch (e: Exception) {
+                    "Serveur injoignable : la demande partira à la prochaine synchro."
+                }
+                set { copy(running = false, current = null, message = msg) }
+            }
+            return
+        }
         scope.launch {
             set { copy(running = true, message = "Préparation de yt-dlp…", progress = 0f) }
             var done = 0

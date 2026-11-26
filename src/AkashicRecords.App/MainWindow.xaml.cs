@@ -32,6 +32,7 @@ public partial class MainWindow : Window
     private FilmOfTheDayWidget? _filmWidget;
     private DesktopReminderWidget? _reminderWidget;
     private DownloaderWindow? _downloaderWindow;
+    private HubDownloadsWindow? _hubDownloads;
     private Views.SettingsView? _settingsView;
     private bool _isExiting;
     private string? _activeSection;
@@ -940,6 +941,24 @@ public partial class MainWindow : Window
     // window so it survives the main window hiding; closed only on real app exit.
     private void ToggleDownloader()
     {
+        // Paired with the hub: the board it keeps for every device (the hub downloads).
+        if (AkashicRecords.App.Sync.SyncService.Instance.Settings.IsPaired)
+        {
+            if (_hubDownloads is null)
+            {
+                _hubDownloads = new HubDownloadsWindow();
+                _hubDownloads.LibraryChanged += () => _musicPlayer?.ReloadLibrary();
+                _hubDownloads.Loaded += (_, _) =>
+                {
+                    _hubDownloads.Left = Math.Max(0, SystemParameters.WorkArea.Right - _hubDownloads.ActualWidth - 24);
+                    _hubDownloads.Top = 80;
+                };
+            }
+            if (_hubDownloads.IsVisible) _hubDownloads.Hide();
+            else { _hubDownloads.Show(); _hubDownloads.Activate(); }
+            return;
+        }
+
         if (_downloaderWindow is null)
         {
             _downloaderWindow = new DownloaderWindow(_config, _configService);
@@ -1281,6 +1300,7 @@ public partial class MainWindow : Window
         _reminderWidget?.ForceClose();
         _recipeWidget?.ForceClose();
         _downloaderWindow?.ForceClose();
+        _hubDownloads?.ForceClose();
         _settingsView?.ForceClose();
         _calendarToast?.ForceClose();
         _midnightTimer?.Stop();
