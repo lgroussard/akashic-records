@@ -18,6 +18,11 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- The reminder alarm is lost when the phone restarts: armed again at boot. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- The next-ticket widget appears right an hour before a departure (an inexact alarm can come much later). -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission
+        android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        android:maxSdkVersion="32" />
     <!-- Downloads written to Music/ on Android 9 and below (MediaStore is used from Android 10). -->
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
@@ -103,6 +108,21 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
+        </receiver>
+        <!-- Next-ticket widget: the moment a ticket comes into or out of view. -->
+        <receiver
+            android:name=".widgets.TicketWidgetAlarmReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".widgets.TicketWidgetReceiver"
+            android:exported="true"
+            android:label="Akashic · Billet">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_ticket" />
         </receiver>
         <!-- Home-screen widgets: a launcher page of them stands in for "swipe right to Akashic". -->
         <receiver

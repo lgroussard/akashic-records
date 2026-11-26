@@ -146,7 +146,10 @@ object SyncService {
             mutex.unlock()
             publish(app, busy = false)
         }
-        if (report != null && report.received + (lastFiles?.downloaded ?: 0) > 0) _dataVersion.value++
+        if (report != null && report.received + (lastFiles?.downloaded ?: 0) > 0) {
+            _dataVersion.value++
+            runCatching { com.akashicrecords.widgets.Widgets.refreshTicket(app) } // a ticket may have come in
+        }
         if (report != null && report.setAside > 0) refreshConflicts(app)
         // Download requests made while the hub could not be reached: it can now.
         if (report != null) runCatching { com.akashicrecords.music.HubDownloads.send(app, AkashicDatabase.get(app)) }

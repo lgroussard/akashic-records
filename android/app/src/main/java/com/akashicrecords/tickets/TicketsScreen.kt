@@ -277,9 +277,11 @@ fun TicketViewer(db: AkashicDatabase, tickets: List<Ticket>, start: Int, onClose
             }
             SwipePages(
                 count = list.size, page = page, onPageChange = { page = it }, modifier = Modifier.fillMaxWidth().weight(1f),
-                key = { list[it].Id }, userScrollEnabled = !zoomedIn,
+                // getOrNull: right after a delete the pager may still ask for the page that just went (crashed).
+                key = { list.getOrNull(it)?.Id ?: "gone$it" }, userScrollEnabled = !zoomedIn,
             ) { i ->
-                TicketPages(list[i]) { z -> if (i == page) zoomedIn = z }
+                val t = list.getOrNull(i) ?: return@SwipePages
+                TicketPages(t) { z -> if (i == page) zoomedIn = z }
             }
         }
         if (confirm) ConfirmDelete("le billet « ${current.Title} »", onConfirm = {
@@ -379,7 +381,7 @@ private fun TicketPages(t: Ticket, onZoomed: (Boolean) -> Unit) {
 // ---- The Billets list (shortcut, calendar header): coming up first, then past ones ----
 
 @Composable
-fun TicketsHub(db: AkashicDatabase, onClose: () -> Unit, openCurrent: Boolean = false) {
+fun TicketsHub(db: AkashicDatabase, onClose: () -> Unit, openCurrent: Boolean = false, openId: Int? = null) {
     val scope = rememberCoroutineScope()
     var version by remember { mutableStateOf(0) }
     var coming by remember { mutableStateOf<List<Ticket>>(emptyList()) }
@@ -399,8 +401,16 @@ fun TicketsHub(db: AkashicDatabase, onClose: () -> Unit, openCurrent: Boolean = 
         loaded = true
     }
     // From the « Billets » shortcut: straight to today's tickets (or the next ones), the list behind.
-    LaunchedEffect(openCurrent) {
+    // From the next-ticket widget (openId): that ticket, among the others of its day.
+    LaunchedEffect(openCurrent, openId) {
         if (!openCurrent) return@LaunchedEffect
+        val day = openId?.let { id ->
+            withContext(Dispatchers.IO) {
+                val t = db.ticketDao().getAll().firstOrNull { it.Id == id } ?: return@withContext null
+                db.ticketDao().from(t.Date).filter { it.Date == t.Date }
+            }
+        }
+        if (day != null) { viewing = day to day.indexOfFirst { it.Id == openId }.coerceAtLeast(0); return@LaunchedEffect }
         val now = withContext(Dispatchers.IO) { TicketStore.current(db) }
         if (now.isNotEmpty()) viewing = now to TicketStore.currentIndex(now)
     }
