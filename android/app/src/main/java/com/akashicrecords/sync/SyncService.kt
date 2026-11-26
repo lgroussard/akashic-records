@@ -116,23 +116,16 @@ object SyncService {
             publish(app, busy = true)
             // What is typed on the open page and not saved yet goes to the database first.
             withContext(Dispatchers.Main) { com.akashicrecords.journaux.PendingEdits.flushAll() }
+            // The rows only: a second or two. The files (pictures, music: possibly large, possibly over a slow
+            // link) move afterwards on their own (syncFiles), so a change made here never waits behind them.
             report = withContext(Dispatchers.IO) {
                 val db = AkashicDatabase.get(app).openHelper.writableDatabase
-                val hub = HubClient(url, token)
-                // The files the rows point at: sent before the rows, fetched after (see FileSync).
                 FileSync.ensureSchema(db)
-                // Music lives in the phone's shared Music folder, and only the chosen tracks are fetched.
-                val music = MusicFiles(app, com.akashicrecords.data.ConfigStore(app).musicFolder())
-                val fileSync = FileSync(db, app.filesDir, app.cacheDir, hub, AkashicCatalog.fileColumns, music)
-                val files = FileSyncReport()
-                fileSync.publish(files)
-                val rows = SyncEngine(db, hub, TABLES).run()
-                fileSync.fetch(files)
-                lastFiles = files
-                rows
+                SyncEngine(db, HubClient(url, token), TABLES).run()
             }
             lastSuccess = SimpleDateFormat("HH:mm:ss", Locale.FRANCE).format(Date())
             lastWhat = (if (report.nothingToDo) "rien à échanger" else "${report.pushed} envoyé(s), ${report.received} reçu(s)") +
+                (lastFiles?.takeIf { it.toSend + it.toFetch > 0 }?.let { " ; fichiers en cours : ${it.toSend} à envoyer, ${it.toFetch} à recevoir" } ?: "") +
                 (lastFiles?.takeIf { it.uploaded + it.downloaded > 0 }?.let { " ; fichiers : ${it.uploaded} envoyé(s), ${it.downloaded} reçu(s)" } ?: "") +
                 (lastFiles?.takeIf { it.failed > 0 }?.let { " ; ${it.failed} fichier(s) non écrit(s) ici, dont ${it.lastFailure}" } ?: "")
             lastError = null
@@ -146,19 +139,50 @@ object SyncService {
             mutex.unlock()
             publish(app, busy = false)
         }
-        if (report != null && report.received + (lastFiles?.downloaded ?: 0) > 0) _dataVersion.value++
+        if (report != null && report.received > 0) _dataVersion.value++
         if (report != null && report.setAside > 0) refreshConflicts(app)
         // Download requests made while the hub could not be reached: it can now.
         if (report != null) runCatching { com.akashicrecords.music.HubDownloads.send(app, AkashicDatabase.get(app)) }
         // Asked for while this run was going: once more now (never in its place, never cancelling it).
         if (again) { again = false; requestSoon(app, 1) }
-        lastFiles?.let { f ->
-            // A kept track has arrived: the music library rescans. And a run that stopped at its time budget
-            // after moving something goes on right away, so a batch of tracks does not wait for the next period.
-            if (f.downloadedMusic > 0) com.akashicrecords.music.Downloader.notifyLibraryChanged()
-            if (report != null && f.uploaded + f.downloaded > 0 && f.toSend + f.toFetch > 0) requestSoon(app, 1)
-        }
+        // Then the files, apart (never holding up the next run of rows).
+        if (report != null) scope.launch { syncFiles(app, url, token) }
         return report
+    }
+
+    private val fileMutex = Mutex()
+
+    /**
+     * The files the rows point at (see FileSync): this phone's new ones sent and listed, the listed ones it lacks
+     * fetched. One transfer at a time, apart from the rows: a large track over a slow link no longer delays a
+     * change. Files listed here are announced at once by a run of rows.
+     */
+    private suspend fun syncFiles(app: Context, url: String, token: String) {
+        if (!fileMutex.tryLock()) return // a transfer is going: it picks up the rest itself
+        val files = FileSyncReport()
+        try {
+            withContext(Dispatchers.IO) {
+                val db = AkashicDatabase.get(app).openHelper.writableDatabase
+                val hub = HubClient(url, token)
+                val music = MusicFiles(app, com.akashicrecords.data.ConfigStore(app).musicFolder())
+                val fileSync = FileSync(db, app.filesDir, app.cacheDir, hub, AkashicCatalog.fileColumns, music)
+                fileSync.publish(files)
+                // Newly listed files go to the hub with the rows, without waiting for the fetch.
+                if (files.uploaded > 0 || files.listed > 0) runCatching { if (mutex.tryLock()) try { SyncEngine(db, hub, TABLES).run() } finally { mutex.unlock() } }
+                fileSync.fetch(files)
+            }
+        } catch (e: Exception) {
+            files.lastFailure = e.message ?: e.javaClass.simpleName
+        } finally {
+            fileMutex.unlock()
+        }
+        lastFiles = files
+        publish(app, busy = false)
+        if (files.downloaded > 0) _dataVersion.value++
+        // A kept track has arrived: the music library rescans. A transfer that stopped at its time budget after
+        // moving something goes on right away, so a batch does not wait for the next period.
+        if (files.downloadedMusic > 0) com.akashicrecords.music.Downloader.notifyLibraryChanged()
+        if (files.uploaded + files.downloaded > 0 && files.toSend + files.toFetch > 0) scope.launch { kotlinx.coroutines.delay(1_000); syncFiles(app, url, token) }
     }
 
     /** Pairs this phone with a hub (one-time code shown on the hub), then syncs once.

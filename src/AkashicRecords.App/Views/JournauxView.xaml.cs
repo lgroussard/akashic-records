@@ -1744,6 +1744,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
                 // no text field has the keyboard.
                 if (_activeTab == "Poetry") RefreshPoetry();
                 else if (_activeTab == "Artistic") RefreshProjectsList();
+                else if (_activeTab == "References") ReferencesPane.Refresh();
             }
         }
         finally

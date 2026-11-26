@@ -15,6 +15,7 @@ class FileSyncReport {
     var toFetch = 0
     var failed = 0   // could not be written here (see lastFailure); the others still move
     var lastFailure: String? = null
+    var listed = 0   // files of this phone newly listed (their content already on the hub)
 }
 
 /**
@@ -94,7 +95,7 @@ class FileSync(
             }
             // Listed once, unless the catalogue already lists that path (the PC may spell its case differently).
             val listed = db.query("SELECT COUNT(*) FROM sync_file WHERE lower(Path) = ?", arrayOf<Any?>(c.path.lowercase())).use { cur -> cur.moveToFirst() && cur.getLong(0) > 0 }
-            if (!listed) db.execSQL("INSERT OR IGNORE INTO sync_file(Path, Hash, Size) VALUES (?, ?, ?)", arrayOf<Any?>(c.path, known, c.size))
+            if (!listed) { db.execSQL("INSERT OR IGNORE INTO sync_file(Path, Hash, Size) VALUES (?, ?, ?)", arrayOf<Any?>(c.path, known, c.size)); report.listed++ }
         }
     }
 
