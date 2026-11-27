@@ -92,6 +92,13 @@
                     <TextBlock Text="SERVEUR" FontWeight="Bold" Foreground="White" FontSize="14"/>
                     <TextBlock x:Name="Subtitle" Text="  ·  le mini-PC qui garde tout" Foreground="{StaticResource Faint}" FontSize="12" VerticalAlignment="Center"/>
                 </StackPanel>
+                <!-- Which disks: the mini-PC's (the hub's state and its folders) or this PC's own. -->
+                <Border HorizontalAlignment="Center" Background="#20203A" CornerRadius="7" Padding="2">
+                    <StackPanel Orientation="Horizontal">
+                        <Button x:Name="HubTab" Content="Mini-PC" Style="{StaticResource Flat}" Padding="12,3" Click="HubTab_OnClick"/>
+                        <Button x:Name="PcTab" Content="Ce PC" Style="{StaticResource Flat}" Padding="12,3" Click="PcTab_OnClick"/>
+                    </StackPanel>
+                </Border>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                     <Button Content="↻" Style="{StaticResource Flat}" Click="Refresh_OnClick" ToolTip="Actualiser" Margin="0,0,4,0"/>
                     <Button Content="✕" Style="{StaticResource Flat}" Click="Close_OnClick" ToolTip="Fermer"/>

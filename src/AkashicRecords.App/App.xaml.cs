@@ -241,10 +241,13 @@ public partial class App : Application
         {
             var server = new ServerWindow { WindowStartupLocation = WindowStartupLocation.Manual, Left = 0, Top = 0 };
             server.Show();
-            if (subTab is not null) _ = server.BrowseAsync(subTab.Replace('|', '/'));
+            // "pc" or "pc:|C:|Users": this PC's disks; else a folder of the mini-PC.
+            if (subTab is "pc" || subTab?.StartsWith("pc:") == true) _ = server.ShowLocalAsync(true, subTab.Length > 3 ? subTab[3..].Replace('|', '/') : null);
+            else if (subTab is not null) _ = server.BrowseAsync(subTab.Replace('|', '/'));
             var serverSettle = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(4000) };
             serverSettle.Tick += (_, _) =>
             {
+                if (LocalDisk.Measuring) return; // this PC being measured: wait for the result
                 serverSettle.Stop();
                 try { CaptureElement((FrameworkElement)server.Content, outputPath); }
                 catch (Exception ex) { LogCrash(ex); }

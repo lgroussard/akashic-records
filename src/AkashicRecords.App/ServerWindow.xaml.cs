@@ -44,12 +44,24 @@ public partial class ServerWindow : Window
     private string? _browsePath;   // null: the overview; else the folder of the server shown in the browser
     private HubDiskView? _disk;
     private string? _diskError;
+    private bool _local;           // « Ce PC »: this PC's own disks (LocalDisk) instead of the mini-PC's
+    private TextBlock? _measureText;
+    private static string MeasureLine() => $"Mesure des disques en cours : {LocalDisk.FilesSeen:N0} fichiers vus. Quelques minutes pour tout le PC, l'écran se met à jour tout seul.";
+    private readonly DispatcherTimer _measureTimer = new() { Interval = TimeSpan.FromSeconds(1) };
 
     public ServerWindow()
     {
         InitializeComponent();
+        // While this PC is measured: the count of files seen, then the result as soon as it is there.
+        _measureTimer.Tick += (_, _) =>
+        {
+            if (!LocalDisk.Measuring) { _measureTimer.Stop(); if (_local) _ = BrowseAsync(_browsePath ?? "/"); return; }
+            if (_local && _measureText is not null) _measureText.Text = MeasureLine();
+        };
+        ShowTabs();
         _timer.Tick += async (_, _) =>
         {
+            if (_local) return;
             if (_browsePath is null) await RefreshAsync();
             else if (_disk?.Refreshing == true) await BrowseAsync(_browsePath); // a new measure is on its way
         };
@@ -186,9 +198,43 @@ public partial class ServerWindow : Window
         B(0xEF, 0x44, 0x44), B(0x84, 0xCC, 0x16), B(0x06, 0xB6, 0xD4), B(0xE8, 0x79, 0xF9), B(0xFB, 0x92, 0x3C),
     };
 
+    /// <summary>Shows this PC's disks (true) or the mini-PC (false).</summary>
+    internal async Task ShowLocalAsync(bool local, string? path = null)
+    {
+        if (local == _local && path is null && (!local || _browsePath is not null)) return; // already there: stay where it was
+        _local = local;
+        ShowTabs();
+        if (local) await BrowseAsync(path ?? "/");
+        else { _browsePath = null; _disk = null; Render(); await RefreshAsync(); }
+    }
+
+    private void ShowTabs()
+    {
+        foreach (var (tab, on) in new[] { (HubTab, !_local), (PcTab, _local) })
+        {
+            tab.Foreground = on ? Brushes.White : Muted;
+            tab.FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal;
+        }
+        Subtitle.Text = _local ? "  ·  les disques de cet ordinateur" : _status is { } st ? $"  ·  {st.Host}" : "  ·  le mini-PC qui garde tout";
+    }
+
+    private async void HubTab_OnClick(object sender, RoutedEventArgs e) { if (_local) await ShowLocalAsync(false); }
+    private async void PcTab_OnClick(object sender, RoutedEventArgs e) { if (!_local) await ShowLocalAsync(true); }
+
     internal async Task BrowseAsync(string path, bool refresh = false)
     {
         _browsePath = path;
+        if (_local)
+        {
+            _disk = LocalDisk.Browse(path);
+            // Never measured yet, or asked: measure now (in the background, the count shows meanwhile).
+            if (refresh || (_disk.State == "none" && !LocalDisk.Measuring)) { LocalDisk.StartMeasure(); _disk = _disk with { Refreshing = true }; }
+            if (LocalDisk.Measuring) _measureTimer.Start();
+            _browsePath = _disk.Path;
+            _diskError = null;
+            Render();
+            return;
+        }
         var s = SyncService.Instance.Settings;
         try
         {
@@ -210,7 +256,7 @@ public partial class ServerWindow : Window
         var top = new DockPanel { Margin = new Thickness(0, 0, 0, 12) };
         var back = new Button { Content = "‹ Vue d'ensemble", Style = (Style)FindResource("Btn"), Margin = new Thickness(0, 0, 12, 0) };
         back.Click += (_, _) => { _browsePath = null; Render(); };
-        top.Children.Add(back);
+        if (!_local) top.Children.Add(back);
         var refresh = new Button { Content = _disk?.Refreshing == true ? "Mesure en cours…" : "↻ Mesurer à nouveau", Style = (Style)FindResource("Btn"), IsEnabled = _disk?.Refreshing != true };
         refresh.Click += async (_, _) => await BrowseAsync(_browsePath ?? "/", refresh: true);
         DockPanel.SetDock(refresh, Dock.Right);
@@ -225,7 +271,7 @@ public partial class ServerWindow : Window
             b.Click += async (_, _) => await BrowseAsync(target);
             crumbs.Children.Add(b);
         }
-        Crumb(_disk?.Root is { Length: > 0 } r ? r : "/", "/", parts.Length == 0);
+        Crumb(_local ? "Ce PC" : _disk?.Root is { Length: > 0 } r ? r : "/", "/", parts.Length == 0);
         for (var i = 0; i < parts.Length; i++)
         {
             crumbs.Children.Add(new TextBlock { Text = "›", Foreground = Faint, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 0, 2, 0) });
@@ -237,8 +283,11 @@ public partial class ServerWindow : Window
         if (_diskError is not null) LeftPanel.Children.Add(Text(_diskError, 12, Warn));
         var d = _disk;
         if (d is null) { LeftPanel.Children.Add(Text("Lecture…", 13, Muted)); return; }
+        if (_local && LocalDisk.Measuring)
+            LeftPanel.Children.Add(_measureText = Text(MeasureLine(), 13, Late));
         if (d.State == "none")
         {
+            if (_local) return;
             LeftPanel.Children.Add(Text(d.Refreshing
                 ? "Première mesure du disque en cours : quelques minutes. L'écran se mettra à jour tout seul."
                 : "Le disque n'a pas encore été mesuré. Touche « Mesurer à nouveau » (il faut que le serveur ait été mis à jour).", 13, Muted));
@@ -247,6 +296,14 @@ public partial class ServerWindow : Window
 
         var head = Card(LeftPanel, "CE DOSSIER");
         head.Children.Add(Text($"{Size(d.Size)}  ·  {d.Files:N0} fichiers", 15, Brushes.White, bold: true));
+        // This PC: each disk's room, as Windows reports it now.
+        var disks = _local ? LocalDisk.DiskSpace() : new();
+        if (_local)
+        {
+            var here = parts.FirstOrDefault();
+            foreach (var (dn, dl, dt, df) in disks.Where(x => here is null || string.Equals(x.Name, here, StringComparison.OrdinalIgnoreCase)))
+                head.Children.Add(Text($"{dn}{(dl.Length > 0 ? " (" + dl + ")" : "")} : {Size(dt - df)} utilisés sur {Size(dt)}  ·  {Size(df)} libres", 12, df < dt / 10 ? Warn : Muted));
+        }
         if (d.Catalogue && d.Path.EndsWith(DiskOutsideName))
             head.Children.Add(Text("Fichiers que le serveur garde sans fiche dans l'app : images envoyées à Agrandir, photos supprimées… Ceux que plus rien n'utilise sont effacés 30 jours après.", 12, Muted));
         else if (d.Catalogue)
@@ -278,8 +335,10 @@ public partial class ServerWindow : Window
             {
                 var f = d.Folders[i];
                 var color = f.Size > 0 ? FolderColors[i % FolderColors.Length] : Faint;
-                var note = f.Mount ? "autre disque ou dossier système, non mesuré" : f.Denied ? "illisible" : $"{Size(f.Size)}  ·  {f.Files:N0} fichiers";
-                var row = Row(color, "📁  " + f.Name, note, d.Size > 0 ? (double)f.Size / d.Size : 0, clickable: f.HasChildren && !f.Mount && !f.Denied);
+                var note = f.Mount ? (_local ? "en ligne, pas sur ce PC : non mesuré" : "autre disque ou dossier système, non mesuré") : f.Denied ? (f.Size > 0 ? $"{Size(f.Size)}  ·  non lisible" : "illisible") : $"{Size(f.Size)}  ·  {f.Files:N0} fichiers";
+                var disk = _local && parts.Length == 0 ? disks.FirstOrDefault(x => x.Name == f.Name) : default;
+                var title = disk.Name is not null ? "  " + f.Name + (disk.Label.Length > 0 ? "  " + disk.Label : "") : (f.Denied && f.Size > 0 ? "🔒  " : "📁  ") + f.Name;
+                var row = Row(color, title, note, d.Size > 0 ? (double)f.Size / d.Size : 0, clickable: f.HasChildren && !f.Mount && !f.Denied);
                 var target = (_browsePath == "/" ? "" : _browsePath) + "/" + f.Name;
                 if (f.HasChildren && !f.Mount && !f.Denied) row.MouseLeftButtonUp += async (_, _) => await BrowseAsync(target);
                 list.Children.Add(row);
@@ -293,7 +352,9 @@ public partial class ServerWindow : Window
             foreach (var f in d.Largest) files.Children.Add(FileRow(f));
             if (d.OtherFilesBytes > 0) files.Children.Add(Text($"+ les autres fichiers : {Size(d.OtherFilesBytes)}", 11, Faint));
         }
-        Footer.Text = "Lecture seule : la mesure est faite chaque nuit par le mini-PC, ou quand tu la demandes.";
+        Footer.Text = _local
+            ? "Lecture seule. Les fichiers seulement dans le cloud (OneDrive « en ligne ») ne prennent pas de place ici et comptent 0. « Système et dossiers non lisibles » : ce que Windows ne laisse pas lire sans droits d'administrateur."
+            : "Lecture seule : la mesure est faite chaque nuit par le mini-PC, ou quand tu la demandes.";
     }
 
     private const string DiskOutsideName = "Fichiers du serveur hors catalogue"; // the hub's DiskIndex.OutsideName
@@ -319,8 +380,9 @@ public partial class ServerWindow : Window
         box.Child = new TextBlock { Text = IconOf(f.Kind), FontSize = 18, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Foreground = Muted };
         grid.Children.Add(box);
         if (f.Hash is { } hash && f.Kind is "image" or "unknown" or "music") _ = LoadThumb(hash, box);
+        else if (_local && f.Kind == "image" && f.Label is { } file) _ = LoadLocalThumb(file, box);
 
-        var label = f.Label ?? (f.Hash is null ? f.Name : "Fichier du serveur (hors catalogue)");
+        var label = _local ? f.Name : f.Label ?? (f.Hash is null ? f.Name : "Fichier du serveur (hors catalogue)");
         var name = label.Contains('/') ? label[(label.LastIndexOf('/') + 1)..] : label;
         var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         text.Children.Add(new TextBlock { Text = name, Foreground = Brushes.White, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis });
@@ -334,6 +396,27 @@ public partial class ServerWindow : Window
         var size = new TextBlock { Text = Size(f.Size), Foreground = Muted, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
         Grid.SetColumn(size, 2); grid.Children.Add(size);
         return new Border { Child = grid, Padding = new Thickness(6, 3, 6, 3) };
+    }
+
+    // A picture of this PC: read from its file, small, away from the screen's thread.
+    private static async Task LoadLocalThumb(string file, Border box)
+    {
+        var image = await Task.Run(() =>
+        {
+            try
+            {
+                var bmp = new System.Windows.Media.Imaging.BitmapImage();
+                bmp.BeginInit();
+                bmp.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+                bmp.DecodePixelWidth = 96;
+                bmp.UriSource = new Uri(file);
+                bmp.EndInit();
+                bmp.Freeze();
+                return bmp;
+            }
+            catch (Exception) { return null; }
+        });
+        if (image is not null) box.Child = new Image { Source = image, Stretch = Stretch.UniformToFill };
     }
 
     private static async Task LoadThumb(string hash, Border box)

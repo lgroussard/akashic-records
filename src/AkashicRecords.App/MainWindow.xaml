@@ -143,6 +143,7 @@
                                 <MenuItem Header="Téléchargements" Click="ToolsDownloads_OnClick"/>
                                 <MenuItem Header="Agrandir des images" Click="ToolsUpscale_OnClick"/>
                                 <MenuItem Header="Serveur" Click="ToolsServer_OnClick"/>
+                                <MenuItem Header="Disques de ce PC" Click="ToolsDisks_OnClick"/>
                             </ContextMenu>
                         </Button.ContextMenu>
                     </Button>
