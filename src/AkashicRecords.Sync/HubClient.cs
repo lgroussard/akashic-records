@@ -20,6 +20,15 @@ public sealed record HubDownloadJob(string Id, string Query, string Label, strin
 public sealed record HubDownloadTool(string? Version, string? Problem, string? Current);
 public sealed record HubDownloadBoard(bool Enabled, HubDownloadTool Tool, List<HubDownloadZone> Zones, List<HubDownloadJob> Jobs, List<string> Folders);
 
+// The "Serveur" screen (the hub's ServerStatus.cs): room, last backup, devices, the hub's own work.
+public sealed record HubServerDisk(string Path, long Total, long Free);
+public sealed record HubStorageKind(string Kind, long Files, long Bytes);
+public sealed record HubBackupStatus(string State, string? At, string? LastOkAt, string? Message, long? Bytes, long? Files, long? DiskTotal, long? DiskFree, long? Seconds);
+public sealed record HubServerDevice(string Name, string? LastSeenAt, string? LastChangeAt, long Changes, bool Revoked, bool Hub);
+public sealed record HubWork(int Queued, int Running, int Failed, int Done);
+public sealed record HubServerStatus(string Version, string Host, string StartedAt, HubServerDisk? Disk, List<HubStorageKind> Storage,
+    long BlobBytes, long BlobFiles, HubBackupStatus Backup, List<HubServerDevice> Devices, Dictionary<string, long> Entities, HubWork Downloads, HubWork Compute);
+
 // Shared computing (the hub's Compute.cs): the hub keeps the model, devices run it when they can.
 public sealed record HubComputeModel(string Name, string Label, string Description, bool Hub, List<string>? Runners);
 public sealed record HubComputeWorker(string Device, string Name, string Rid, int Models, bool Busy, int SeenSecondsAgo);
@@ -110,6 +119,9 @@ public sealed class HubClient : IDisposable
 
     public async Task RemoveZoneAsync(string id, CancellationToken ct = default) =>
         await Ensure(await Send(() => _http.DeleteAsync($"downloads/zones/{id}", ct)), ct);
+
+    public async Task<HubServerStatus> ServerAsync(CancellationToken ct = default) =>
+        await Read<HubServerStatus>(await Send(() => _http.GetAsync("server", ct)), ct);
 
     // ---- Shared computing.
 

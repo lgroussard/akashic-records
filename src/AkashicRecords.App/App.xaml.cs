@@ -235,6 +235,23 @@ public partial class App : Application
             return;
         }
 
+        // The hub's state (needs this copy paired with a hub).
+        if (section == "Serveur")
+        {
+            var server = new ServerWindow { WindowStartupLocation = WindowStartupLocation.Manual, Left = 0, Top = 0 };
+            server.Show();
+            var serverSettle = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(4000) };
+            serverSettle.Tick += (_, _) =>
+            {
+                serverSettle.Stop();
+                try { CaptureElement((FrameworkElement)server.Content, outputPath); }
+                catch (Exception ex) { LogCrash(ex); }
+                finally { server.ForceClose(); Shutdown(); }
+            };
+            serverSettle.Start();
+            return;
+        }
+
         // The image upscaler (needs this copy paired with a hub: config\sync.json).
         if (section == "Agrandir")
         {

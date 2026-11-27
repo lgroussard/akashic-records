@@ -34,6 +34,7 @@ public partial class MainWindow : Window
     private DownloaderWindow? _downloaderWindow;
     private HubDownloadsWindow? _hubDownloads;
     private UpscaleWindow? _upscale;
+    private ServerWindow? _server;
     private Views.SettingsView? _settingsView;
     private bool _isExiting;
     private string? _activeSection;
@@ -151,6 +152,7 @@ public partial class MainWindow : Window
         _trayIcon.RecipeWidgetToggled += OnRecipeWidgetToggled;
         _trayIcon.DownloaderRequested += ToggleDownloader;
         _trayIcon.UpscaleRequested += ShowUpscale;
+        _trayIcon.ServerRequested += ShowServer;
 
         // Ctrl+Alt+Space may belong to another program: the app then runs without its shortcut (the tray
         // icon still shows and hides it) instead of stopping here with no widgets and no notifications.
@@ -947,6 +949,15 @@ public partial class MainWindow : Window
         _ => result.Section,
     };
 
+    // The hub's state (disk, backup, devices); created on first use, then hidden and shown again.
+    private void ShowServer()
+    {
+        _server ??= new ServerWindow();
+        _server.Show();
+        if (_server.WindowState == WindowState.Minimized) _server.WindowState = WindowState.Normal;
+        _server.Activate();
+    }
+
     // The image upscaler (shared computing through the hub); created on first use, then hidden and shown again.
     private void ShowUpscale()
     {
@@ -1325,6 +1336,7 @@ public partial class MainWindow : Window
         _downloaderWindow?.ForceClose();
         _hubDownloads?.ForceClose();
         _upscale?.ForceClose();
+        _server?.ForceClose();
         _settingsView?.ForceClose();
         _calendarToast?.ForceClose();
         _midnightTimer?.Stop();
