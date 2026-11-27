@@ -29,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -150,7 +151,7 @@ internal fun DiskBrowser(path: String, onPath: (String?) -> Unit, onClose: () ->
 
                 if (largest.isNotEmpty()) Card("PLUS GROS FICHIERS") {
                     largest.forEach { f ->
-                        BrowseRow(Palette.TextFaint, f.optString("name"), size(f.optLong("size")), if (total > 0) f.optLong("size").toFloat() / total else 0f, null)
+                        FileRow(f)
                     }
                     val other = v.optLong("other_files_bytes")
                     if (other > 0) Text("+ les autres fichiers : ${size(other)}", fontSize = 11.sp, color = Palette.TextFaint)
@@ -180,5 +181,42 @@ private fun BrowseRow(color: Color, name: String, value: String, share: Float, o
         Box(Modifier.padding(start = 18.dp, top = 4.dp).fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Palette.Surface1)) {
             Box(Modifier.fillMaxWidth(share.coerceIn(0.002f, 1f)).fillMaxHeight().background(color))
         }
+    }
+}
+
+private fun iconOf(kind: String) = when (kind) {
+    "image" -> "🖼"; "music" -> "🎵"; "book" -> "📖"; "video" -> "🎬"; "document" -> "📄"; "unknown" -> "🧩"; else -> "📦"
+}
+
+// A file: its preview (pictures and album covers of the catalogue, from the hub) or an icon, what it is (its name in
+// Akashic for a blob named by its hash), where it is in Akashic, its size.
+@Composable
+private fun FileRow(f: JSONObject) {
+    val context = LocalContext.current
+    val kind = f.optString("kind", "other")
+    val hash = f.str("hash")
+    val label = f.str("label") ?: if (hash == null) f.optString("name") else "Fichier du serveur (hors catalogue)"
+    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(44.dp).clip(RoundedCornerShape(6.dp)).background(Palette.Surface1), contentAlignment = Alignment.Center) {
+            Text(iconOf(kind), fontSize = 18.sp)
+            if (hash != null && kind in setOf("image", "unknown", "music")) {
+                // Over the icon once it arrives; nothing for a file the hub cannot preview.
+                var thumb by remember(hash) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+                LaunchedEffect(hash) {
+                    thumb = withContext(Dispatchers.IO) {
+                        com.akashicrecords.archives.HubPhotos.thumb(context, hash)?.let { com.akashicrecords.media.MediaFiles.decode(it, 120) }
+                    }?.asImageBitmap()
+                }
+                thumb?.let { androidx.compose.foundation.Image(it, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.size(44.dp)) }
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(label.substringAfterLast('/'), fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            val where = if (label.contains('/') && f.str("label") != null) "dans Akashic : " + label.substringBeforeLast('/') else null
+            if (where != null) Text(where, fontSize = 11.sp, color = Palette.TextFaint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(size(f.optLong("size")), fontSize = 12.sp, color = Palette.TextMuted)
     }
 }

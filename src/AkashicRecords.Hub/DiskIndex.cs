@@ -135,7 +135,10 @@ public static class DiskIndex
     // ------------------------------------------------------------------ reading (the hub)
 
     public sealed record Folder(string Name, long Size, long Files, bool Denied, bool Mount, bool HasChildren);
-    public sealed record FileEntry(string Name, long Size);
+    /// <summary>A file of the folder. A blob of the catalogue (named by its hash) also says what it is there: Label =
+    /// its path in the catalogue, Hash = for the apps to ask for its preview (GET /media/{hash}/thumb). Kind: image,
+    /// music, book, video, document, other; "unknown" for a blob the catalogue does not list (results of the hub's work).</summary>
+    public sealed record FileEntry(string Name, long Size, string Kind = "other", string? Label = null, string? Hash = null);
     public sealed record View(
         string State, string? At, long? Seconds, bool Refreshing, string Root, string Path, long Size, long Files,
         List<Folder> Folders, List<FileEntry> Largest, long OtherFilesBytes, long SmallFoldersBytes, long SmallFolders);
@@ -144,7 +147,7 @@ public static class DiskIndex
     private static readonly object Gate = new();
 
     /// <summary>One folder of the index and what is directly in it; path "" or "/" = the root.</summary>
-    public static View Browse(HubOptions options, string? path)
+    public static View Browse(HubOptions options, string? path, HubStore? store = null)
     {
         var file = System.IO.Path.Combine(options.DataDir, FileName);
         var refreshing = File.Exists(System.IO.Path.Combine(options.DataDir, RequestName));
@@ -165,7 +168,7 @@ public static class DiskIndex
         var folders = (node["d"] as JsonArray)?.OfType<JsonObject>().Select(c => new Folder(
             c["n"]!.GetValue<string>(), c["s"]!.GetValue<long>(), c["f"]?.GetValue<long>() ?? 0,
             c["x"] is not null, c["m"] is not null, c["d"] is JsonArray { Count: > 0 } || c["t"] is not null)).ToList() ?? new();
-        var largest = (node["t"] as JsonArray)?.OfType<JsonArray>().Select(t => new FileEntry(t[0]!.GetValue<string>(), t[1]!.GetValue<long>())).ToList() ?? new();
+        var largest = Describe((node["t"] as JsonArray)?.OfType<JsonArray>().Select(t => new FileEntry(t[0]!.GetValue<string>(), t[1]!.GetValue<long>())).ToList() ?? new(), store);
         var size = node["s"]!.GetValue<long>();
         var small = node["o"]?.GetValue<long>() ?? 0;
         var otherFiles = Math.Max(0, size - folders.Sum(f => f.Size) - small - largest.Sum(f => f.Size));
@@ -173,6 +176,32 @@ public static class DiskIndex
         return new View("ready", doc["at"]?.GetValue<string>(), doc["seconds"]?.GetValue<long>(), refreshing, root,
             "/" + string.Join('/', walked), size, node["f"]?.GetValue<long>() ?? 0, folders, largest, otherFiles, small,
             node["oc"]?.GetValue<long>() ?? 0);
+    }
+
+    private static readonly Dictionary<string, string> Kinds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        [".jpg"] = "image", [".jpeg"] = "image", [".png"] = "image", [".webp"] = "image", [".heic"] = "image", [".heif"] = "image",
+        [".gif"] = "image", [".bmp"] = "image", [".tif"] = "image", [".tiff"] = "image", [".avif"] = "image",
+        [".mp3"] = "music", [".flac"] = "music", [".m4a"] = "music", [".ogg"] = "music", [".opus"] = "music", [".wav"] = "music", [".aac"] = "music",
+        [".epub"] = "book", [".pdf"] = "document", [".doc"] = "document", [".docx"] = "document", [".odt"] = "document", [".txt"] = "document",
+        [".mp4"] = "video", [".mkv"] = "video", [".avi"] = "video", [".mov"] = "video", [".webm"] = "video",
+    };
+
+    private static string KindOf(string name) => Kinds.TryGetValue(System.IO.Path.GetExtension(name), out var k) ? k : "other";
+
+    /// <summary>Each file's kind, and for the catalogue's blobs (hash names) what they are there.</summary>
+    private static List<FileEntry> Describe(List<FileEntry> files, HubStore? store)
+    {
+        var hashes = files.Select(f => f.Name.ToLowerInvariant()).Where(BlobStore.IsHash).ToList();
+        var known = hashes.Count > 0 && store is not null ? store.CataloguePaths(hashes) : new Dictionary<string, string>();
+        return files.Select(f =>
+        {
+            var h = f.Name.ToLowerInvariant();
+            if (!BlobStore.IsHash(h)) return f with { Kind = KindOf(f.Name) };
+            return known.TryGetValue(h, out var path)
+                ? f with { Kind = KindOf(path), Label = path, Hash = h }
+                : f with { Kind = "unknown", Hash = h };
+        }).ToList();
     }
 
     private static JsonObject? Load(string file)

@@ -1037,5 +1037,37 @@ await Scenario("18. Ecran Serveur : parcourir le disque dossier par dossier", as
         "Actualiser : le hub depose la demande pour la tache systeme");
 });
 
+await Scenario("19. Parcourir le disque : les fichiers du catalogue montrent ce qu'ils sont", async hub =>
+{
+    JsonElement Json(HttpResponseMessage r) => JsonDocument.Parse(r.Content.ReadAsStringAsync().Result).RootElement;
+    hub.EntityTypes.Add("MediaFile");
+    await hub.RestartAsync();
+    var pc = await hub.Device("pc");
+    var photo = new string('a', 64);
+    var orphan = new string('b', 64);
+    var push = new PushRequest(null, new List<Mutation>
+    {
+        new(Guid.NewGuid().ToString(), "MediaFile", "1", 0, JsonSerializer.SerializeToElement(new { Path = "media\\archive\\Plage.HEIC", Hash = photo, Size = 3 }), false),
+    });
+    await pc.Http.PostAsJsonAsync("/sync/push", push, SimDevice.Wire);
+
+    var disk = Path.Combine(hub.DataDir, "disque2", "aa");
+    Directory.CreateDirectory(disk);
+    using (var big = System.IO.File.Create(Path.Combine(disk, photo))) big.SetLength(2 * 1024 * 1024); // a folder under 1 MB would be folded
+    System.IO.File.WriteAllText(Path.Combine(disk, orphan), "x");
+    System.IO.File.WriteAllText(Path.Combine(disk, "chanson.mp3"), "m");
+    DiskIndex.Run(Path.Combine(hub.DataDir, "disque2"), Path.Combine(hub.DataDir, DiskIndex.FileName));
+
+    var files = Json(await pc.Http.GetAsync("/server/disk?path=/aa")).GetProperty("largest").EnumerateArray()
+        .ToDictionary(f => f.GetProperty("name").GetString()!, f => f);
+    var p = files[photo];
+    Check(p.GetProperty("label").GetString() == "media/archive/Plage.HEIC" && p.GetProperty("kind").GetString() == "image" && p.GetProperty("hash").GetString() == photo,
+        "fichier du catalogue : son chemin dans Akashic, son type, de quoi demander l'apercu");
+    Check(files[orphan].GetProperty("kind").GetString() == "unknown" && files[orphan].GetProperty("label").ValueKind == JsonValueKind.Null,
+        "fichier du serveur absent du catalogue : marque 'unknown'");
+    Check(files["chanson.mp3"].GetProperty("kind").GetString() == "music" && files["chanson.mp3"].GetProperty("hash").ValueKind == JsonValueKind.Null,
+        "fichier ordinaire : type d'apres son extension");
+});
+
 Console.WriteLine($"\n{passed} verifications reussies, {failures} en echec.");
 return failures == 0 ? 0 : 1;
