@@ -349,14 +349,20 @@ public sealed class ComfyUi
         // Kontext sees, and the sentence asks it to fill the grey. Tried on a removed person (2026-11-27): Kontext
         // alone sometimes drew the person back (it still saw them); a first pass of LaMa came out blurry (drawn small)
         // and Kontext copies the picture it is given, blur included; the grey hides the object and has no blur to copy.
+        // The redrawn zone reaches twice as far as the grey: where the grey met the photo, Kontext drew a faint light
+        // line (it copies edges); with that edge inside the redrawn ring, the line is gone (same request, same seed).
         var grow = erase ? Math.Max(8, (int)Math.Round(Math.Max(width, height) * 0.01)) : 0;
         var source = Out("1", 0);
         if (erase)
         {
-            mask = Grown(g, mask, width, height);
+            var painted0 = (JsonArray)mask.DeepClone();
+            var grey = Grown(g, mask, width, height);
             g["55"] = Node("EmptyImage", new { width, height, batch_size = 1, color = 0x808080 });
-            g["56"] = Node("ImageCompositeMasked", new { destination = Out("1", 0), source = Out("55", 0), x = 0, y = 0, resize_source = false, mask = (JsonArray)mask.DeepClone() });
+            g["56"] = Node("ImageCompositeMasked", new { destination = Out("1", 0), source = Out("55", 0), x = 0, y = 0, resize_source = false, mask = grey });
             source = Out("56", 0);
+            g["58"] = Node("GrowMask", new { mask = painted0, expand = grow * 2, tapered_corners = true });
+            mask = Out("58", 0);
+            grow *= 2;
             prompt += " Fill the plain grey area so it blends seamlessly with the rest of the photo, sharp and detailed, same lighting.";
         }
         var shape = Shaped(zone, maskText, grow, width, height);
