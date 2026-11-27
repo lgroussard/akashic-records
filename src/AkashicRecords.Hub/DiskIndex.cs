@@ -49,6 +49,13 @@ public static class DiskIndex
         return 0;
     }
 
+    /// <summary>Linux file systems that hold the mini-PC's own data: entered like any folder. Every mount point
+    /// is not another disk: systemd's protections (ProtectSystem, ReadWritePaths) re-mount /home, the hub's data…
+    /// read-only in the service's view, on the same disk.</summary>
+    private static readonly HashSet<string> LocalFileSystems = new(StringComparer.Ordinal) { "ext2", "ext3", "ext4", "xfs", "btrfs", "f2fs", "zfs", "jfs", "reiserfs" };
+
+    /// <summary>The mount points not to enter: the system's virtual ones (proc, tmpfs, snap images…) and other
+    /// disks, such as the backup disk (ntfs). They are listed, not measured.</summary>
     private static HashSet<string> OtherMounts(string root)
     {
         var set = new HashSet<string>(StringComparer.Ordinal);
@@ -56,9 +63,10 @@ public static class DiskIndex
         foreach (var line in File.ReadLines("/proc/self/mounts"))
         {
             var parts = line.Split(' ');
-            if (parts.Length < 2) continue;
+            if (parts.Length < 3) continue;
             var point = parts[1].Replace("\\040", " ");
-            if (point != root && point.StartsWith(root.TrimEnd('/') + "/")) set.Add(point);
+            if (point == root || !point.StartsWith(root.TrimEnd('/') + "/")) continue;
+            if (!LocalFileSystems.Contains(parts[2])) set.Add(point);
         }
         return set;
     }
