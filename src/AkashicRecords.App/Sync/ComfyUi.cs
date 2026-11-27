@@ -340,34 +340,32 @@ public sealed class ComfyUi
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException) { return false; }
     }
 
+    private static string PidFile => Path.Combine(AppContext.BaseDirectory, "compute", "comfyui.pid");
+
     private async Task EnsureRunningAsync()
     {
-        if (await UpAsync()) return;
+        if (await UpAsync())
+        {
+            Adopt();
+            return;
+        }
         var dir = Dir ?? throw new InvalidOperationException("Dossier ComfyUI non choisi.");
         if (_process is null || _process.HasExited)
         {
             var log = Path.Combine(AppContext.BaseDirectory, "compute", "comfyui.log");
             Directory.CreateDirectory(Path.GetDirectoryName(log)!);
-            var psi = new ProcessStartInfo(Path.Combine(dir, @"python_embeded\python.exe"))
+            // Through cmd, ComfyUI writes straight into its log file: nothing ties it to this app. Its output used to
+            // come to the app through pipes; once the app was stopped abruptly, the ComfyUI left running could no
+            // longer write and every job crashed ("OSError: [Errno 22] Invalid argument" in KSampler).
+            var python = Path.Combine(dir, @"python_embeded\python.exe");
+            var psi = new ProcessStartInfo("cmd.exe")
             {
                 WorkingDirectory = dir, UseShellExecute = false, CreateNoWindow = true,
-                RedirectStandardOutput = true, RedirectStandardError = true,
+                Arguments = $"/c \"\"{python}\" -s ComfyUI\\main.py --windows-standalone-build --listen 127.0.0.1 --port 8188 --disable-auto-launch > \"{log}\" 2>&1\"",
             };
-            foreach (var a in new[] { "-s", @"ComfyUI\main.py", "--windows-standalone-build", "--listen", "127.0.0.1", "--port", "8188", "--disable-auto-launch" })
-                psi.ArgumentList.Add(a);
             _process = Process.Start(psi) ?? throw new InvalidOperationException("ComfyUI n'a pas pu démarrer.");
-            var writer = new StreamWriter(log, append: false) { AutoFlush = true };
-            _process.OutputDataReceived += (_, e) => { if (e.Data is not null) lock (writer) writer.WriteLine(e.Data); };
-            _process.ErrorDataReceived += (_, e) => { if (e.Data is not null) lock (writer) writer.WriteLine(e.Data); };
-            _process.Exited += (_, _) => { lock (writer) writer.Dispose(); };
-            _process.EnableRaisingEvents = true;
-            _process.BeginOutputReadLine();
-            _process.BeginErrorReadLine();
-            if (_idleTimer is null)
-            {
-                _idleTimer = new Timer(_ => StopIfIdle(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
-                AppDomain.CurrentDomain.ProcessExit += (_, _) => Stop(); // never left running once Akashic is closed
-            }
+            try { File.WriteAllText(PidFile, _process.Id.ToString()); } catch (IOException) { }
+            WatchIdle();
         }
         for (var i = 0; i < 180; i++)
         {
@@ -376,6 +374,32 @@ public sealed class ComfyUi
             if (await UpAsync()) return;
         }
         throw new InvalidOperationException("ComfyUI ne répond pas après 3 minutes.");
+    }
+
+    private void WatchIdle()
+    {
+        _lastUse = DateTime.UtcNow;
+        if (_idleTimer is not null) return;
+        _idleTimer = new Timer(_ => StopIfIdle(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => Stop(); // never left running once Akashic is closed
+    }
+
+    /// <summary>
+    /// A ComfyUI already answering may be the one an earlier run of this app started (and that run was closed
+    /// abruptly): it is taken back, so it is still stopped when idle. One started by hand is left alone.
+    /// </summary>
+    private void Adopt()
+    {
+        if (_process is { HasExited: false }) return;
+        try
+        {
+            if (!File.Exists(PidFile)) return;
+            var earlier = Process.GetProcessById(int.Parse(File.ReadAllText(PidFile).Trim()));
+            if (earlier.ProcessName is not ("cmd" or "python")) return;
+            _process = earlier;
+            WatchIdle();
+        }
+        catch (Exception ex) when (ex is ArgumentException or FormatException or IOException or InvalidOperationException) { }
     }
 
     // The ComfyUI this app started is stopped after a while without work (its memory goes back to the computer).
@@ -422,7 +446,7 @@ public sealed class ComfyUi
             if (!doc.RootElement.TryGetProperty(id, out var entry)) continue;
             var status = entry.TryGetProperty("status", out var s) ? s : default;
             if (status.ValueKind == JsonValueKind.Object && status.TryGetProperty("status_str", out var st) && st.GetString() == "error")
-                throw new InvalidOperationException("ComfyUI a échoué : " + Shorten(status.GetRawText()));
+                throw new InvalidOperationException("ComfyUI a échoué : " + Failure(status));
             if (entry.TryGetProperty("outputs", out var outputs) && outputs.TryGetProperty("99", out var save)
                 && save.TryGetProperty("images", out var images) && images.GetArrayLength() > 0)
             {
@@ -431,6 +455,20 @@ public sealed class ComfyUi
             }
         }
         throw new InvalidOperationException("ComfyUI n'a pas fini en 20 minutes.");
+    }
+
+    /// <summary>The error ComfyUI reported, readable: the step and its message (else the raw status, shortened).</summary>
+    private static string Failure(JsonElement status)
+    {
+        if (status.TryGetProperty("messages", out var messages) && messages.ValueKind == JsonValueKind.Array)
+            foreach (var m in messages.EnumerateArray())
+                if (m.ValueKind == JsonValueKind.Array && m.GetArrayLength() == 2 && m[0].GetString() == "execution_error")
+                {
+                    var e = m[1];
+                    string Text(string key) => e.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString()! : "";
+                    return Shorten($"{Text("node_type")} : {Text("exception_type")} {Text("exception_message")}".Trim());
+                }
+        return Shorten(status.GetRawText());
     }
 
     private static string Shorten(string s) => s.Length > 300 ? s[..300] + "…" : s;
