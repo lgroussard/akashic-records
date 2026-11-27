@@ -3,14 +3,18 @@ using Microsoft.Data.Sqlite;
 namespace AkashicRecords.Hub;
 
 /// <summary>
-/// One upscale request. Status: queued, running, done, failed. The input and the result are blobs (by hash) in
+/// One request of shared computing. Kind: null or "upscale" (Nomos ×4, result beside the original), "edit" (FLUX Kontext
+/// following a sentence, optionally only inside a mask) or "restore" (Kontext cleans the picture up, then Nomos ×4); an
+/// edit or a restore of a picture of the app replaces it as a revertible edit. Params: the edit's JSON (prompt,
+/// mask_hash, mask_text, erase). Status: queued, running, done, failed. The input and the result are blobs (by hash) in
 /// the hub's blob store: they stay on the hub, a device fetches the result when it wants to look at it.
 /// </summary>
 public sealed record ComputeJob(
     string Id, string Model, string InputHash, string InputName, long InputSize, string Status,
     string AddedAt, string AddedBy, string? Worker, string? WorkerName, string? StartedAt, string? FinishedAt,
     double? Seconds, string? ResultHash, long? ResultSize, string? ResultName, string? Error,
-    string? AttachType = null, string? AttachId = null, string? AttachedPath = null, string? AttachError = null);
+    string? AttachType = null, string? AttachId = null, string? AttachedPath = null, string? AttachError = null,
+    string? Kind = null, string? Params = null);
 
 /// <summary>The shared job list (its own SQLite file next to hub.db: working state, not synchronised data).</summary>
 public sealed class ComputeStore
@@ -48,7 +52,7 @@ public sealed class ComputeStore
             );
             """);
         // Added later: the image of the app a job came from (it gets its result next to it), and what became of that.
-        foreach (var col in new[] { "attach_type", "attach_id", "attached_path", "attach_error" })
+        foreach (var col in new[] { "attach_type", "attach_id", "attached_path", "attach_error", "kind", "params" })
         {
             using var has = c.CreateCommand();
             has.CommandText = "SELECT COUNT(*) FROM pragma_table_info('cp_job') WHERE name = $n";
@@ -80,7 +84,7 @@ public sealed class ComputeStore
         cmd.CommandText = $"""
             SELECT id, model, input_hash, input_name, input_size, status, added_at, added_by, worker, worker_name,
                    started_at, finished_at, seconds, result_hash, result_size, result_name, error,
-                   attach_type, attach_id, attached_path, attach_error
+                   attach_type, attach_id, attached_path, attach_error, kind, params
             FROM cp_job {where}
             """;
         foreach (var (n, v) in args) cmd.Parameters.AddWithValue(n, v ?? DBNull.Value);
@@ -90,7 +94,7 @@ public sealed class ComputeStore
         while (r.Read())
             list.Add(new ComputeJob(r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetInt64(4), r.GetString(5),
                 r.GetString(6), r.GetString(7), S(8), S(9), S(10), S(11), r.IsDBNull(12) ? null : r.GetDouble(12),
-                S(13), r.IsDBNull(14) ? null : r.GetInt64(14), S(15), S(16), S(17), S(18), S(19), S(20)));
+                S(13), r.IsDBNull(14) ? null : r.GetInt64(14), S(15), S(16), S(17), S(18), S(19), S(20), S(21), S(22)));
         return list;
     }
 
@@ -110,17 +114,17 @@ public sealed class ComputeStore
     }
 
     public ComputeJob AddJob(string model, string inputHash, string inputName, long inputSize, string device,
-        string? attachType = null, string? attachId = null)
+        string? attachType = null, string? attachId = null, string? kind = null, string? parameters = null)
     {
         lock (_lock)
         {
             using var c = Open();
             var id = Guid.NewGuid().ToString();
             Exec(c, """
-                INSERT INTO cp_job(id, model, input_hash, input_name, input_size, status, added_at, added_by, attach_type, attach_id)
-                VALUES ($id, $m, $h, $n, $s, 'queued', $at, $by, $att, $aid)
+                INSERT INTO cp_job(id, model, input_hash, input_name, input_size, status, added_at, added_by, attach_type, attach_id, kind, params)
+                VALUES ($id, $m, $h, $n, $s, 'queued', $at, $by, $att, $aid, $k, $p)
                 """, ("$id", id), ("$m", model), ("$h", inputHash), ("$n", inputName), ("$s", inputSize), ("$at", Now()), ("$by", device),
-                ("$att", attachType), ("$aid", attachId));
+                ("$att", attachType), ("$aid", attachId), ("$k", kind), ("$p", parameters));
             return Query(c, "WHERE id = $id", ("$id", id)).Single();
         }
     }

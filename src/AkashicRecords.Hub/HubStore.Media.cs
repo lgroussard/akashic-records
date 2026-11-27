@@ -20,6 +20,17 @@ public sealed partial class HubStore
         return doc.RootElement.Clone();
     }
 
+    /// <summary>The current revision of an entity (what a change of it gives as base_rev); 0 when unknown.</summary>
+    public long Rev(string entityType, string entityId)
+    {
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT rev FROM entities WHERE entity_type = $t AND entity_id = $id";
+        cmd.Parameters.AddWithValue("$t", entityType);
+        cmd.Parameters.AddWithValue("$id", entityId);
+        return cmd.ExecuteScalar() is long rev ? rev : 0;
+    }
+
     /// <summary>The id of a live entity whose text field has this value (e.g. the PhotoAlbum named "Agrandies"); null if none.</summary>
     public string? FindLive(string entityType, string field, string value)
     {

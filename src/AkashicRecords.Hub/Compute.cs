@@ -124,7 +124,13 @@ public static class ComputeRoutes
     public sealed record ClaimRequest(string? Name, string? Rid, List<string>? Models);
     public sealed record CompleteRequest(string? ResultHash, double? Seconds);
     public sealed record FailRequest(string? Error);
-    public sealed record FromRequest(string? EntityType, string? EntityId);
+    /// <summary>Kind: null/"upscale", "edit" (Prompt required; MaskHash = a PNG blob, white where the change goes;
+    /// MaskText = what to find and mask too, in English; Erase = empty the zone first) or "restore".</summary>
+    public sealed record FromRequest(string? EntityType, string? EntityId, string? Kind = null, string? Prompt = null,
+        string? MaskHash = null, string? MaskText = null, bool? Erase = null);
+
+    public const string KindEdit = "edit";
+    public const string KindRestore = "restore";
 
     public static void Map(WebApplication app, ComputeStore jobs, ComputeCatalog catalog, ComputeWorkers workers, BlobStore blobs, ComputeAttach attach, HubOptions options)
     {
@@ -137,7 +143,8 @@ public static class ComputeRoutes
             return new
             {
                 enabled = options.Compute,
-                models = catalog.Models().Select(m => new { m.Name, m.Label, m.Description, m.Hub, runners = workers.Runners(m.Name) }),
+                models = catalog.Models().Select(m => new { m.Name, m.Label, m.Description, m.Hub, runners = workers.Runners(m.Name) })
+                    .Append(new { Name = ComputeCatalog.Kontext, Label = "FLUX Kontext", Description = "Modifie une image en suivant une phrase, ou la restaure. Sur un PC avec ComfyUI.", Hub = false, runners = workers.Runners(ComputeCatalog.Kontext) }),
                 workers = workers.Describe(busy),
                 jobs = jobs.Jobs(),
             };
@@ -173,17 +180,43 @@ public static class ComputeRoutes
 
         // Upscale an image already in the app: the hub reads the original itself, and puts the result next to it
         // when the job is done (ComputeAttach).
+        // An edit or a restore (FLUX Kontext, run by a PC) replaces the picture by a revertible edit once done.
         app.MapPost("/compute/jobs/from", async (FromRequest? req, HttpContext ctx) =>
         {
             if (!options.Compute) return Disabled();
-            var model = catalog.Models().FirstOrDefault();
-            if (model is null) return Results.BadRequest(new { error = "no model" });
             if (req?.EntityType is null || req.EntityId is null || !ComputeAttach.Kinds.ContainsKey(req.EntityType))
                 return Results.BadRequest(new { error = "entity_type: Photo, JournalPhoto, RefImage or CanvasElement; entity_id required" });
+            var kind = req.Kind is null or "" or "upscale" ? null : req.Kind;
+            string modelName;
+            string? parameters = null;
+            if (kind is null)
+            {
+                var model = catalog.Models().FirstOrDefault();
+                if (model is null) return Results.BadRequest(new { error = "no model" });
+                modelName = model.Name;
+            }
+            else if (kind is KindEdit or KindRestore)
+            {
+                modelName = ComputeCatalog.Kontext;
+                if (kind == KindEdit)
+                {
+                    var prompt = req.Prompt?.Trim() ?? "";
+                    if (prompt.Length is 0 or > 1000) return Results.BadRequest(new { error = "prompt: say what to change (1 to 1000 characters)" });
+                    var mask = req.MaskHash?.ToLowerInvariant();
+                    if (mask is not null && (!BlobStore.IsHash(mask) || !blobs.Exists(mask))) return Results.BadRequest(new { error = "mask_hash: send the mask to /media first" });
+                    var maskText = string.IsNullOrWhiteSpace(req.MaskText) ? null : req.MaskText.Trim();
+                    if (maskText is { Length: > 200 }) return Results.BadRequest(new { error = "mask_text: 200 characters at most" });
+                    parameters = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>
+                    {
+                        ["prompt"] = prompt, ["mask_hash"] = mask, ["mask_text"] = maskText, ["erase"] = req.Erase == true,
+                    });
+                }
+            }
+            else return Results.BadRequest(new { error = "kind: upscale, edit or restore" });
             try
             {
-                var (hash, name, size) = await attach.InputAsync(req.EntityType, req.EntityId, ctx.RequestAborted);
-                var job = jobs.AddJob(model.Name, hash, name, size, Device(ctx), req.EntityType, req.EntityId);
+                var (hash, name, size) = await attach.InputAsync(req.EntityType, req.EntityId, ctx.RequestAborted, refuseUpscaled: kind is null);
+                var job = jobs.AddJob(modelName, hash, name, size, Device(ctx), req.EntityType, req.EntityId, kind, parameters);
                 return Results.Json(job, statusCode: StatusCodes.Status201Created);
             }
             catch (InvalidOperationException ex)
@@ -213,7 +246,8 @@ public static class ComputeRoutes
             var hash = req?.ResultHash?.ToLowerInvariant();
             if (!BlobStore.IsHash(hash) || !blobs.Exists(hash!)) return Results.BadRequest(new { error = "result_hash: send the result to /media first" });
             var size = new FileInfo(blobs.PathOf(hash!)).Length;
-            if (!jobs.Complete(id, device, hash!, size, OnnxUpscaler.ResultName(job.InputName), Math.Max(0, req!.Seconds ?? 0)))
+            var resultName = job.Kind is null ? OnnxUpscaler.ResultName(job.InputName) : Path.GetFileNameWithoutExtension(job.InputName) + "-ia.png";
+            if (!jobs.Complete(id, device, hash!, size, resultName, Math.Max(0, req!.Seconds ?? 0)))
                 return Results.Conflict(new { error = "not your job (or not running)" });
             attach.Attach(jobs, jobs.Job(id)!);
             return Results.Ok(jobs.Job(id));

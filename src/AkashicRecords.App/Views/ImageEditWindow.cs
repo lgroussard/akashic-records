@@ -11,6 +11,9 @@ namespace AkashicRecords.App.Views;
 
 // The small picture editor behind « Modifier »: quarter turns, contrast, saturation and a free crop drawn on the
 // preview. It only gathers the settings (`Result`); ImageEditing applies them to the full-resolution file.
+// When the PC is paired, a second part asks the AI (FLUX Kontext, run by a PC with ComfyUI through the hub): a
+// sentence, optionally a zone painted on the preview and/or named in a few words, or « Restaurer ». That is gathered
+// in `AiResult`; the result comes back later as an edit of the picture (« Revenir à l'original » still works).
 public sealed class ImageEditWindow : Window
 {
     private const int PreviewMaxSide = 1400;
@@ -37,8 +40,25 @@ public sealed class ImageEditWindow : Window
 
     public ImageEditSettings? Result { get; private set; }
 
+    /// <summary>What to ask the AI, when the window was closed with « Envoyer à l'IA » or « Restaurer ».</summary>
+    public ImageAiRequest? AiResult { get; private set; }
+
+    // The AI zone: brush strokes in preview pixels (only on the unturned picture: the mask matches the stored picture).
+    private readonly List<(List<Point> Points, double Size)> _strokes = new();
+    private readonly System.Windows.Controls.Primitives.ToggleButton _brush = new()
+    {
+        Content = "Peindre la zone", Padding = new Thickness(14, 6, 14, 6), Cursor = Cursors.Hand,
+        ToolTip = "Peins sur l'image l'endroit à changer : sa place et sa taille. Sans zone, toute l'image suit la phrase.",
+    };
+    private readonly Slider _brushSize = new() { Minimum = 4, Maximum = 160, Value = 40, Width = 120, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
+    private readonly TextBox _prompt = new() { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 60, Margin = new Thickness(0, 0, 0, 8) };
+    private readonly TextBox _maskText = new() { Margin = new Thickness(0, 0, 0, 8) };
+    private readonly CheckBox _erase = new() { Content = "Effacer d'abord ce qu'il y a dans la zone", Margin = new Thickness(0, 0, 0, 10) };
+    private readonly Canvas _paint = new() { IsHitTestVisible = false };
+    private List<Point>? _currentStroke;
+
     /// <summary>`oriented` is the upright full picture; the window keeps a scaled copy and disposes it.</summary>
-    public ImageEditWindow(SKBitmap oriented, string storedPath)
+    public ImageEditWindow(SKBitmap oriented, string storedPath, bool aiAvailable = false)
     {
         _fullWidth = oriented.Width;
         _fullHeight = oriented.Height;
@@ -61,6 +81,7 @@ public sealed class ImageEditWindow : Window
         _overlay.Children.Add(_shade);
         _overlay.Children.Add(_frame);
         _surface.Children.Add(_overlay);
+        _overlay.Children.Add(_paint);
         _viewbox.Child = _surface;
         _viewbox.SizeChanged += (_, _) => DrawCrop();
         var previewArea = new Border { Background = Brush("Surface1Brush"), CornerRadius = new CornerRadius(8), Margin = new Thickness(16, 16, 8, 16), Child = _viewbox };
@@ -107,6 +128,8 @@ public sealed class ImageEditWindow : Window
                 TextWrapping = TextWrapping.Wrap, Foreground = Brush("TextFaintBrush"), FontSize = 11, Margin = new Thickness(0, 8, 0, 0),
             });
         }
+
+        if (aiAvailable) AddAiPart(panel);
 
         var reset = SideButton("Réinitialiser", Reset);
         var cancel = SideButton("Annuler", () => { }); // IsCancel closes the dialog (Échap too)
@@ -231,6 +254,10 @@ public sealed class ImageEditWindow : Window
     private void Turn(int by)
     {
         _turns = ((_turns + by) % 4 + 4) % 4;
+        // The AI zone is drawn on the stored picture's orientation: it does not survive a turn.
+        ClearStrokes();
+        _brush.IsChecked = false;
+        _brush.IsEnabled = _turns == 0;
         // The crop follows the picture round.
         if (_crop is { } c)
             _crop = by > 0 ? new Rect(1 - c.Y - c.Height, c.X, c.Height, c.Width) : new Rect(c.Y, 1 - c.X - c.Width, c.Height, c.Width);
@@ -335,6 +362,15 @@ public sealed class ImageEditWindow : Window
     private void Overlay_OnMouseDown(object sender, MouseButtonEventArgs e)
     {
         var p = Clamp(e.GetPosition(_overlay));
+        if (_brush.IsChecked == true)
+        {
+            _currentStroke = [p];
+            _strokes.Add((_currentStroke, _brushSize.Value * Math.Max(PreviewWidth, PreviewHeight) / 1000));
+            DrawStrokes();
+            _overlay.CaptureMouse();
+            e.Handled = true;
+            return;
+        }
         _drag = DragMode.New;
         _anchor = p;
         if (CropPixels is { } r)
@@ -359,6 +395,16 @@ public sealed class ImageEditWindow : Window
     private void Overlay_OnMouseMove(object sender, MouseEventArgs e)
     {
         var p = Clamp(e.GetPosition(_overlay));
+        if (_brush.IsChecked == true)
+        {
+            _overlay.Cursor = Cursors.Pen;
+            if (_currentStroke is not null && e.LeftButton == MouseButtonState.Pressed)
+            {
+                _currentStroke.Add(p);
+                DrawStrokes();
+            }
+            return;
+        }
         switch (_drag)
         {
             case DragMode.New:
@@ -398,6 +444,13 @@ public sealed class ImageEditWindow : Window
 
     private void Overlay_OnMouseUp(object sender, MouseButtonEventArgs e)
     {
+        if (_currentStroke is not null)
+        {
+            _currentStroke = null;
+            _overlay.ReleaseMouseCapture();
+            e.Handled = true;
+            return;
+        }
         if (_drag == DragMode.None) return;
         _drag = DragMode.None;
         _overlay.ReleaseMouseCapture();
@@ -405,4 +458,133 @@ public sealed class ImageEditWindow : Window
         if (_crop is { } c && c.Width > 0.999 && c.Height > 0.999) { _crop = null; DrawCrop(); }
         e.Handled = true;
     }
+
+    // ---- AI ----
+
+    private void AddAiPart(StackPanel panel)
+    {
+        panel.Children.Add(new Separator { Margin = new Thickness(0, 18, 0, 14) });
+        panel.Children.Add(Header("MODIFIER AVEC L'IA"));
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Écris ce qu'il faut changer, en anglais de préférence (« replace the blue ball in her hand with a banana »). " +
+                   "Peins la zone pour dire où (et à quelle taille) ; sans zone, toute l'image suit la phrase. Hors de la zone, l'image ne bouge pas.",
+            TextWrapping = TextWrapping.Wrap, Foreground = Brush("TextMutedBrush"), FontSize = 11.5, Margin = new Thickness(0, 0, 0, 8),
+        });
+        panel.Children.Add(_prompt);
+
+        var brushRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+        _brush.Style = Application.Current.TryFindResource("SecondaryButtonStyle") as Style;
+        _brush.Checked += (_, _) => _overlay.Cursor = Cursors.Pen;
+        _brush.Unchecked += (_, _) => _overlay.Cursor = Cursors.Cross;
+        brushRow.Children.Add(_brush);
+        _brushSize.ToolTip = "Taille du pinceau";
+        brushRow.Children.Add(_brushSize);
+        panel.Children.Add(brushRow);
+        var clear = SideButton("Effacer la zone peinte", ClearStrokes);
+        clear.HorizontalAlignment = HorizontalAlignment.Left;
+        clear.Margin = new Thickness(0, 0, 0, 10);
+        panel.Children.Add(clear);
+
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Ou trouver la zone d'après quelques mots (facultatif, en anglais : « blue ball ») :",
+            TextWrapping = TextWrapping.Wrap, Foreground = Brush("TextMutedBrush"), FontSize = 11.5, Margin = new Thickness(0, 0, 0, 4),
+        });
+        panel.Children.Add(_maskText);
+        _erase.ToolTip = "Coché : ce qui est dans la zone disparaît d'abord (pour remplacer un objet). Décoché : la zone dit seulement où placer le nouvel objet.";
+        panel.Children.Add(_erase);
+
+        var send = new Button
+        {
+            Content = "Envoyer à l'IA", Padding = new Thickness(14, 6, 14, 6), Cursor = Cursors.Hand, HorizontalAlignment = HorizontalAlignment.Left,
+            Style = Application.Current.TryFindResource("PrimaryButtonStyle") as Style,
+        };
+        send.Click += (_, _) => SendToAi();
+        panel.Children.Add(send);
+
+        var restoreHeader = Header("RESTAURER");
+        restoreHeader.Margin = new Thickness(0, 18, 0, 6);
+        panel.Children.Add(restoreHeader);
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Pour une petite photo floue ou abîmée : l'IA la nettoie puis l'agrandit ×4. Elle peut redessiner un peu les visages.",
+            TextWrapping = TextWrapping.Wrap, Foreground = Brush("TextMutedBrush"), FontSize = 11.5, Margin = new Thickness(0, 0, 0, 8),
+        });
+        var restore = SideButton("Restaurer (IA)", () => { AiResult = new ImageAiRequest("restore", null, null, null, false); DialogResult = true; });
+        restore.HorizontalAlignment = HorizontalAlignment.Left;
+        panel.Children.Add(restore);
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Fait sur un PC avec ComfyUI (une à quelques minutes). Le résultat remplace l'image ; « " + ImageEditing.RevertLabel + " » reste possible. " +
+                   "La rotation, le recadrage et les couleurs réglés plus haut ne s'appliquent pas à l'IA.",
+            TextWrapping = TextWrapping.Wrap, Foreground = Brush("TextFaintBrush"), FontSize = 11, Margin = new Thickness(0, 10, 0, 0),
+        });
+    }
+
+    private void SendToAi()
+    {
+        var prompt = _prompt.Text.Trim();
+        if (prompt.Length == 0)
+        {
+            MessageBox.Show(this, "Écris d'abord ce qu'il faut changer.", "Modifier avec l'IA");
+            _prompt.Focus();
+            return;
+        }
+        var maskText = string.IsNullOrWhiteSpace(_maskText.Text) ? null : _maskText.Text.Trim();
+        AiResult = new ImageAiRequest("edit", prompt, _strokes.Count > 0 ? RenderMask() : null, maskText, _erase.IsChecked == true);
+        DialogResult = true;
+    }
+
+    private void ClearStrokes()
+    {
+        _strokes.Clear();
+        _currentStroke = null;
+        DrawStrokes();
+    }
+
+    private void DrawStrokes()
+    {
+        _paint.Children.Clear();
+        var brush = new SolidColorBrush(Color.FromArgb(0x70, 0xFF, 0x30, 0x30));
+        foreach (var (points, size) in _strokes)
+        {
+            _paint.Children.Add(new Polyline
+            {
+                Stroke = brush, StrokeThickness = size, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
+                StrokeLineJoin = PenLineJoin.Round, Points = new PointCollection(points.Count == 1 ? [points[0], points[0]] : points),
+            });
+        }
+    }
+
+    // The zone as a PNG at preview size: white where painted, black elsewhere (the worker scales it to the picture).
+    private byte[] RenderMask()
+    {
+        var w = (int)PreviewWidth;
+        var h = (int)PreviewHeight;
+        using var bitmap = new SKBitmap(w, h, SKColorType.Gray8, SKAlphaType.Opaque);
+        using (var canvas = new SKCanvas(bitmap))
+        {
+            canvas.Clear(SKColors.Black);
+            foreach (var (points, size) in _strokes)
+            {
+                using var paint = new SKPaint
+                {
+                    Color = SKColors.White, StrokeWidth = (float)size, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round,
+                    Style = SKPaintStyle.Stroke, IsAntialias = true,
+                };
+                using var path = new SKPath();
+                path.MoveTo((float)points[0].X, (float)points[0].Y);
+                foreach (var p in points.Skip(1)) path.LineTo((float)p.X, (float)p.Y);
+                if (points.Count == 1) path.LineTo((float)points[0].X + 0.01f, (float)points[0].Y);
+                canvas.DrawPath(path, paint);
+            }
+        }
+        using var data = bitmap.Encode(SKEncodedImageFormat.Png, 100);
+        return data.ToArray();
+    }
 }
+
+/// <summary>An AI request from the editor. Kind "edit" (a sentence; MaskPng = white where the change goes; MaskText =
+/// words naming the zone; Erase = empty the zone first) or "restore".</summary>
+public sealed record ImageAiRequest(string Kind, string? Prompt, byte[]? MaskPng, string? MaskText, bool Erase);

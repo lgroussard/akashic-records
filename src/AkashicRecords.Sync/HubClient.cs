@@ -35,7 +35,8 @@ public sealed record HubComputeWorker(string Device, string Name, string Rid, in
 public sealed record HubComputeJob(string Id, string Model, string InputHash, string InputName, long InputSize, string Status,
     string AddedAt, string AddedBy, string? Worker, string? WorkerName, string? StartedAt, string? FinishedAt,
     double? Seconds, string? ResultHash, long? ResultSize, string? ResultName, string? Error,
-    string? AttachType = null, string? AttachId = null, string? AttachedPath = null, string? AttachError = null);
+    string? AttachType = null, string? AttachId = null, string? AttachedPath = null, string? AttachError = null,
+    string? Kind = null, string? Params = null);
 public sealed record HubComputeBoard(bool Enabled, List<HubComputeModel> Models, List<HubComputeWorker> Workers, List<HubComputeJob> Jobs);
 public sealed record HubComputeFile(string Path, string Hash, long Size);
 public sealed record HubComputeModelFiles(string Name, string Label, bool Hub, List<HubComputeFile> Files);
@@ -145,17 +146,26 @@ public sealed class HubClient : IDisposable
 
     /// <summary>Asks for an image already in the app to be upscaled (entity type and its sync id); the hub reads the
     /// original itself and puts the result next to it. A refusal comes back as a HubException with the hub's message.</summary>
-    public async Task<HubComputeJob> AddComputeJobFromAsync(string entityType, string entityId, CancellationToken ct = default)
+    public async Task<HubComputeJob> AddComputeJobFromAsync(string entityType, string entityId, CancellationToken ct = default) =>
+        await AddComputeJobFromAsync(new { entity_type = entityType, entity_id = entityId }, ct);
+
+    /// <summary>Asks for an AI edit of an image already in the app: kind "edit" (a sentence, optionally a mask blob, a
+    /// text to mask, whether to empty the zone first) or "restore". Once done the hub makes the result a revertible edit.</summary>
+    public async Task<HubComputeJob> AddComputeEditAsync(string entityType, string entityId, string kind, string? prompt,
+        string? maskHash, string? maskText, bool erase, CancellationToken ct = default) =>
+        await AddComputeJobFromAsync(new { entity_type = entityType, entity_id = entityId, kind, prompt, mask_hash = maskHash, mask_text = maskText, erase }, ct);
+
+    private async Task<HubComputeJob> AddComputeJobFromAsync(object body, CancellationToken ct)
     {
-        var resp = await Send(() => _http.PostAsJsonAsync("compute/jobs/from", new { entity_type = entityType, entity_id = entityId }, Wire, ct));
+        var resp = await Send(() => _http.PostAsJsonAsync("compute/jobs/from", body, Wire, ct));
         if (resp.StatusCode == HttpStatusCode.UnprocessableEntity)
         {
             using (resp)
             {
-                var body = await resp.Content.ReadAsStringAsync(ct);
+                var text = await resp.Content.ReadAsStringAsync(ct);
                 string? message = null;
-                try { message = JsonDocument.Parse(body).RootElement.GetProperty("error").GetString(); } catch (Exception) { }
-                throw new HubException(message ?? body, resp.StatusCode);
+                try { message = JsonDocument.Parse(text).RootElement.GetProperty("error").GetString(); } catch (Exception) { }
+                throw new HubException(message ?? text, resp.StatusCode);
             }
         }
         return await Read<HubComputeJob>(resp, ct);

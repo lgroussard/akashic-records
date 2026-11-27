@@ -16,7 +16,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -26,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -37,6 +41,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -51,6 +58,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.akashicrecords.Palette
+import com.akashicrecords.sync.HubCompute
+import com.akashicrecords.sync.SyncService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -70,6 +79,9 @@ private data class Crop(val l: Float, val t: Float, val r: Float, val b: Float) 
 private val FULL = Crop(0f, 0f, 1f, 1f)
 private const val MIN_CROP = 0.05f
 
+/** A brush stroke of the AI zone: points as fractions (0..1) of the unturned picture, width as a fraction of its width. */
+private data class ZoneStroke(val points: List<Offset>, val width: Float)
+
 /**
  * Full-screen editor of a picture already in the app: ⟲ ⟳ quarter turns, a crop frame drawn on the picture
  * (drag its corners, or inside it to move it), Contraste and Saturation. The controls are in the bars above and
@@ -78,6 +90,10 @@ private const val MIN_CROP = 0.05f
  *
  * [source] finds the full picture (a local file, or the hub's copy for an Archives photo). [onChanged] gets the
  * row's new path, after a save or « Revenir à l'original ».
+ *
+ * When the phone is paired, « IA » turns the bars into the AI request (done by a PC with ComfyUI through the hub,
+ * never on the phone): a sentence, a zone painted on the picture with the finger and/or named in a few words, erase
+ * first or not, or « Restaurer ». The result comes back later as an edit of the picture.
  */
 @Composable
 fun ImageEditor(
@@ -100,6 +116,14 @@ fun ImageEditor(
     var contrast by remember { mutableFloatStateOf(0f) }
     var saturation by remember { mutableFloatStateOf(0f) }
     val edited = ImageEdits.isEdited(currentPath)
+    val aiAvailable = remember { SyncService.credentials(context) != null }
+    var aiMode by remember { mutableStateOf(false) }
+    var prompt by remember { mutableStateOf("") }
+    var zoneWords by remember { mutableStateOf("") }
+    var eraseFirst by remember { mutableStateOf(false) }
+    var painting by remember { mutableStateOf(false) }
+    var brush by remember { mutableFloatStateOf(0.06f) }
+    val strokes = remember { mutableStateListOf<ZoneStroke>() }
 
     LaunchedEffect(currentPath) {
         val (f, bmp) = withContext(Dispatchers.IO) {
@@ -138,6 +162,42 @@ fun ImageEditor(
                 saved.path
             }.onSuccess { onChanged(it); onClose() }
                 .onFailure { message = "Échec : ${it.message ?: it.javaClass.simpleName}"; busy = false }
+        }
+    }
+
+    // The zone as a mask at the preview's size: white where painted (the PC scales it to the full picture).
+    fun zoneMask(): Bitmap? {
+        val p = preview ?: return null
+        if (strokes.isEmpty()) return null
+        val mask = Bitmap.createBitmap(p.width, p.height, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(mask)
+        canvas.drawColor(android.graphics.Color.BLACK)
+        val paint = android.graphics.Paint().apply {
+            color = android.graphics.Color.WHITE; style = android.graphics.Paint.Style.STROKE; isAntiAlias = true
+            strokeCap = android.graphics.Paint.Cap.ROUND; strokeJoin = android.graphics.Paint.Join.ROUND
+        }
+        for (s in strokes) {
+            paint.strokeWidth = s.width * p.width
+            val path = android.graphics.Path()
+            path.moveTo(s.points[0].x * p.width, s.points[0].y * p.height)
+            for (pt in s.points.drop(1)) path.lineTo(pt.x * p.width, pt.y * p.height)
+            if (s.points.size == 1) path.lineTo(s.points[0].x * p.width + 0.5f, s.points[0].y * p.height)
+            canvas.drawPath(path, paint)
+        }
+        return mask
+    }
+
+    fun sendToAi(kind: String) {
+        if (kind == "edit" && prompt.isBlank()) { message = "Écris d'abord ce qu'il faut changer."; return }
+        busy = true
+        message = "Envoi…"
+        scope.launch {
+            val failure = HubCompute.requestEdit(
+                context, table, id.toLong(), kind, if (kind == "edit") prompt.trim() else null,
+                if (kind == "edit") zoneMask() else null, zoneWords.trim().ifEmpty { null }.takeIf { kind == "edit" }, eraseFirst && kind == "edit",
+            )
+            busy = false
+            message = failure ?: "Envoyée : l'image modifiée arrivera d'ici quelques minutes (Revenir à l'original restera possible)."
         }
     }
 
@@ -199,8 +259,21 @@ fun ImageEditor(
                 val touch = with(LocalDensity.current) { 32.dp.toPx() }
                 val handle = with(LocalDensity.current) { 7.dp.toPx() }
                 val line = with(LocalDensity.current) { 2.dp.toPx() }
+                val zoneColor = Color(0xFFFF3030).copy(alpha = 0.45f)
                 Canvas(
-                    Modifier.fillMaxSize().pointerInput(cropping, ox, oy, dw, dh) {
+                    Modifier.fillMaxSize().pointerInput(painting, ox, oy, dw, dh) {
+                        // The AI zone: painted with the finger, on the unturned picture only.
+                        if (!painting) return@pointerInput
+                        fun frac(p: Offset) = Offset(((p.x - ox) / dw).coerceIn(0f, 1f), ((p.y - oy) / dh).coerceIn(0f, 1f))
+                        detectDragGestures(
+                            onDragStart = { pos -> strokes.add(ZoneStroke(listOf(frac(pos)), brush)) },
+                            onDrag = { change, _ ->
+                                change.consume()
+                                val last = strokes.removeAt(strokes.lastIndex)
+                                strokes.add(last.copy(points = last.points + frac(change.position)))
+                            },
+                        )
+                    }.pointerInput(cropping, ox, oy, dw, dh) {
                         if (!cropping) return@pointerInput
                         var grab = -1 // 0 TL, 1 TR, 2 BR, 3 BL, 4 inside (move)
                         detectDragGestures(
@@ -246,6 +319,13 @@ fun ImageEditor(
                         dstSize = IntSize(dw.roundToInt().coerceAtLeast(1), dh.roundToInt().coerceAtLeast(1)),
                         colorFilter = filter,
                     )
+                    for (s in strokes) {
+                        val path = Path()
+                        path.moveTo(ox + s.points[0].x * dw, oy + s.points[0].y * dh)
+                        for (pt in s.points.drop(1)) path.lineTo(ox + pt.x * dw, oy + pt.y * dh)
+                        if (s.points.size == 1) path.lineTo(ox + s.points[0].x * dw + 0.5f, oy + s.points[0].y * dh)
+                        drawPath(path, zoneColor, style = Stroke(width = s.width * dw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                    }
                     if (cropping || !crop.full) {
                         val l = ox + crop.l * dw
                         val t = oy + crop.t * dh
@@ -268,11 +348,45 @@ fun ImageEditor(
                 }
             }
 
-            // Bottom bars: turning and cropping, then the two sliders.
-            Column(Modifier.fillMaxWidth().background(Palette.Surface1).padding(horizontal = 8.dp, vertical = 4.dp)) {
+            // Bottom bars: turning and cropping, then the two sliders; or, in « IA » mode, the AI request.
+            if (aiMode) Column(Modifier.fillMaxWidth().background(Palette.Surface1).padding(horizontal = 8.dp, vertical = 4.dp)) {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(enabled = shown != null && !busy, onClick = { crop = crop.turnedLeft(); turns = (turns + 3) % 4 }) { Text("⟲", fontSize = 20.sp) }
-                    TextButton(enabled = shown != null && !busy, onClick = { crop = crop.turnedRight(); turns = (turns + 1) % 4 }) { Text("⟳", fontSize = 20.sp) }
+                    TextButton(enabled = !busy, onClick = { aiMode = false; painting = false }) { Text("← Retouches") }
+                    TextButton(enabled = !busy && turns == 0, onClick = { painting = !painting; cropping = false }) {
+                        Text(if (painting) "✓ Peindre la zone" else "Peindre la zone", color = if (painting) Palette.Accent else Palette.Text)
+                    }
+                    TextButton(enabled = !busy && strokes.isNotEmpty(), onClick = { strokes.clear() }) { Text("Effacer la zone") }
+                    TextButton(enabled = !busy && shown != null, onClick = { sendToAi("restore") }) { Text("Restaurer") }
+                }
+                if (painting) Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Pinceau", fontSize = 13.sp, color = Palette.TextMuted, modifier = Modifier.width(84.dp))
+                    Slider(
+                        value = brush, onValueChange = { brush = it }, valueRange = 0.01f..0.2f,
+                        colors = SliderDefaults.colors(thumbColor = Palette.Accent, activeTrackColor = Palette.Accent, inactiveTrackColor = Palette.Surface3),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                OutlinedTextField(
+                    prompt, { prompt = it }, enabled = !busy, minLines = 2, maxLines = 3,
+                    label = { Text("Ce qu'il faut changer (en anglais de préférence)") },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                )
+                OutlinedTextField(
+                    zoneWords, { zoneWords = it }, enabled = !busy, singleLine = true,
+                    label = { Text("Ou la zone en quelques mots (« blue ball »)") },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                )
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(eraseFirst, { eraseFirst = it }, enabled = !busy, colors = CheckboxDefaults.colors(checkedColor = Palette.Accent))
+                    Text("Effacer d'abord la zone", fontSize = 13.sp, color = Palette.Text, modifier = Modifier.weight(1f))
+                    TextButton(enabled = !busy && shown != null, onClick = { sendToAi("edit") }) { Text("Envoyer à l'IA") }
+                }
+            } else Column(Modifier.fillMaxWidth().background(Palette.Surface1).padding(horizontal = 8.dp, vertical = 4.dp)) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+                    if (aiAvailable) TextButton(enabled = shown != null && !busy, onClick = { aiMode = true; cropping = false }) { Text("IA") }
+                    // A turn drops the AI zone: it is painted on the stored picture's orientation.
+                    TextButton(enabled = shown != null && !busy, onClick = { crop = crop.turnedLeft(); turns = (turns + 3) % 4; strokes.clear() }) { Text("⟲", fontSize = 20.sp) }
+                    TextButton(enabled = shown != null && !busy, onClick = { crop = crop.turnedRight(); turns = (turns + 1) % 4; strokes.clear() }) { Text("⟳", fontSize = 20.sp) }
                     TextButton(enabled = shown != null && !busy, onClick = { cropping = !cropping }) {
                         Text(if (cropping) "✓ Recadrer" else "Recadrer", color = if (cropping) Palette.Accent else Palette.Text)
                     }

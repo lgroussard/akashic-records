@@ -90,8 +90,14 @@ public static class ImageEditing
                 return null;
             }
 
-            var window = new ImageEditWindow(oriented, row.Value.Path) { Owner = owner };
-            if (window.ShowDialog() != true || window.Result is not { } settings) return null;
+            var window = new ImageEditWindow(oriented, row.Value.Path, aiAvailable: UpscaleAction.Available) { Owner = owner };
+            if (window.ShowDialog() != true) return null;
+            if (window.AiResult is { } ai)
+            {
+                _ = SendToAiAsync(owner, table, id, ai);
+                return null; // the picture changes later, when the result comes back through the sync
+            }
+            if (window.Result is not { } settings) return null;
 
             var newPath = NewEditPath(row.Value.Path);
             System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;
@@ -111,6 +117,27 @@ public static class ImageEditing
             Say(owner, "La modification n'a pas pu être enregistrée : " + ex.Message);
             return null;
         }
+    }
+
+    private static async Task SendToAiAsync(Window? owner, string table, int id, ImageAiRequest ai)
+    {
+        string message;
+        try
+        {
+            await ComputeService.Instance.RequestEditAsync(table, id, ai.Kind, ai.Prompt, ai.MaskPng, ai.MaskText, ai.Erase);
+            message = (ai.Kind == "restore" ? "Envoyée à la restauration" : "Envoyée à l'IA") +
+                      " : la version modifiée remplacera l'image d'ici quelques minutes (suivi dans la fenêtre des calculs). « " +
+                      RevertLabel + " » restera possible.";
+        }
+        catch (AkashicRecords.Sync.HubException ex)
+        {
+            message = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            message = "La demande n'a pas pu être envoyée : " + ex.Message;
+        }
+        Say(owner, message);
     }
 
     /// <summary>Points the row back at the original file. Returns the restored state, or null.</summary>
