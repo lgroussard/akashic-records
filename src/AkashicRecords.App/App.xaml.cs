@@ -16,6 +16,7 @@ public partial class App : Application
 {
     public App()
     {
+        WindowKeeper.Register(); // small windows never stranded in full screen or off screen
         // The WPF MediaPlayer gates https media behind a zone check (default off): internet
         // URLs fail with "Only site-of-origin pack URIs are supported". iTunes preview clips
         // are https, so restore the legacy allow-all behavior for this app.
@@ -31,6 +32,7 @@ public partial class App : Application
     // driving mouse clicks. Example: --screenshot Journaux:Personal D:\shot.png
     protected override void OnStartup(StartupEventArgs e)
     {
+        WindowKeeper.Register(); // small windows never stranded in full screen or off screen
         var idx = Array.IndexOf(e.Args, "--screenshot");
         if (idx >= 0 && idx + 2 <= e.Args.Length - 1)
         {
@@ -88,6 +90,7 @@ public partial class App : Application
 
     private void RunScreenshot(string target, string outputPath)
     {
+        WindowKeeper.Register(); // small windows never stranded in full screen or off screen
         var parts = target.Split(':', 2);
         var section = parts[0];
         var subTab = parts.Length > 1 ? parts[1] : null;
@@ -310,6 +313,7 @@ public partial class App : Application
 
     private static void CaptureElement(FrameworkElement element, string outputPath)
     {
+        WindowKeeper.Register(); // small windows never stranded in full screen or off screen
         var width = (int)Math.Ceiling(element.ActualWidth);
         var height = (int)Math.Ceiling(element.ActualHeight);
         if (width <= 0 || height <= 0) { width = 1920; height = 1080; }
@@ -328,12 +332,14 @@ public partial class App : Application
 
     private static void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
+        WindowKeeper.Register(); // small windows never stranded in full screen or off screen
         LogCrash(e.Exception);
         e.Handled = true;
     }
 
     private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
     {
+        WindowKeeper.Register(); // small windows never stranded in full screen or off screen
         LogCrash(e.ExceptionObject as Exception ?? new Exception(e.ExceptionObject.ToString()));
     }
 

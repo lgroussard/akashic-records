@@ -150,9 +150,6 @@ public partial class MainWindow : Window
         _trayIcon.FilmWidgetToggled += OnFilmWidgetToggled;
         _trayIcon.RemindersToggled += OnRemindersToggled;
         _trayIcon.RecipeWidgetToggled += OnRecipeWidgetToggled;
-        _trayIcon.DownloaderRequested += ToggleDownloader;
-        _trayIcon.UpscaleRequested += ShowUpscale;
-        _trayIcon.ServerRequested += ShowServer;
 
         // Ctrl+Alt+Space may belong to another program: the app then runs without its shortcut (the tray
         // icon still shows and hides it) instead of stopping here with no widgets and no notifications.
@@ -789,6 +786,19 @@ public partial class MainWindow : Window
             if (_activeSection is null) SearchBox.Focus();
         }
     }
+
+    // "Outils ▾": the tools that open in their own window, under the button.
+    private void ToolsButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (ToolsButton.ContextMenu is not { } menu) return;
+        menu.PlacementTarget = ToolsButton;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        menu.IsOpen = true;
+    }
+
+    private void ToolsDownloads_OnClick(object sender, RoutedEventArgs e) => ToggleDownloader();
+    private void ToolsUpscale_OnClick(object sender, RoutedEventArgs e) => ShowUpscale();
+    private void ToolsServer_OnClick(object sender, RoutedEventArgs e) => ShowServer();
 
     // Toggles the floating music player. It's a separate top-level window so it keeps
     // playing while the main window is hidden; created lazily on first click.
