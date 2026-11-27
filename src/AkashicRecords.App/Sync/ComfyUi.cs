@@ -105,7 +105,7 @@ public sealed class ComfyUi
             for (var t = 0; t < tries; t++)
             {
                 var graph = job.Kind == "restore" ? Restore(name, job.Id)
-                    : engine == "sdxl" ? EditSdxl(name, job.Id, prompt!, maskFile is not null, maskText, erase)
+                    : engine == "sdxl" ? EditSdxl(name, job.Id, prompt!, maskFile is not null, maskText, erase, width, height)
                     : Edit(name, job.Id, prompt!, maskFile is not null, maskText, erase, width, height);
                 var (file, subfolder) = await QueueAndWaitAsync(graph);
                 produced.Add(Path.Combine(subfolder, file));
@@ -250,6 +250,17 @@ public sealed class ComfyUi
         return Out("53", 0);
     }
 
+    /// <summary>
+    /// The zone to erase, grown by about 1 % of the picture's size (at least 8 px). Painted by hand, a zone stops
+    /// right on the object's edge: its thin outline was left behind, then kept and copied by the AI as a real edge
+    /// (seen on a removed person). Growing it takes that outline in; the zone's soft edge still blends it.
+    /// </summary>
+    private static JsonArray Grown(JsonObject g, JsonArray mask, int width, int height)
+    {
+        g["54"] = Node("GrowMask", new { mask, expand = Math.Max(8, (int)Math.Round(Math.Max(width, height) * 0.01)), tapered_corners = true });
+        return Out("54", 0);
+    }
+
     // LaMa empties the zone first (zoomed in at its own scale), when asked; returns the picture to draw on.
     private static JsonArray Erased(JsonObject g, JsonArray mask, bool erase)
     {
@@ -265,10 +276,11 @@ public sealed class ComfyUi
     /// The other engine, RealVisXL (SDXL), kept "just in case" next to Kontext: it only redraws a zone (inpainting,
     /// zoomed to 1024 px, soft edge, the rest identical), from the sentence as a description of what must be there.
     /// </summary>
-    private static JsonObject EditSdxl(string name, string jobId, string prompt, bool painted, string? maskText, bool erase)
+    private static JsonObject EditSdxl(string name, string jobId, string prompt, bool painted, string? maskText, bool erase, int width, int height)
     {
         var g = new JsonObject { ["1"] = Node("LoadImage", new { image = name }) };
         var mask = Zone(g, painted, maskText) ?? throw new InvalidOperationException("RealVisXL a besoin d'une zone.");
+        if (erase) mask = Grown(g, mask, width, height);
         var basePicture = Erased(g, mask, erase);
         g["2"] = Node("CheckpointLoaderSimple", new { ckpt_name = "realvisxl_v5_fp16.safetensors" });
         g["3"] = Node("CLIPTextEncode", new { text = prompt + ", photo, natural light, realistic, detailed", clip = Out("2", 1) });
@@ -303,8 +315,10 @@ public sealed class ComfyUi
             return Save(g, Out("62", 0), jobId);
         }
 
-        // With a zone: LaMa empties it first if asked (zoomed in at its own scale), then Kontext draws the sentence in
-        // the zone only, zoomed to 1024 px, pasted back with a soft edge: the rest stays identical, at full size.
+        // With a zone: LaMa empties it first if asked (zoomed in at its own scale, the zone grown to take the object's
+        // outline in), then Kontext draws the sentence in the zone only, zoomed to 1024 px, pasted back with a soft
+        // edge: the rest stays identical, at full size.
+        if (erase) mask = Grown(g, mask, width, height);
         var basePicture = Erased(g, mask, erase);
         g["10"] = Node("InpaintCropImproved", Crop(basePicture, (JsonArray)mask.DeepClone(), 1024, 8, 32, 3.0, false));
         g["35"] = Node("VAEEncode", new { pixels = Out("10", 1), vae = Out("32", 0) });
