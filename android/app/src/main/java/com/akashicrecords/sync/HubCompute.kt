@@ -165,13 +165,13 @@ object HubCompute {
     /**
      * Asks for an AI edit of a picture of the app (FLUX Kontext, done by a PC with ComfyUI): [kind] "edit" (a sentence,
      * optionally [mask] — white where the change goes, any size — and words naming the zone, [erase] = empty the zone
-     * first; [frame] = [x, y, w, h] fractions of the picture, the only part shown to the AI, pasted back) or "restore".
+     * first; [hide] = white where the picture is hidden from the AI, restored as it was) or "restore".
      * The result replaces the picture as an edit (« Revenir à l'original » stays possible) and
      * reaches this phone at a sync. Returns null when it went, else a message for the user.
      */
     suspend fun requestEdit(
         context: Context, table: String, localId: Long, kind: String, prompt: String?, mask: Bitmap?, maskText: String?, erase: Boolean,
-        tries: Int = 1, engine: String = "kontext", frame: DoubleArray? = null,
+        tries: Int = 1, engine: String = "kontext", hide: Bitmap? = null,
     ): String? = withContext(Dispatchers.IO) {
         if (table !in inPlaceKinds) return@withContext "Ce type d'image ne peut pas être modifié par l'IA."
         val hub = hub(context) ?: return@withContext "Ce téléphone n'est pas appairé au serveur (Réglages → Synchronisation)."
@@ -181,18 +181,20 @@ object HubCompute {
             syncId = syncIdOf(context, table, localId) ?: return@withContext "Cette image n'a pas encore pu être envoyée au serveur : réessaie dans un moment."
         }
         try {
-            var maskHash: String? = null
-            if (mask != null) {
+            // A mask sent to the hub as a blob (once); its hash.
+            fun send(bitmap: Bitmap?): String? {
+                if (bitmap == null) return null
                 val temp = File(dir(context), "mask-" + System.nanoTime() + ".png")
                 try {
-                    temp.outputStream().use { mask.compress(Bitmap.CompressFormat.PNG, 100, it) }
-                    maskHash = sha256(temp)
-                    if (!hub.hasFile(maskHash)) hub.uploadFile(temp, maskHash)
+                    temp.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                    val hash = sha256(temp)
+                    if (!hub.hasFile(hash)) hub.uploadFile(temp, hash)
+                    return hash
                 } finally {
                     temp.delete()
                 }
             }
-            hub.addComputeEdit(table, syncId, kind, prompt, maskHash, maskText, erase, tries, engine, frame)
+            hub.addComputeEdit(table, syncId, kind, prompt, send(mask), maskText, erase, tries, engine, send(hide))
             refresh(context)
             null
         } catch (e: Exception) {

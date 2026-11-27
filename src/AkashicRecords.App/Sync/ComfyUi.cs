@@ -80,7 +80,8 @@ public sealed class ComfyUi
         var produced = new List<string>();
         try
         {
-            var (prompt, maskHash, maskText, erase, tries, engine, frame) = ReadParams(job);
+            var (prompt, maskHash, maskText, erase, tries, engine, hideHash) = ReadParams(job);
+            string? hideFile = null;
             if (engine == "sdxl" && !File.Exists(Path.Combine(Dir!, RealVisXlFile)))
                 throw new InvalidOperationException("RealVisXL n'est pas dans ce ComfyUI (" + RealVisXlFile + ").");
 
@@ -94,14 +95,17 @@ public sealed class ComfyUi
                 maskFile = Path.Combine(work, "mask.png");
                 if (!await hub.DownloadFileAsync(maskHash, maskFile)) throw new InvalidOperationException("Le masque n'est plus sur le serveur.");
             }
-            // A frame: Kontext is only shown that part of the picture (and of the mask); each result is pasted back
-            // into the whole picture afterwards, with a soft edge.
+            // Hidden parts (painted with « Cacher à l'IA »): Kontext is only shown the rest — cut to its bounding box,
+            // the hidden pixels inside it filled flat grey — and each result is put back into the whole picture with
+            // the hidden parts restored exactly as they were.
             string? whole = null;
-            SKRectI frameRect = default;
-            if (frame is not null)
+            SKRectI visible = default;
+            if (hideHash is not null)
             {
+                hideFile = Path.Combine(work, "hide.png");
+                if (!await hub.DownloadFileAsync(hideHash, hideFile)) throw new InvalidOperationException("Le cache n'est plus sur le serveur.");
                 whole = source;
-                (source, maskFile, frameRect) = CutFrame(whole, maskFile, frame, work);
+                (source, maskFile, visible) = Conceal(whole, maskFile, hideFile, work);
             }
             var name = $"akashic-{job.Id}.png";
             var prepared = Path.Combine(work, name);
@@ -131,7 +135,7 @@ public sealed class ComfyUi
                         await stream.CopyToAsync(target);
                     if (!check || attempt == 2 || ZoneChange(source, result, maskFile!) >= KeptBelow) break;
                 }
-                if (whole is not null) PasteFrame(whole, frameRect, result);
+                if (whole is not null) Unconceal(whole, hideFile!, visible, result);
                 results.Add(result);
             }
             return results;
@@ -177,7 +181,7 @@ public sealed class ComfyUi
         return count == 0 ? 255 : total / count;
     }
 
-    private static (string? Prompt, string? MaskHash, string? MaskText, bool Erase, int Tries, string Engine, double[]? Frame) ReadParams(HubComputeJob job)
+    private static (string? Prompt, string? MaskHash, string? MaskText, bool Erase, int Tries, string Engine, string? HideHash) ReadParams(HubComputeJob job)
     {
         using var doc = JsonDocument.Parse(job.Params ?? "{}");
         var r = doc.RootElement;
@@ -187,84 +191,109 @@ public sealed class ComfyUi
         var prompt = Text("prompt");
         if (string.IsNullOrWhiteSpace(prompt)) throw new InvalidOperationException("Demande de modification sans phrase.");
         return (prompt, Text("mask_hash"), Text("mask_text"), r.TryGetProperty("erase", out var e) && e.ValueKind == JsonValueKind.True,
-            tries, Text("engine") ?? "kontext", ReadFrame(r));
+            tries, Text("engine") ?? "kontext", Text("hide_hash"));
     }
 
-    /// <summary>The frame asked ("frame": [x, y, width, height] as fractions of the upright picture), or null for the
-    /// whole picture.</summary>
-    private static double[]? ReadFrame(JsonElement r)
+    /// <summary>A mask (white = on, any size) at the given size, as 0-255 per pixel.</summary>
+    private static byte[] MaskValues(string maskFile, int width, int height)
     {
-        if (!r.TryGetProperty("frame", out var f) || f.ValueKind != JsonValueKind.Array || f.GetArrayLength() != 4) return null;
-        var v = f.EnumerateArray().Select(e => e.ValueKind == JsonValueKind.Number ? e.GetDouble() : double.NaN).ToArray();
-        if (v.Any(double.IsNaN)) return null;
-        return v[2] >= 0.999 && v[3] >= 0.999 ? null : v;
+        using var mask = SKBitmap.Decode(maskFile) ?? throw new InvalidOperationException("Masque illisible.");
+        using var scaled = mask.Resize(new SKImageInfo(width, height), new SKSamplingOptions(SKFilterMode.Linear));
+        var values = new byte[width * height];
+        for (var y = 0; y < height; y++)
+            for (var x = 0; x < width; x++)
+            {
+                var m = scaled.GetPixel(x, y);
+                values[y * width + x] = (byte)(Math.Max(m.Red, Math.Max(m.Green, m.Blue)) * m.Alpha / 255);
+            }
+        return values;
     }
 
-    /// <summary>The frame in the upright picture's pixels.</summary>
-    private static SKRectI FramePixels(double[] f, int width, int height)
-    {
-        var left = Math.Clamp((int)Math.Round(f[0] * width), 0, width - 1);
-        var top = Math.Clamp((int)Math.Round(f[1] * height), 0, height - 1);
-        var right = Math.Clamp((int)Math.Round((f[0] + f[2]) * width), left + 1, width);
-        var bottom = Math.Clamp((int)Math.Round((f[1] + f[3]) * height), top + 1, height);
-        return new SKRectI(left, top, right, bottom);
-    }
-
-    /// <summary>Writes the framed part of the upright picture (and of the mask, if any) as PNGs in `work`.</summary>
-    private static (string Source, string? Mask, SKRectI Frame) CutFrame(string whole, string? maskFile, double[] frame, string work)
+    /// <summary>
+    /// What Kontext is shown when parts are hidden: the bounding box of what is not hidden, the hidden pixels inside it
+    /// flat grey (Kontext keeps a flat grey as it is, seen on 4 tries out of 4), and the zone mask cut the same way.
+    /// </summary>
+    private static (string Source, string? Mask, SKRectI Visible) Conceal(string whole, string? maskFile, string hideFile, string work)
     {
         using var picture = ImageEditing.DecodeOriented(whole) ?? throw new InvalidOperationException("Format d'image illisible sur cet ordinateur.");
-        var rect = FramePixels(frame, picture.Width, picture.Height);
-        var source = Path.Combine(work, "framed.png");
-        using (var part = new SKBitmap(rect.Width, rect.Height))
-        {
-            picture.ExtractSubset(part, rect);
-            Save(part, source);
-        }
+        int w = picture.Width, h = picture.Height;
+        var hide = MaskValues(hideFile, w, h);
+        int left = w, top = h, right = -1, bottom = -1;
+        for (var y = 0; y < h; y++)
+            for (var x = 0; x < w; x++)
+                if (hide[y * w + x] <= 127)
+                {
+                    left = Math.Min(left, x); right = Math.Max(right, x);
+                    top = Math.Min(top, y); bottom = Math.Max(bottom, y);
+                }
+        if (right < 0) throw new InvalidOperationException("Toute l'image est cachée : l'IA n'a rien à voir.");
+        var rect = new SKRectI(left, top, right + 1, bottom + 1);
+
+        using var part = new SKBitmap(new SKImageInfo(rect.Width, rect.Height, SKColorType.Rgba8888, SKAlphaType.Premul));
+        for (var y = 0; y < rect.Height; y++)
+            for (var x = 0; x < rect.Width; x++)
+            {
+                var c = picture.GetPixel(rect.Left + x, rect.Top + y);
+                var a = hide[(rect.Top + y) * w + rect.Left + x] / 255.0;
+                part.SetPixel(x, y, new SKColor((byte)(c.Red + (128 - c.Red) * a), (byte)(c.Green + (128 - c.Green) * a), (byte)(c.Blue + (128 - c.Blue) * a)));
+            }
+        var source = Path.Combine(work, "concealed.png");
+        Save(part, source);
+
         string? mask = null;
         if (maskFile is not null)
         {
             using var m = SKBitmap.Decode(maskFile) ?? throw new InvalidOperationException("Masque illisible.");
-            var mr = FramePixels(frame, m.Width, m.Height);
-            using var part = new SKBitmap(mr.Width, mr.Height);
-            m.ExtractSubset(part, mr);
-            mask = Path.Combine(work, "mask-framed.png");
-            Save(part, mask);
+            using var full = m.Resize(new SKImageInfo(w, h), new SKSamplingOptions(SKFilterMode.Linear));
+            using var cut = new SKBitmap(rect.Width, rect.Height);
+            full.ExtractSubset(cut, rect);
+            mask = Path.Combine(work, "mask-concealed.png");
+            Save(cut, mask);
         }
         return (source, mask, rect);
     }
 
     /// <summary>
-    /// Puts a framed result back into the whole picture (written over `result`): scaled to the frame, blended over a
-    /// thin band along the frame's inner edges (not along the picture's own edges), so a slight colour shift of the
-    /// redrawn part does not leave a hard line. Outside the frame the picture is untouched.
+    /// Puts a result drawn on the concealed part back into the whole picture (written over `result`): hidden pixels
+    /// get their original back exactly; the original also fades out over a thin band around them, so whatever Kontext
+    /// drew against the grey edge does not show. Outside the visible box nothing changes.
     /// </summary>
-    private static void PasteFrame(string whole, SKRectI frame, string result)
+    private static void Unconceal(string whole, string hideFile, SKRectI visible, string result)
     {
         using var picture = ImageEditing.DecodeOriented(whole) ?? throw new InvalidOperationException("Image illisible.");
+        int w = picture.Width, h = picture.Height;
         using var drawn = SKBitmap.Decode(result) ?? throw new InvalidOperationException("Résultat illisible.");
-        using var part = drawn.Width == frame.Width && drawn.Height == frame.Height
+        using var part = drawn.Width == visible.Width && drawn.Height == visible.Height
             ? drawn.Copy()
-            : drawn.Resize(new SKImageInfo(frame.Width, frame.Height), new SKSamplingOptions(SKCubicResampler.Mitchell));
-        var band = Math.Max(4, (int)Math.Round(Math.Min(frame.Width, frame.Height) * 0.03));
-        bool fadeLeft = frame.Left > 0, fadeTop = frame.Top > 0, fadeRight = frame.Right < picture.Width, fadeBottom = frame.Bottom < picture.Height;
-        using var output = picture.Copy(SKColorType.Rgba8888);
-        for (var y = 0; y < frame.Height; y++)
-            for (var x = 0; x < frame.Width; x++)
+            : drawn.Resize(new SKImageInfo(visible.Width, visible.Height), new SKSamplingOptions(SKCubicResampler.Mitchell));
+        var hide = MaskValues(hideFile, w, h);
+
+        // The hidden zone blurred: how much of the original to keep near it.
+        using var hard = new SKBitmap(new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul));
+        for (var y = 0; y < h; y++)
+            for (var x = 0; x < w; x++)
             {
-                var d = int.MaxValue;
-                if (fadeLeft) d = Math.Min(d, x);
-                if (fadeTop) d = Math.Min(d, y);
-                if (fadeRight) d = Math.Min(d, frame.Width - 1 - x);
-                if (fadeBottom) d = Math.Min(d, frame.Height - 1 - y);
+                var v = hide[y * w + x];
+                hard.SetPixel(x, y, new SKColor(v, v, v));
+            }
+        var sigma = Math.Max(2f, Math.Min(visible.Width, visible.Height) * 0.01f);
+        using var soft = new SKBitmap(hard.Info);
+        using (var canvas = new SKCanvas(soft))
+        using (var paint = new SKPaint { ImageFilter = SKImageFilter.CreateBlur(sigma, sigma, SKShaderTileMode.Clamp) })
+        {
+            canvas.Clear(SKColors.Black);
+            canvas.DrawBitmap(hard, 0, 0, paint);
+        }
+
+        using var output = picture.Copy(SKColorType.Rgba8888);
+        for (var y = 0; y < visible.Height; y++)
+            for (var x = 0; x < visible.Width; x++)
+            {
+                int px = visible.Left + x, py = visible.Top + y;
+                var keep = Math.Max(hide[py * w + px], (int)soft.GetPixel(px, py).Red) / 255.0;
                 var c = part.GetPixel(x, y);
-                if (d < band)
-                {
-                    var a = (d + 0.5) / band;
-                    var o = output.GetPixel(frame.Left + x, frame.Top + y);
-                    c = new SKColor((byte)(o.Red + (c.Red - o.Red) * a), (byte)(o.Green + (c.Green - o.Green) * a), (byte)(o.Blue + (c.Blue - o.Blue) * a));
-                }
-                output.SetPixel(frame.Left + x, frame.Top + y, c.WithAlpha(255));
+                var o = output.GetPixel(px, py);
+                output.SetPixel(px, py, new SKColor((byte)(c.Red + (o.Red - c.Red) * keep), (byte)(c.Green + (o.Green - c.Green) * keep), (byte)(c.Blue + (o.Blue - c.Blue) * keep)));
             }
         Save(output, result);
     }
@@ -335,7 +364,7 @@ public sealed class ComfyUi
     }
 
     // Whole picture through Kontext (scaled to its ~1 megapixel), decoded in "41". `keepShape`: scaled to about
-    // 1 megapixel in its exact shape instead of Kontext's nearest preferred size (a framed part is pasted back: a
+    // 1 megapixel in its exact shape instead of Kontext's nearest preferred size (a concealed part is pasted back: a
     // changed shape would shift it against the picture around).
     private static void WholePicture(JsonObject g, string prompt, (int Width, int Height)? keepShape = null)
     {
@@ -460,7 +489,7 @@ public sealed class ComfyUi
         return (Side(w), Side(h));
     }
 
-    private static JsonObject Edit(string name, string jobId, string prompt, bool painted, string? maskText, bool erase, int width, int height, SKRectI? zone, bool framed = false)
+    private static JsonObject Edit(string name, string jobId, string prompt, bool painted, string? maskText, bool erase, int width, int height, SKRectI? zone, bool concealed = false)
     {
         var g = new JsonObject { ["1"] = Node("LoadImage", new { image = name }) };
 
@@ -470,7 +499,7 @@ public sealed class ComfyUi
         if (mask is null)
         {
             // No zone: the whole picture follows the sentence; a large original gets its size back.
-            WholePicture(g, prompt, framed ? (width, height) : null);
+            WholePicture(g, prompt, concealed ? (width, height) : null);
             if ((long)width * height <= 1_300_000) return Save(g, Out("41", 0), jobId);
             Nomos(g, Out("41", 0));
             g["62"] = Node("ImageScale", new { image = Out("61", 0), upscale_method = "lanczos", width, height, crop = "disabled" });

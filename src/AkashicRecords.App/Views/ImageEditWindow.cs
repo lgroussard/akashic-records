@@ -43,21 +43,30 @@ public sealed class ImageEditWindow : Window
     /// <summary>What to ask the AI, when the window was closed with « Envoyer à l'IA » or « Restaurer ».</summary>
     public ImageAiRequest? AiResult { get; private set; }
 
-    // The AI zone: brush strokes in preview pixels (only on the unturned picture: the mask matches the stored picture).
-    private readonly List<(List<Point> Points, double Size)> _strokes = new();
-    // A plain button switched on and off (the app's button styles are made for Button only, not ToggleButton).
+    // The AI zone and the parts hidden from the AI: brush strokes in preview pixels (only on the unturned picture: the
+    // masks match the stored picture).
+    private readonly List<(List<Point> Points, double Size, bool Hide)> _strokes = new();
+    // Plain buttons switched on and off (the app's button styles are made for Button only, not ToggleButton).
     private readonly Button _brush = new()
     {
         Content = "Peindre la zone", Padding = new Thickness(14, 6, 14, 6), Cursor = Cursors.Hand,
         ToolTip = "Peins sur l'image l'endroit à changer : sa place et sa taille. Sans zone, toute l'image suit la phrase.",
     };
-    private bool _painting;
-
-    private void SetPainting(bool on)
+    private readonly Button _hideBrush = new()
     {
-        _painting = on;
-        _brush.Content = on ? "✓ Peindre la zone" : "Peindre la zone";
-        _overlay.Cursor = on ? Cursors.Pen : Cursors.Cross;
+        Content = "Cacher à l'IA", Padding = new Thickness(14, 6, 14, 6), Cursor = Cursors.Hand,
+        ToolTip = "Peins ce que l'IA ne doit pas voir : elle ne reçoit que le reste, et les parties cachées reviennent telles quelles.",
+    };
+    private enum Brushing { None, Zone, Hide }
+    private Brushing _brushing;
+    private bool _painting => _brushing != Brushing.None;
+
+    private void SetPainting(Brushing tool)
+    {
+        _brushing = tool;
+        _brush.Content = tool == Brushing.Zone ? "✓ Peindre la zone" : "Peindre la zone";
+        _hideBrush.Content = tool == Brushing.Hide ? "✓ Cacher à l'IA" : "Cacher à l'IA";
+        _overlay.Cursor = tool != Brushing.None ? Cursors.Pen : Cursors.Cross;
     }
     private readonly Slider _brushSize = new() { Minimum = 4, Maximum = 160, Value = 40, Width = 120, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
     private readonly TextBox _prompt = new() { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 60, Margin = new Thickness(0, 0, 0, 8) };
@@ -65,12 +74,6 @@ public sealed class ImageEditWindow : Window
     private readonly CheckBox _erase = new() { Content = "Effacer d'abord ce qu'il y a dans la zone", Margin = new Thickness(0, 0, 0, 10) };
     private readonly ComboBox _tries = new() { Width = 70, Margin = new Thickness(8, 0, 16, 0), VerticalAlignment = VerticalAlignment.Center };
     private readonly ComboBox _engine = new() { Width = 170, Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
-    private readonly CheckBox _aiFrame = new()
-    {
-        Content = "Ne montrer à l'IA que le rectangle tracé", IsChecked = true, Margin = new Thickness(0, 0, 0, 4),
-        ToolTip = "L'IA ne voit et ne change que ce morceau (agrandi pour plus de détails), puis il est recollé dans la photo entière.",
-    };
-    private readonly TextBlock _aiFrameText = new() { TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(0, 0, 0, 10) };
     private readonly Canvas _paint = new() { IsHitTestVisible = false };
     private List<Point>? _currentStroke;
 
@@ -272,9 +275,10 @@ public sealed class ImageEditWindow : Window
     {
         _turns = ((_turns + by) % 4 + 4) % 4;
         // The AI zone is drawn on the stored picture's orientation: it does not survive a turn.
-        ClearStrokes();
-        SetPainting(false);
-        _brush.IsEnabled = _turns == 0;
+        _strokes.Clear();
+        DrawStrokes();
+        SetPainting(Brushing.None);
+        _brush.IsEnabled = _hideBrush.IsEnabled = _turns == 0;
         // The crop follows the picture round.
         if (_crop is { } c)
             _crop = by > 0 ? new Rect(1 - c.Y - c.Height, c.X, c.Height, c.Width) : new Rect(c.Y, 1 - c.X - c.Width, c.Height, c.Width);
@@ -349,13 +353,6 @@ public sealed class ImageEditWindow : Window
             h = Math.Max(1, (int)Math.Round(c.Height * h));
         }
         _sizeText.Text = $"Image enregistrée : {w} × {h} px (JPEG)";
-        _aiFrame.IsEnabled = _crop is not null;
-        _aiFrameText.Foreground = Brush("TextFaintBrush");
-        _aiFrameText.Text = _crop is null
-            ? "Trace un rectangle sur l'image (comme pour recadrer) pour ne montrer qu'un morceau à l'IA."
-            : _aiFrame.IsChecked == true
-                ? $"L'IA verra seulement ce rectangle ({w} × {h} px), puis il sera recollé dans la photo, le reste intact."
-                : "L'IA verra toute l'image.";
     }
 
     private enum DragMode { None, New, Move, Resize }
@@ -389,7 +386,7 @@ public sealed class ImageEditWindow : Window
         if (_painting)
         {
             _currentStroke = [p];
-            _strokes.Add((_currentStroke, _brushSize.Value * Math.Max(PreviewWidth, PreviewHeight) / 1000));
+            _strokes.Add((_currentStroke, _brushSize.Value * Math.Max(PreviewWidth, PreviewHeight) / 1000, _brushing == Brushing.Hide));
             DrawStrokes();
             _overlay.CaptureMouse();
             e.Handled = true;
@@ -498,22 +495,29 @@ public sealed class ImageEditWindow : Window
             TextWrapping = TextWrapping.Wrap, Foreground = Brush("TextMutedBrush"), FontSize = 11.5, Margin = new Thickness(0, 0, 0, 8),
         });
         panel.Children.Add(_prompt);
-        _aiFrame.Checked += (_, _) => DrawCrop();
-        _aiFrame.Unchecked += (_, _) => DrawCrop();
-        panel.Children.Add(_aiFrame);
-        panel.Children.Add(_aiFrameText);
 
         var brushRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
         _brush.Style = Application.Current.TryFindResource("SecondaryButtonStyle") as Style;
-        _brush.Click += (_, _) => SetPainting(!_painting);
+        _brush.Click += (_, _) => SetPainting(_brushing == Brushing.Zone ? Brushing.None : Brushing.Zone);
         brushRow.Children.Add(_brush);
         _brushSize.ToolTip = "Taille du pinceau";
         brushRow.Children.Add(_brushSize);
         panel.Children.Add(brushRow);
-        var clear = SideButton("Effacer la zone peinte", ClearStrokes);
+        var clear = SideButton("Effacer la zone peinte", () => ClearStrokes(hide: false));
         clear.HorizontalAlignment = HorizontalAlignment.Left;
         clear.Margin = new Thickness(0, 0, 0, 10);
         panel.Children.Add(clear);
+
+        // What the AI must not see: painted dark; it gets only the rest, and the hidden parts come back unchanged.
+        var hideRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
+        _hideBrush.Style = Application.Current.TryFindResource("SecondaryButtonStyle") as Style;
+        _hideBrush.Click += (_, _) => SetPainting(_brushing == Brushing.Hide ? Brushing.None : Brushing.Hide);
+        hideRow.Children.Add(_hideBrush);
+        var showAll = SideButton("Tout montrer", () => ClearStrokes(hide: true));
+        showAll.Margin = new Thickness(8, 0, 0, 0);
+        showAll.ToolTip = "Enlever les parties cachées : l'IA verra toute l'image.";
+        hideRow.Children.Add(showAll);
+        panel.Children.Add(hideRow);
 
         panel.Children.Add(new TextBlock
         {
@@ -561,7 +565,7 @@ public sealed class ImageEditWindow : Window
         panel.Children.Add(new TextBlock
         {
             Text = "Fait sur un PC avec ComfyUI (une à quelques minutes). Le résultat remplace l'image ; « " + ImageEditing.RevertLabel + " » reste possible. " +
-                   "La rotation et les couleurs réglées plus haut ne s'appliquent pas à l'IA ; le rectangle tracé sert de cadre (case ci-dessus).",
+                   "La rotation, le recadrage et les couleurs réglés plus haut ne s'appliquent pas à l'IA.",
             TextWrapping = TextWrapping.Wrap, Foreground = Brush("TextFaintBrush"), FontSize = 11, Margin = new Thickness(0, 10, 0, 0),
         });
     }
@@ -577,28 +581,23 @@ public sealed class ImageEditWindow : Window
         }
         var maskText = string.IsNullOrWhiteSpace(_maskText.Text) ? null : _maskText.Text.Trim();
         var engine = (_engine.SelectedItem as ComboBoxItem)?.Tag as string ?? "kontext";
-        if (engine == "sdxl" && _strokes.Count == 0 && maskText is null)
+        var zone = _strokes.Any(s => !s.Hide);
+        var hidden = _strokes.Any(s => s.Hide);
+        if (engine == "sdxl" && !zone && maskText is null)
         {
             MessageBox.Show(this, "RealVisXL redessine seulement une zone : peins-la, ou nomme-la en quelques mots.", "Modifier avec l'IA");
             return;
         }
-        AiResult = new ImageAiRequest("edit", prompt, _strokes.Count > 0 ? RenderMask() : null, maskText, _erase.IsChecked == true, Tries(), engine, AiFrame());
+        AiResult = new ImageAiRequest("edit", prompt, zone ? RenderMask(hide: false) : null, maskText, _erase.IsChecked == true, Tries(), engine,
+            hidden ? RenderMask(hide: true) : null);
         DialogResult = true;
     }
 
     private int Tries() => (_tries.SelectedItem as ComboBoxItem)?.Tag as int? ?? 1;
 
-    // The rectangle drawn, as the AI's frame on the stored (unturned) picture: [x, y, width, height] in fractions.
-    private double[]? AiFrame()
+    private void ClearStrokes(bool hide)
     {
-        if (_crop is not { } c || _aiFrame.IsChecked != true) return null;
-        for (var i = 0; i < _turns; i++) c = new Rect(c.Y, 1 - c.X - c.Width, c.Height, c.Width); // undo one right turn
-        return [c.X, c.Y, c.Width, c.Height];
-    }
-
-    private void ClearStrokes()
-    {
-        _strokes.Clear();
+        _strokes.RemoveAll(s => s.Hide == hide);
         _currentStroke = null;
         DrawStrokes();
     }
@@ -606,19 +605,21 @@ public sealed class ImageEditWindow : Window
     private void DrawStrokes()
     {
         _paint.Children.Clear();
-        var brush = new SolidColorBrush(Color.FromArgb(0x70, 0xFF, 0x30, 0x30));
-        foreach (var (points, size) in _strokes)
+        var zoneBrush = new SolidColorBrush(Color.FromArgb(0x70, 0xFF, 0x30, 0x30));
+        var hideBrush = new SolidColorBrush(Color.FromArgb(0xD0, 0x20, 0x20, 0x28)); // hidden: nearly black
+        foreach (var (points, size, hide) in _strokes)
         {
             _paint.Children.Add(new Polyline
             {
-                Stroke = brush, StrokeThickness = size, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
+                Stroke = hide ? hideBrush : zoneBrush, StrokeThickness = size, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
                 StrokeLineJoin = PenLineJoin.Round, Points = new PointCollection(points.Count == 1 ? [points[0], points[0]] : points),
             });
         }
     }
 
-    // The zone as a PNG at preview size: white where painted, black elsewhere (the worker scales it to the picture).
-    private byte[] RenderMask()
+    // The zone (or the hidden parts) as a PNG at preview size: white where painted, black elsewhere (the worker scales
+    // it to the picture).
+    private byte[] RenderMask(bool hide)
     {
         var w = (int)PreviewWidth;
         var h = (int)PreviewHeight;
@@ -626,7 +627,7 @@ public sealed class ImageEditWindow : Window
         using (var canvas = new SKCanvas(bitmap))
         {
             canvas.Clear(SKColors.Black);
-            foreach (var (points, size) in _strokes)
+            foreach (var (points, size, _) in _strokes.Where(s => s.Hide == hide))
             {
                 using var paint = new SKPaint
                 {
@@ -646,7 +647,7 @@ public sealed class ImageEditWindow : Window
 }
 
 /// <summary>An AI request from the editor. Kind "edit" (a sentence; MaskPng = white where the change goes; MaskText =
-/// words naming the zone; Erase = empty the zone first; Frame = the only part shown to the AI, [x, y, w, h] in fractions
-/// of the stored picture, pasted back) or "restore".</summary>
+/// words naming the zone; Erase = empty the zone first; HidePng = white where the picture is hidden from the AI, restored
+/// as it was in the result) or "restore".</summary>
 public sealed record ImageAiRequest(string Kind, string? Prompt, byte[]? MaskPng, string? MaskText, bool Erase, int Tries = 1, string Engine = "kontext",
-    double[]? Frame = null);
+    byte[]? HidePng = null);
