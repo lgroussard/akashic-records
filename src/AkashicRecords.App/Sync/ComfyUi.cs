@@ -345,30 +345,15 @@ public sealed class ComfyUi
 
         // With a zone: Kontext draws the sentence in the zone only, zoomed to about 1 megapixel in its own shape, pasted
         // back with a soft edge: the rest stays identical, at full size.
-        // « Effacer d'abord »: the zone, grown to take the object's outline in, is painted flat grey in the picture
-        // Kontext sees, and the sentence asks it to fill the grey. Tried on a removed person (2026-11-27): Kontext
-        // alone sometimes drew the person back (it still saw them); a first pass of LaMa came out blurry (drawn small)
-        // and Kontext copies the picture it is given, blur included; the grey hides the object and has no blur to copy.
-        // The redrawn zone reaches twice as far as the grey: where the grey met the photo, Kontext drew a faint light
-        // line (it copies edges); with that edge inside the redrawn ring, the line is gone (same request, same seed).
-        var grow = erase ? Math.Max(8, (int)Math.Round(Math.Max(width, height) * 0.01)) : 0;
-        var source = Out("1", 0);
-        if (erase)
-        {
-            var painted0 = (JsonArray)mask.DeepClone();
-            var grey = Grown(g, mask, width, height);
-            g["55"] = Node("EmptyImage", new { width, height, batch_size = 1, color = 0x808080 });
-            g["56"] = Node("ImageCompositeMasked", new { destination = Out("1", 0), source = Out("55", 0), x = 0, y = 0, resize_source = false, mask = grey });
-            source = Out("56", 0);
-            g["58"] = Node("GrowMask", new { mask = painted0, expand = grow * 2, tapered_corners = true });
-            mask = Out("58", 0);
-            grow *= 2;
-            prompt += " Fill the plain grey area so it blends seamlessly with the rest of the photo, sharp and detailed, same lighting.";
-        }
-        var shape = Shaped(zone, maskText, grow, width, height);
+        // Removing too («Effacer d'abord» or not): Kontext alone, on the real picture, following the sentence; nothing
+        // is erased or filled before it. Tried on a removed person (2026-11-27), same zone and sentence: Kontext alone
+        // gave the sharp result the user wanted; a LaMa pass first came out blurry (Kontext copies the picture it is
+        // given) and a grey fill was kept as grey (4 tries out of 4). Kontext may leave the object in some tries:
+        // several tries, keep the good one.
+        var shape = Shaped(zone, maskText, 0, width, height);
         g["10"] = Node("InpaintCropImproved", shape is { } t
-            ? Crop(source, (JsonArray)mask.DeepClone(), t.Width, t.Height, 8, 32, 1.5, false)
-            : Crop(source, (JsonArray)mask.DeepClone(), 1024, 1024, 8, 32, 3.0, false));
+            ? Crop(Out("1", 0), (JsonArray)mask.DeepClone(), t.Width, t.Height, 8, 32, 1.5, false)
+            : Crop(Out("1", 0), (JsonArray)mask.DeepClone(), 1024, 1024, 8, 32, 3.0, false));
         g["35"] = Node("VAEEncode", new { pixels = Out("10", 1), vae = Out("32", 0) });
         g["43"] = Node("SetLatentNoiseMask", new { samples = Out("35", 0), mask = Out("10", 2) });
         Kontext(g, prompt, Out("35", 0), Out("43", 0));
