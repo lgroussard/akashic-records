@@ -595,8 +595,11 @@ await Scenario("14. Calcul partage : le hub garde les modeles et la liste, les a
     Check(claimed.StatusCode == HttpStatusCode.OK && held.GetProperty("id").GetString() == jobId && held.GetProperty("status").GetString() == "running"
           && held.GetProperty("worker_name").GetString() == "LOHAN",
         "le PC qui sait le faire le recoit, marque en cours chez lui");
-    Check((await Post(pc, "/compute/claim", new { name = "LOHAN", rid = "win-x64", models = new[] { "nomos-webphoto-4x" } })).StatusCode == HttpStatusCode.NoContent,
-        "un travail en cours n'est pas donne deux fois");
+    Check((await Post(phone, "/compute/claim", new { name = "Telephone", rid = "win-x64", models = new[] { "nomos-webphoto-4x" } })).StatusCode == HttpStatusCode.NoContent,
+        "un travail en cours n'est pas donne a un autre appareil");
+    var again = await Post(pc, "/compute/claim", new { name = "LOHAN", rid = "win-x64", models = new[] { "nomos-webphoto-4x" } });
+    Check(again.StatusCode == HttpStatusCode.OK && Json(again).GetProperty("id").GetString() == jobId,
+        "le PC qui redemande alors qu'il tenait un travail l'avait lache (appli redemarree) : il le recupere tout de suite, sans attendre 15 min");
 
     var result = Encoding.UTF8.GetBytes("pretend this is a bigger png");
     var up = (await (await pc.Http.PostAsync("/media", new ByteArrayContent(result))).Content.ReadFromJsonAsync<MediaResponse>(SimDevice.Wire))!;
