@@ -29,7 +29,7 @@ public sealed record HubWork(int Queued, int Running, int Failed, int Done);
 public sealed record HubDiskFolder(string Name, long Size, long Files, bool Denied, bool Mount, bool HasChildren);
 public sealed record HubDiskFile(string Name, long Size, string Kind = "other", string? Label = null, string? Hash = null);
 public sealed record HubDiskView(string State, string? At, long? Seconds, bool Refreshing, string Root, string Path, long Size, long Files,
-    List<HubDiskFolder> Folders, List<HubDiskFile> Largest, long OtherFilesBytes, long SmallFoldersBytes, long SmallFolders);
+    List<HubDiskFolder> Folders, List<HubDiskFile> Largest, long OtherFilesBytes, long SmallFoldersBytes, long SmallFolders, bool Catalogue = false);
 public sealed record HubServerStatus(string Version, string Host, string StartedAt, HubServerDisk? Disk, List<HubStorageKind> Storage,
     long BlobBytes, long BlobFiles, HubBackupStatus Backup, List<HubServerDevice> Devices, Dictionary<string, long> Entities, HubWork Downloads, HubWork Compute);
 

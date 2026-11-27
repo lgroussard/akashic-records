@@ -115,6 +115,8 @@ internal fun DiskBrowser(path: String, onPath: (String?) -> Unit, onClose: () ->
 
                 Card("CE DOSSIER") {
                     Text("${size(total)} · ${v.optLong("files")} fichiers", fontWeight = FontWeight.Bold)
+                    if (v.optBoolean("catalogue"))
+                        Text("Les fichiers d'Akashic, rangés comme dans l'app.", fontSize = 12.sp, color = Palette.TextMuted)
                     // The graph: what fills this folder, biggest first.
                     val loose = largest.sumOf { it.optLong("size") } + v.optLong("other_files_bytes") + v.optLong("small_folders_bytes")
                     if (total > 0) Row(Modifier.fillMaxWidth().padding(vertical = 10.dp).height(16.dp).clip(RoundedCornerShape(4.dp)).background(Palette.Surface1)) {

@@ -237,6 +237,8 @@ public partial class ServerWindow : Window
 
         var head = Card(LeftPanel, "CE DOSSIER");
         head.Children.Add(Text($"{Size(d.Size)}  ·  {d.Files:N0} fichiers", 15, Brushes.White, bold: true));
+        if (d.Catalogue)
+            head.Children.Add(Text("Les fichiers d'Akashic, rangés comme dans l'app (sur le disque, ils sont nommés par empreinte).", 12, Muted));
 
         // The graph: what fills this folder, biggest first.
         var segments = d.Folders.Where(f => f.Size > 0).Select((f, i) => (f.Name, f.Size, Color: FolderColors[i % FolderColors.Length])).ToList();
