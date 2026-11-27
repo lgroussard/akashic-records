@@ -189,7 +189,8 @@
                                         <StackPanel Margin="0,0,0,20">
                                             <TextBlock Text="COUVERTURE" Style="{StaticResource PanelSectionHeaderStyle}"/>
                                             <Image x:Name="FicheCoverImage" Height="140" Margin="0,10,0,8"
-                                                   Stretch="Uniform" HorizontalAlignment="Center" Visibility="Collapsed"/>
+                                                   Stretch="Uniform" HorizontalAlignment="Center" Visibility="Collapsed"
+                                                   Cursor="Hand" ToolTip="Ouvrir en grand" MouseLeftButtonUp="FicheCoverImage_OnMouseLeftButtonUp"/>
                                             <!-- Wraps: the three buttons are wider than the fiche, and « Retirer » was cut off. -->
                                             <WrapPanel Margin="0,4,0,0">
                                                 <Button Content="Choisir une couverture…" Click="SetCoverImageButton_OnClick"

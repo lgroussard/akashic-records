@@ -45,6 +45,9 @@ import com.akashicrecords.journaux.nowIso
 import com.akashicrecords.media.ImageEditor
 import com.akashicrecords.media.LocalImage
 import com.akashicrecords.media.MediaFiles
+import com.akashicrecords.media.ZoomableBitmap
+import com.akashicrecords.media.ZoomableLocalImage
+import com.akashicrecords.media.rememberZoomState
 import com.akashicrecords.music.RemoteImages
 import com.akashicrecords.sync.HubCompute
 import com.akashicrecords.sync.SyncService
@@ -297,7 +300,7 @@ private fun SearchResults(db: AkashicDatabase, query: String, key: Int, boards: 
         val scope = rememberCoroutineScope()
         Dialog(onDismissRequest = { preview = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
             Column(Modifier.fillMaxWidth(0.94f).clip(RoundedCornerShape(12.dp)).background(Palette.Surface1).padding(12.dp)) {
-                WebImage(hit.thumbUrl, ratio(hit.width, hit.height), Modifier.heightIn(max = 420.dp).clip(RoundedCornerShape(8.dp)), fit = true)
+                ZoomableWebImage(hit.thumbUrl, ratio(hit.width, hit.height), Modifier.heightIn(max = 420.dp).clip(RoundedCornerShape(8.dp)))
                 Spacer(Modifier.height(8.dp))
                 if (hit.title.isNotBlank()) Text(hit.title, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(listOf(hit.author, hit.source).filter { it.isNotBlank() }.joinToString(" · "), fontSize = 12.sp, color = Palette.TextMuted)
@@ -338,9 +341,9 @@ private fun ImageViewer(
     var note by remember(img.Id) { mutableStateOf<String?>(null) } // the answer to « Agrandir ×4 »
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(Modifier.fillMaxSize().background(Color(0xF00E0E12)).padding(12.dp)) {
-            Box(Modifier.weight(1f).fillMaxWidth().clickable(onClick = onClose), contentAlignment = Alignment.Center) {
-                LocalImage(img.ImagePath, Modifier.fillMaxSize(), maxSide = 2048, crop = false)
-            }
+            // Pinch / double tap to zoom (media/Zoomable.kt); a single tap closes, as before, unless zoomed in.
+            val zoom = rememberZoomState(img.Id, img.ImagePath)
+            ZoomableLocalImage(img.ImagePath, zoom, Modifier.weight(1f).fillMaxWidth(), onTap = { if (!zoom.isZoomed) onClose() })
             // Bounded, so a long list of observations scrolls here instead of squeezing the image out.
             Column(Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState())) {
                 if (img.Title.isNotBlank()) Text(img.Title, fontSize = 15.sp, color = Palette.Text)
@@ -495,6 +498,19 @@ private fun WebImage(url: String, knownRatio: Float, modifier: Modifier, fit: Bo
         contentScale = if (fit) ContentScale.Fit else ContentScale.Crop,
         modifier = Modifier.fillMaxWidth().aspectRatio(r).then(modifier),
     ) else Box(Modifier.fillMaxWidth().aspectRatio(r).then(modifier).background(Palette.Surface3))
+}
+
+// The search preview, zoomable inside its frame (pinch / double tap, media/Zoomable.kt).
+@Composable
+private fun ZoomableWebImage(url: String, knownRatio: Float, modifier: Modifier) {
+    val bitmap by produceState(RemoteImages.cached(url), url) { if (value == null) value = RemoteImages.load(url) }
+    val b = bitmap
+    val r = if (b != null && b.height > 0) (b.width.toFloat() / b.height).coerceIn(0.4f, 2.5f) else knownRatio
+    val image = remember(b) { b?.asImageBitmap() }
+    val zoom = rememberZoomState(url)
+    ZoomableBitmap(image, zoom, Modifier.fillMaxWidth().aspectRatio(r).then(modifier)) {
+        Box(Modifier.fillMaxSize().background(Palette.Surface3))
+    }
 }
 
 @Composable

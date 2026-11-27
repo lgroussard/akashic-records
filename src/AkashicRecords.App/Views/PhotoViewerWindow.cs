@@ -8,14 +8,15 @@ using Microsoft.Win32;
 
 namespace AkashicRecords.App.Views;
 
-// A set of photos shown large, one at a time: arrows (or the keyboard arrows, or the wheel) step through them,
+// A set of photos shown large, one at a time: arrows (or the keyboard arrows, or the wheel over the bar) step through
+// them; over the photo the wheel, a drag and a double-click zoom and pan it (ZoomableImage),
 // "Enregistrer sous…" writes a copy of the shown file wherever the user says. Esc or Fermer closes.
 public sealed class PhotoViewerWindow : Window
 {
     private readonly List<string> _paths; // full paths
     private int _index;
 
-    private readonly Image _image = new() { Stretch = Stretch.Uniform, Margin = new Thickness(16) };
+    private readonly ZoomableImage _image = new() { Margin = new Thickness(16) };
     private readonly TextBlock _counter = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 12, 0) };
     private readonly Button _previous;
     private readonly Button _next;
@@ -95,6 +96,10 @@ public sealed class PhotoViewerWindow : Window
 
         Show(_index);
     }
+
+    /// <summary>One picture shown large (a cover, a poem's image), to zoom into.</summary>
+    public static void OpenSingle(DependencyObject owner, string fullPath) =>
+        new PhotoViewerWindow(new[] { fullPath }, 0) { Owner = Window.GetWindow(owner) }.ShowDialog();
 
     private static Brush Brush(string key) => (Brush)Application.Current.FindResource(key);
 

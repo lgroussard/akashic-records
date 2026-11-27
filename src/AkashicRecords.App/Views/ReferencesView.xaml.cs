@@ -359,8 +359,44 @@ public partial class ReferencesView : UserControl
         FillBoardCombo(img.BoardId);
         ViewerImage.Source = null;
         Viewer.Visibility = Visibility.Visible;
-        _ = Task.Run(() => DecodeFile(MediaStorage.ResolveFullPath(img.ImagePath), 1800))
-            .ContinueWith(t => { if (_viewing == img) ViewerImage.Source = t.Result; }, TaskScheduler.FromCurrentSynchronizationContext());
+        _ = ShowSavedAsync(img);
+    }
+
+    // A quick 1800 px decode first, then the full resolution swapped in under the same zoom, so zooming in stays sharp.
+    private async Task ShowSavedAsync(RefImage img)
+    {
+        var path = MediaStorage.ResolveFullPath(img.ImagePath);
+        var fast = await Task.Run(() => DecodeFile(path, 1800));
+        if (_viewing != img) return;
+        ViewerImage.Source = fast;
+        if (fast is null) return;
+        var full = await Task.Run(() => DecodeFile(path, 0));
+        if (_viewing == img && full is not null && Viewer.Visibility == Visibility.Visible) ViewerImage.ReplaceSource(full);
+    }
+
+    // A search hit opens on its thumbnail; the full picture is fetched behind it for zooming in.
+    private async Task ShowHitFullAsync(ReferenceHit hit)
+    {
+        try
+        {
+            var (bytes, _) = await ReferenceImageSearch.DownloadAsync(hit.FullUrl);
+            var full = await Task.Run(() =>
+            {
+                var b = new BitmapImage();
+                b.BeginInit();
+                b.CacheOption = BitmapCacheOption.OnLoad;
+                if (hit.Width > 6000) b.DecodePixelWidth = 6000; // museum masters can be huge: plenty to zoom into
+                b.StreamSource = new MemoryStream(bytes);
+                b.EndInit();
+                b.Freeze();
+                return (BitmapSource)b;
+            });
+            if (_previewing == hit && Viewer.Visibility == Visibility.Visible) ViewerImage.ReplaceSource(full);
+        }
+        catch
+        {
+            // The thumbnail stays.
+        }
     }
 
     private void OpenHit(ReferenceHit hit)
@@ -383,6 +419,7 @@ public partial class ReferencesView : UserControl
         FillBoardCombo(_filter >= 0 ? _filter : null);
         ViewerImage.Source = RemoteCache.TryGetValue(hit.ThumbUrl, out var thumb) ? thumb : null;
         Viewer.Visibility = Visibility.Visible;
+        _ = ShowHitFullAsync(hit);
     }
 
     private void FillBoardCombo(int? selected)

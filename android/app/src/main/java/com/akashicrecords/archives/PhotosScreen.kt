@@ -37,6 +37,10 @@ import com.akashicrecords.media.ImageEdits
 import com.akashicrecords.media.ImageEditor
 import com.akashicrecords.media.LocalImage
 import com.akashicrecords.media.MediaFiles
+import com.akashicrecords.media.ZoomState
+import com.akashicrecords.media.ZoomableFileImage
+import com.akashicrecords.media.ZoomableLocalImage
+import com.akashicrecords.media.rememberPageZoomState
 import com.akashicrecords.media.cachedImage
 import com.akashicrecords.music.rememberOnline
 import com.akashicrecords.sync.HubCompute
@@ -169,7 +173,7 @@ fun PhotosTab(db: AkashicDatabase) {
                     val p = shown[i]
                     Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(4.dp)).background(Palette.Surface2).clickable { viewing = i }) {
                         val isHere = p.Id in here
-                        Thumb(p, state.hashes[HubPhotos.key(p)], isHere, Modifier.fillMaxSize(), full = false)
+                        Thumb(p, state.hashes[HubPhotos.key(p)], isHere, Modifier.fillMaxSize())
                         if (p.IsFavorite) Text("★", color = Color(0xFFF2C14E), modifier = Modifier.align(Alignment.TopEnd).padding(4.dp))
                         if (!isHere) Text("☁", fontSize = 12.sp, color = Color.White.copy(alpha = 0.85f), modifier = Modifier.align(Alignment.BottomStart).padding(4.dp))
                     }
@@ -184,25 +188,36 @@ fun PhotosTab(db: AkashicDatabase) {
     }
 }
 
-// The picture: its file when stored here, else the hub's copy (a preview in the grid, the whole photo full
-// screen, over the preview while it arrives). Its title when neither is there.
+// The picture in the grid: its file when stored here, else the hub's preview. Its title when neither is there.
 @Composable
-private fun Thumb(p: Photo, hash: String?, isHere: Boolean, modifier: Modifier, full: Boolean) {
+private fun Thumb(p: Photo, hash: String?, isHere: Boolean, modifier: Modifier) {
     val context = LocalContext.current
-    val maxSide = if (full) 2048 else 360
     when {
-        isHere -> LocalImage(p.ImagePath, modifier, maxSide = maxSide, crop = !full)
-        hash != null -> {
-            val preview = "hub-thumb:$hash"
-            if (full) {
-                FileImage("hub:$hash", modifier, maxSide, crop = false, placeholder = cachedImage(preview, 360)) { HubPhotos.original(context, p, hash) }
-            } else {
-                FileImage(preview, modifier, 360, crop = true) { HubPhotos.thumb(context, hash) }
-            }
+        isHere -> LocalImage(p.ImagePath, modifier, maxSide = 360, crop = true)
+        hash != null -> FileImage("hub-thumb:$hash", modifier, 360, crop = true) { HubPhotos.thumb(context, hash) }
+        else -> NotOnServer(p, modifier)
+    }
+}
+
+// The picture full screen, zoomable: its file when stored here, else the hub's whole photo (over the grid's
+// preview while it arrives).
+@Composable
+private fun Large(p: Photo, hash: String?, isHere: Boolean, zoom: ZoomState) {
+    val context = LocalContext.current
+    val modifier = Modifier.fillMaxSize()
+    when {
+        isHere -> ZoomableLocalImage(p.ImagePath, zoom, modifier)
+        hash != null -> ZoomableFileImage("hub:$hash", zoom, modifier, placeholder = cachedImage("hub-thumb:$hash", 360)) {
+            HubPhotos.original(context, p, hash)
         }
-        else -> Box(modifier, contentAlignment = Alignment.Center) {
-            Text(p.Title.ifBlank { "Photo pas encore sur le serveur" }, fontSize = 11.sp, color = Palette.TextFaint, textAlign = TextAlign.Center, modifier = Modifier.padding(6.dp), maxLines = 3, overflow = TextOverflow.Ellipsis)
-        }
+        else -> NotOnServer(p, modifier)
+    }
+}
+
+@Composable
+private fun NotOnServer(p: Photo, modifier: Modifier) {
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Text(p.Title.ifBlank { "Photo pas encore sur le serveur" }, fontSize = 11.sp, color = Palette.TextFaint, textAlign = TextAlign.Center, modifier = Modifier.padding(6.dp), maxLines = 3, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -226,6 +241,7 @@ private fun Viewer(
     var menu by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Photo?>(null) }
     var reverting by remember { mutableStateOf(false) }
+    var zoomed by remember { mutableStateOf(false) } // the shown photo is zoomed in: no swipe to the next
     // A new path is a new file: the viewer and the gallery's image caches (keyed by path) show it at once.
     fun replacePath(id: Int, path: String) {
         list = list.map { if (it.Id == id) it.copy(ImagePath = path) else it }
@@ -291,9 +307,15 @@ private fun Viewer(
             }) { Text(if (current.IsFavorite) "★" else "☆", fontSize = 22.sp, color = if (current.IsFavorite) Color(0xFFF2C14E) else Palette.Text) }
             TextButton(onClick = { confirm = true }) { Text("🗑") }
         }
-        SwipePages(count = list.size, page = page, onPageChange = { page = it }, modifier = Modifier.fillMaxWidth().weight(1f), verticalAlignment = Alignment.CenterVertically) { i ->
-            val p = list[i]
-            Thumb(p, state.hashes[HubPhotos.key(p)], remember(p.Id, p.ImagePath, kept) { HubPhotos.isHere(context, p) }, Modifier.fillMaxSize(), full = true)
+        // Pinch / double tap to zoom (media/Zoomable.kt); while the shown photo is zoomed a drag moves around it
+        // instead of going to the next one.
+        SwipePages(
+            count = list.size, page = page, onPageChange = { page = it }, modifier = Modifier.fillMaxWidth().weight(1f),
+            verticalAlignment = Alignment.CenterVertically, userScrollEnabled = !zoomed,
+        ) { i ->
+            val p = list.getOrNull(i) ?: return@SwipePages
+            val zoom = rememberPageZoomState(i == page) { zoomed = it }
+            Large(p, state.hashes[HubPhotos.key(p)], remember(p.Id, p.ImagePath, kept) { HubPhotos.isHere(context, p) }, zoom)
         }
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
             note?.let { Text(it, fontSize = 12.sp, color = Palette.Accent, modifier = Modifier.padding(bottom = 4.dp)) }

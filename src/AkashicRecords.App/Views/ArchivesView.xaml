@@ -3,6 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:views="clr-namespace:AkashicRecords.App.Views"
              mc:Ignorable="d">
     <Grid>
         <!-- Main content: two sub-tabs (Photos / Archive familiale) -->
@@ -158,7 +159,8 @@
                     <TextBlock x:Name="ViewerCounterText" Foreground="#AAAAAA" VerticalAlignment="Center"/>
                 </DockPanel>
 
-                <Image x:Name="ViewerImage" Grid.Row="1" Stretch="Uniform"/>
+                <!-- Wheel / drag / double-click / + - 0 zoom and pan the photo -->
+                <views:ZoomableImage x:Name="ViewerImage" Grid.Row="1"/>
 
                 <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center"
                             Margin="0,12,0,0">

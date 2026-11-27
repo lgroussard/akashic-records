@@ -707,6 +707,13 @@ public partial class CollectionsView : UserControl, ISearchNavigable, IRemembers
         }
     }
 
+    // The cover large, to zoom into.
+    private void FicheCoverImage_OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_selectedFilm?.CoverImagePath is not { } path) return;
+        PhotoViewerWindow.OpenSingle(this, MediaStorage.ResolveFullPath(path));
+    }
+
     private void SetCoverImageButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (_selectedFilm is null) return;

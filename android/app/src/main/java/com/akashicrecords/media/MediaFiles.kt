@@ -71,6 +71,21 @@ object MediaFiles {
         while (bounds.outWidth / (sample * 2) >= maxSide || bounds.outHeight / (sample * 2) >= maxSide) sample *= 2
         return BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
     }
+
+    /**
+     * A decode of [file] of at most [maxPixels] pixels (halving the size until it fits), or null when that would
+     * not give a long side above [longerThan] (no gain over what is already shown).
+     */
+    fun decodeWithin(file: File, maxPixels: Long, longerThan: Int): Bitmap? {
+        if (!file.isFile) return null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.path, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        var sample = 1
+        while ((bounds.outWidth.toLong() / sample) * (bounds.outHeight.toLong() / sample) > maxPixels) sample *= 2
+        if (maxOf(bounds.outWidth, bounds.outHeight) / sample <= longerThan) return null
+        return BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
+    }
 }
 
 // Decoded images kept in memory, so a cover or a photo is read and decoded once instead of every time it
@@ -97,6 +112,20 @@ fun LocalImage(relativePath: String?, modifier: Modifier = Modifier, maxSide: In
 fun cachedImage(name: String, maxSide: Int): ImageBitmap? = imageCache.get("$name|$maxSide")?.image
 
 /**
+ * [name] at [maxSide] from the memory cache, else read from the file that [file] finds, decoded and cached.
+ * Null when there is no such file.
+ */
+internal suspend fun loadCachedImage(name: String, maxSide: Int, file: suspend () -> File?): ImageBitmap? =
+    withContext(Dispatchers.IO) {
+        val key = "$name|$maxSide"
+        val f = runCatching { file() }.getOrNull()?.takeIf { it.isFile } ?: return@withContext null
+        val modified = f.lastModified()
+        (imageCache.get(key)?.takeIf { it.modified == modified }
+            ?: MediaFiles.decode(f, maxSide)?.let { CachedImage(it.asImageBitmap(), it.byteCount, modified) }
+                ?.also { imageCache.put(key, it) })?.image
+    }
+
+/**
  * An image read from a file that [file] finds (possibly fetching it first), decoded once and kept in memory
  * under [name]. [placeholder] shows while nothing is decoded yet (null: an empty tile, then "image absente").
  */
@@ -114,15 +143,8 @@ fun FileImage(
     var image by remember(key) { mutableStateOf(imageCache.get(key)?.image) }
     var missing by remember(key) { mutableStateOf(false) }
     LaunchedEffect(key) {
-        val loaded = withContext(Dispatchers.IO) {
-            val f = runCatching { file() }.getOrNull()?.takeIf { it.isFile } ?: return@withContext null
-            val modified = f.lastModified()
-            imageCache.get(key)?.takeIf { it.modified == modified }
-                ?: MediaFiles.decode(f, maxSide)?.let { CachedImage(it.asImageBitmap(), it.byteCount, modified) }
-                    ?.also { imageCache.put(key, it) }
-        }
-        image = loaded?.image
-        missing = loaded == null
+        image = loadCachedImage(name, maxSide, file)
+        missing = image == null
     }
     val shown = image ?: placeholder
     if (shown != null) {
