@@ -1,0 +1,10 @@
+[Unit]
+Description=Akashic hub: measure the disk every night (04:15)
+
+[Timer]
+OnCalendar=*-*-* 04:15:00
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

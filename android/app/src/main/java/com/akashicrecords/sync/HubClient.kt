@@ -64,6 +64,11 @@ class HubClient(hubUrl: String, private val token: String? = null) {
     /** The hub's state for the "Serveur" screen (the hub's ServerStatus.cs). */
     fun server(): JSONObject = call("GET", "/server", null)
 
+    /** One folder of the server's disk (measured apart by the mini-PC, see the hub's DiskIndex.cs). */
+    fun serverDisk(path: String): JSONObject = call("GET", "/server/disk?path=" + java.net.URLEncoder.encode(path, "UTF-8"), null)
+
+    fun refreshServerDisk(): JSONObject = call("POST", "/server/disk/refresh", JSONObject())
+
     fun compute(): JSONObject = call("GET", "/compute", null)
 
     /** Asks for an image already sent with [uploadStream] to be upscaled with [model]. */

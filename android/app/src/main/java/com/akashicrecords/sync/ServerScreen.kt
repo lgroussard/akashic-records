@@ -83,6 +83,13 @@ fun ServerScreen(onClose: () -> Unit) {
     }
     LaunchedEffect(Unit) { while (true) { refresh(); delay(30_000) } }
 
+    // The folder browser: null = the overview.
+    var browsing by remember { mutableStateOf<String?>(null) }
+    browsing?.let { path ->
+        DiskBrowser(path, onPath = { browsing = it }, onClose = onClose)
+        return
+    }
+
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(Modifier.fillMaxSize().background(Palette.AppBg)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -98,6 +105,9 @@ fun ServerScreen(onClose: () -> Unit) {
                 }
                 if (error != null) Text(error!!, fontSize = 12.sp, color = Warn, modifier = Modifier.padding(bottom = 8.dp))
                 DiskCard(s)
+                androidx.compose.material3.Button(onClick = { browsing = "/" }, modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                    Text("Parcourir les dossiers  ›")
+                }
                 BackupCard(s.getJSONObject("backup"))
                 DevicesCard(s.getJSONArray("devices"))
                 Card("TRAVAUX DU SERVEUR") {
@@ -116,7 +126,7 @@ fun ServerScreen(onClose: () -> Unit) {
 }
 
 @Composable
-private fun Card(title: String, content: @Composable () -> Unit) {
+internal fun Card(title: String, content: @Composable () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(RoundedCornerShape(12.dp)).background(Palette.Surface2).padding(14.dp)) {
         Text(title, fontSize = 10.sp, color = Palette.TextMuted, modifier = Modifier.padding(bottom = 8.dp))
         content()
@@ -212,9 +222,9 @@ private fun WorkLine(label: String, w: JSONObject) {
         color = if (w.optInt("failed") > 0) Late else Palette.TextMuted, modifier = Modifier.padding(bottom = 3.dp))
 }
 
-private fun JSONObject.str(name: String): String? = if (has(name) && !isNull(name)) optString(name).takeIf { it.isNotEmpty() } else null
+internal fun JSONObject.str(name: String): String? = if (has(name) && !isNull(name)) optString(name).takeIf { it.isNotEmpty() } else null
 
-private fun size(bytes: Long): String = when {
+internal fun size(bytes: Long): String = when {
     bytes >= 1L shl 40 -> "%.1f To".format(bytes / (1L shl 40).toDouble())
     bytes >= 1L shl 30 -> "%.1f Go".format(bytes / (1L shl 30).toDouble())
     bytes >= 1L shl 20 -> "%d Mo".format(bytes / (1L shl 20))
@@ -222,7 +232,7 @@ private fun size(bytes: Long): String = when {
 }
 
 /** "il y a 5 min", "hier à 03:31", "le 24/11 à 03:30". */
-private fun whenText(iso: String): String {
+internal fun whenText(iso: String): String {
     val t = runCatching { Instant.parse(iso) }.getOrNull()
         ?: runCatching { java.time.OffsetDateTime.parse(iso).toInstant() }.getOrNull() ?: return iso
     val ago = Duration.between(t, Instant.now())

@@ -6,6 +6,7 @@ using AkashicRecords.Hub;
 //   AkashicRecords.Hub devices         list paired devices
 //   AkashicRecords.Hub revoke <id>     revoke a device's token
 //   AkashicRecords.Hub config          print the effective settings
+//   AkashicRecords.Hub index-disk <root> <out.json>   measure a disk folder by folder (run as root, see DiskIndex.cs)
 // Settings: see HubOptions (hub.json, hub.local.json, AKASHIC_HUB_* variables, --Hub:Key=value).
 
 var command = args.Length > 0 && !args[0].StartsWith('-') ? args[0].ToLowerInvariant() : null;
@@ -13,6 +14,13 @@ if (command is null)
 {
     HubApp.Build(args).Run();
     return 0;
+}
+
+// Measuring the disk needs no settings nor database (it runs as root, apart from the server).
+if (command == "index-disk")
+{
+    if (args.Length < 3) { Console.Error.WriteLine("Usage : AkashicRecords.Hub index-disk <dossier> <sortie.json>"); return 2; }
+    return DiskIndex.Run(args[1], args[2]);
 }
 
 try

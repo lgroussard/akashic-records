@@ -73,8 +73,16 @@ chown -R akashic:akashic "$DATA"
 chmod 750 "$DATA"
 
 cp "$APP/akashic-hub.service" /etc/systemd/system/akashic-hub.service
+# The disk measure for the Serveur screen: every night, and on request from the apps (as root, read-only).
+for u in akashic-disk-index.service akashic-disk-index.timer akashic-disk-index.path; do
+    [ -f "$APP/$u" ] && cp "$APP/$u" /etc/systemd/system/$u
+done
 systemctl daemon-reload
 systemctl enable --now akashic-hub
+if [ -f /etc/systemd/system/akashic-disk-index.service ]; then
+    systemctl enable --now akashic-disk-index.timer akashic-disk-index.path >/dev/null 2>&1 || true
+    [ -f "$DATA/disk-index.json" ] || systemctl start --no-block akashic-disk-index.service
+fi
 
 ok=""
 for _ in $(seq 1 20); do

@@ -41,11 +41,18 @@ public partial class ServerWindow : Window
     private HubServerStatus? _status;
     private string? _error;
     private DateTime _readAt;
+    private string? _browsePath;   // null: the overview; else the folder of the server shown in the browser
+    private HubDiskView? _disk;
+    private string? _diskError;
 
     public ServerWindow()
     {
         InitializeComponent();
-        _timer.Tick += async (_, _) => await RefreshAsync();
+        _timer.Tick += async (_, _) =>
+        {
+            if (_browsePath is null) await RefreshAsync();
+            else if (_disk?.Refreshing == true) await BrowseAsync(_browsePath); // a new measure is on its way
+        };
         IsVisibleChanged += async (_, _) =>
         {
             if (IsVisible) { await RefreshAsync(); _timer.Start(); }
@@ -78,6 +85,10 @@ public partial class ServerWindow : Window
     {
         LeftPanel.Children.Clear();
         RightPanel.Children.Clear();
+        // The browser takes the whole width; the overview has two columns.
+        Grid.SetColumnSpan(LeftPanel, _browsePath is null ? 1 : 3);
+        RightPanel.Visibility = _browsePath is null ? Visibility.Visible : Visibility.Collapsed;
+        if (_browsePath is not null) { RenderBrowse(); return; }
         if (_status is null)
         {
             LeftPanel.Children.Add(Text(_error ?? "Lecture de l'état du serveur…", 13, _error is null ? Muted : Warn));
@@ -107,6 +118,9 @@ public partial class ServerWindow : Window
             var rest = d2.Total - d2.Free - Kinds.Sum(k => st.Storage.FirstOrDefault(x => x.Kind == k.Kind)?.Bytes ?? 0);
             if (rest > 0) disk.Children.Add(Legend(Faint, "Système, fichiers perso et le reste", Size(rest)));
         }
+        var browse = new Button { Content = "Parcourir les dossiers  ›", Style = (Style)FindResource("Primary"), Margin = new Thickness(0, 10, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
+        browse.Click += async (_, _) => await BrowseAsync("/");
+        disk.Children.Add(browse);
 
         // Last copy to the external disk.
         var backup = Card(LeftPanel, "SAUVEGARDE SUR LE DISQUE EXTERNE");
@@ -151,6 +165,151 @@ public partial class ServerWindow : Window
         catalogue.Children.Add(Text($"{total:N0} éléments synchronisés ({st.BlobFiles:N0} fichiers, {Size(st.BlobBytes)})", 12, Muted));
 
         Footer.Text = $"Hub {st.Version}  ·  allumé depuis {Since(st.StartedAt)}  ·  lu à {_readAt:HH:mm}" + (_error is null ? "" : $"  ·  {_error}");
+    }
+
+    // ------------------------------------------------------------------ the folder browser (read-only)
+
+    /// <summary>Colours of a folder's sub-folders, in size order, in the bar and the list.</summary>
+    private static readonly Brush[] FolderColors =
+    {
+        B(0x3B, 0x82, 0xF6), B(0xF4, 0x72, 0xB6), B(0xF5, 0x9E, 0x0B), B(0x8B, 0x5C, 0xF6), B(0x14, 0xB8, 0xA6),
+        B(0xEF, 0x44, 0x44), B(0x84, 0xCC, 0x16), B(0x06, 0xB6, 0xD4), B(0xE8, 0x79, 0xF9), B(0xFB, 0x92, 0x3C),
+    };
+
+    internal async Task BrowseAsync(string path, bool refresh = false)
+    {
+        _browsePath = path;
+        var s = SyncService.Instance.Settings;
+        try
+        {
+            using var hub = new HubClient(s.HubUrl, s.Token);
+            if (refresh) await hub.RefreshServerDiskAsync();
+            _disk = await hub.ServerDiskAsync(path);
+            _browsePath = _disk.Path; // a folder gone since: the deepest one still known
+            _diskError = null;
+        }
+        catch (Exception e)
+        {
+            _diskError = "Serveur injoignable : " + e.Message;
+        }
+        Render();
+    }
+
+    private void RenderBrowse()
+    {
+        var top = new DockPanel { Margin = new Thickness(0, 0, 0, 12) };
+        var back = new Button { Content = "‹ Vue d'ensemble", Style = (Style)FindResource("Btn"), Margin = new Thickness(0, 0, 12, 0) };
+        back.Click += (_, _) => { _browsePath = null; Render(); };
+        top.Children.Add(back);
+        var refresh = new Button { Content = _disk?.Refreshing == true ? "Mesure en cours…" : "↻ Mesurer à nouveau", Style = (Style)FindResource("Btn"), IsEnabled = _disk?.Refreshing != true };
+        refresh.Click += async (_, _) => await BrowseAsync(_browsePath ?? "/", refresh: true);
+        DockPanel.SetDock(refresh, Dock.Right);
+        top.Children.Add(refresh);
+
+        // Where we are: every level is a way back up.
+        var crumbs = new WrapPanel { VerticalAlignment = VerticalAlignment.Center };
+        var parts = (_browsePath ?? "/").Split('/', StringSplitOptions.RemoveEmptyEntries);
+        void Crumb(string label, string target, bool current)
+        {
+            var b = new Button { Content = label, Style = (Style)FindResource("Flat"), FontWeight = current ? FontWeights.SemiBold : FontWeights.Normal, Foreground = current ? Brushes.White : Muted };
+            b.Click += async (_, _) => await BrowseAsync(target);
+            crumbs.Children.Add(b);
+        }
+        Crumb(_disk?.Root is { Length: > 0 } r ? r : "/", "/", parts.Length == 0);
+        for (var i = 0; i < parts.Length; i++)
+        {
+            crumbs.Children.Add(new TextBlock { Text = "›", Foreground = Faint, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 0, 2, 0) });
+            Crumb(parts[i], "/" + string.Join('/', parts.Take(i + 1)), i == parts.Length - 1);
+        }
+        top.Children.Add(crumbs);
+        LeftPanel.Children.Add(top);
+
+        if (_diskError is not null) LeftPanel.Children.Add(Text(_diskError, 12, Warn));
+        var d = _disk;
+        if (d is null) { LeftPanel.Children.Add(Text("Lecture…", 13, Muted)); return; }
+        if (d.State == "none")
+        {
+            LeftPanel.Children.Add(Text(d.Refreshing
+                ? "Première mesure du disque en cours : quelques minutes. L'écran se mettra à jour tout seul."
+                : "Le disque n'a pas encore été mesuré. Touche « Mesurer à nouveau » (il faut que le serveur ait été mis à jour).", 13, Muted));
+            return;
+        }
+
+        var head = Card(LeftPanel, "CE DOSSIER");
+        head.Children.Add(Text($"{Size(d.Size)}  ·  {d.Files:N0} fichiers", 15, Brushes.White, bold: true));
+
+        // The graph: what fills this folder, biggest first.
+        var segments = d.Folders.Where(f => f.Size > 0).Select((f, i) => (f.Name, f.Size, Color: FolderColors[i % FolderColors.Length])).ToList();
+        var loose = d.Largest.Sum(f => f.Size) + d.OtherFilesBytes;
+        if (d.SmallFoldersBytes + loose > 0) segments.Add(("Fichiers et petits dossiers", d.SmallFoldersBytes + loose, Faint));
+        if (d.Size > 0 && segments.Count > 0)
+        {
+            var bar = new Grid { Height = 18, Margin = new Thickness(0, 8, 0, 4) };
+            foreach (var (name, size, color) in segments)
+            {
+                bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(size, GridUnitType.Star) });
+                var seg = new Border { Background = color, ToolTip = $"{name} : {Size(size)}", BorderBrush = CardBg, BorderThickness = new Thickness(0, 0, 1, 0) };
+                Grid.SetColumn(seg, bar.ColumnDefinitions.Count - 1);
+                bar.Children.Add(seg);
+            }
+            head.Children.Add(new Border { CornerRadius = new CornerRadius(4), ClipToBounds = true, Child = bar });
+        }
+        head.Children.Add(Text($"Mesuré {When(d.At ?? "")}" + (d.Seconds is { } sec ? $" (en {Duration(sec)})" : "") + (d.Refreshing ? "  ·  nouvelle mesure en cours…" : ""), 11, Faint));
+
+        // Sub-folders: click to go in.
+        if (d.Folders.Count > 0)
+        {
+            var list = Card(LeftPanel, "DOSSIERS");
+            for (var i = 0; i < d.Folders.Count; i++)
+            {
+                var f = d.Folders[i];
+                var color = f.Size > 0 ? FolderColors[i % FolderColors.Length] : Faint;
+                var note = f.Mount ? "autre disque ou dossier système, non mesuré" : f.Denied ? "illisible" : $"{Size(f.Size)}  ·  {f.Files:N0} fichiers";
+                var row = Row(color, "📁  " + f.Name, note, d.Size > 0 ? (double)f.Size / d.Size : 0, clickable: f.HasChildren && !f.Mount && !f.Denied);
+                var target = (_browsePath == "/" ? "" : _browsePath) + "/" + f.Name;
+                if (f.HasChildren && !f.Mount && !f.Denied) row.MouseLeftButtonUp += async (_, _) => await BrowseAsync(target);
+                list.Children.Add(row);
+            }
+            if (d.SmallFolders > 0) list.Children.Add(Text($"+ {d.SmallFolders} petits dossiers (moins de 1 Mo chacun) : {Size(d.SmallFoldersBytes)}", 11, Faint));
+        }
+
+        if (d.Largest.Count > 0)
+        {
+            var files = Card(LeftPanel, "PLUS GROS FICHIERS DE CE DOSSIER");
+            foreach (var f in d.Largest)
+                files.Children.Add(Row(Faint, f.Name, Size(f.Size), d.Size > 0 ? (double)f.Size / d.Size : 0, clickable: false));
+            if (d.OtherFilesBytes > 0) files.Children.Add(Text($"+ les autres fichiers : {Size(d.OtherFilesBytes)}", 11, Faint));
+        }
+        Footer.Text = "Lecture seule : la mesure est faite chaque nuit par le mini-PC, ou quand tu la demandes.";
+    }
+
+    // One line of the browser: colour, name, size, and a thin bar for its share of the folder.
+    private static FrameworkElement Row(Brush color, string name, string value, double share, bool clickable)
+    {
+        var grid = new Grid { Margin = new Thickness(0, 0, 0, 2) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(160) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(230) });
+        grid.Children.Add(new Border { Width = 10, Height = 10, CornerRadius = new CornerRadius(2), Background = color, VerticalAlignment = VerticalAlignment.Center });
+        var label = new TextBlock { Text = name, Foreground = Brushes.White, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(label, 1); grid.Children.Add(label);
+        var track = new Grid { Height = 6, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 8, 0) };
+        track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(share, 0.001), GridUnitType.Star) });
+        track.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(1 - share, 0.001), GridUnitType.Star) });
+        track.Children.Add(new Border { Background = color, CornerRadius = new CornerRadius(3) });
+        var rest = new Border { Background = Track, CornerRadius = new CornerRadius(3) };
+        Grid.SetColumn(rest, 1); track.Children.Add(rest);
+        Grid.SetColumn(track, 2); grid.Children.Add(track);
+        var v = new TextBlock { Text = value + (clickable ? "   ›" : ""), Foreground = Muted, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Right };
+        Grid.SetColumn(v, 3); grid.Children.Add(v);
+        var border = new Border { Child = grid, Padding = new Thickness(6, 5, 6, 5), CornerRadius = new CornerRadius(5), Background = Brushes.Transparent, Cursor = clickable ? Cursors.Hand : null };
+        if (clickable)
+        {
+            border.MouseEnter += (_, _) => border.Background = Track;
+            border.MouseLeave += (_, _) => border.Background = Brushes.Transparent;
+        }
+        return border;
     }
 
     private static string Work(HubWork w)
