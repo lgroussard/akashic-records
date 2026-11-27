@@ -189,6 +189,14 @@ fun ImageEditor(
         return mask
     }
 
+    // The frame drawn (the crop tool), as the AI's frame on the stored (unturned) picture: [x, y, width, height].
+    fun aiFrame(): DoubleArray? {
+        if (crop.full) return null
+        var k = crop
+        repeat(turns) { k = k.turnedLeft() } // undo the right turns
+        return doubleArrayOf(k.l.toDouble(), k.t.toDouble(), (k.r - k.l).toDouble(), (k.b - k.t).toDouble())
+    }
+
     fun sendToAi(kind: String) {
         if (kind == "edit" && prompt.isBlank()) { message = "Écris d'abord ce qu'il faut changer."; return }
         if (kind == "edit" && engine == "sdxl" && strokes.isEmpty() && zoneWords.isBlank()) { message = "RealVisXL redessine seulement une zone : peins-la ou nomme-la."; return }
@@ -198,7 +206,7 @@ fun ImageEditor(
             val failure = HubCompute.requestEdit(
                 context, table, id.toLong(), kind, if (kind == "edit") prompt.trim() else null,
                 if (kind == "edit") zoneMask() else null, zoneWords.trim().ifEmpty { null }.takeIf { kind == "edit" }, eraseFirst && kind == "edit",
-                tries, if (kind == "edit") engine else "kontext",
+                tries, if (kind == "edit") engine else "kontext", if (kind == "edit") aiFrame() else null,
             )
             busy = false
             message = failure ?: if (tries > 1) "Envoyée : $tries versions à choisir d'ici quelques minutes dans Plus → Agrandir et IA."
@@ -365,13 +373,22 @@ fun ImageEditor(
             // Bottom bars: turning and cropping, then the two sliders; or, in « IA » mode, the AI request.
             if (aiMode) Column(Modifier.fillMaxWidth().background(Palette.Surface1).padding(horizontal = 8.dp, vertical = 4.dp)) {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(enabled = !busy, onClick = { aiMode = false; painting = false }) { Text("← Retouches") }
+                    TextButton(enabled = !busy, onClick = { aiMode = false; painting = false; cropping = false }) { Text("← Retouches") }
                     TextButton(enabled = !busy && turns == 0, onClick = { painting = !painting; cropping = false }) {
                         Text(if (painting) "✓ Peindre la zone" else "Peindre la zone", color = if (painting) Palette.Accent else Palette.Text)
                     }
+                    TextButton(enabled = !busy && shown != null, onClick = { cropping = !cropping; painting = false }) {
+                        Text(if (cropping) "✓ Cadre" else "Cadre", color = if (cropping) Palette.Accent else Palette.Text)
+                    }
+                    TextButton(enabled = !busy && !crop.full, onClick = { crop = FULL }) { Text("Sans cadre") }
                     TextButton(enabled = !busy && strokes.isNotEmpty(), onClick = { strokes.clear() }) { Text("Effacer la zone") }
                     TextButton(enabled = !busy && shown != null, onClick = { sendToAi("restore") }) { Text("Restaurer") }
                 }
+                Text(
+                    if (crop.full) "Cadre : trace un rectangle pour ne montrer qu'un morceau à l'IA."
+                    else "L'IA ne verra que le cadre (agrandi), puis il sera recollé dans la photo, le reste intact.",
+                    fontSize = 12.sp, color = Palette.TextMuted, modifier = Modifier.padding(horizontal = 8.dp),
+                )
                 if (painting) Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Pinceau", fontSize = 13.sp, color = Palette.TextMuted, modifier = Modifier.width(84.dp))
                     Slider(
