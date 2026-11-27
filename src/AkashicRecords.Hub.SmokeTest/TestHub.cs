@@ -16,6 +16,7 @@ public sealed class TestHub : IAsyncDisposable
     public string DataDir { get; } = Path.Combine(Path.GetTempPath(), "akashic-hub-smoke-" + Guid.NewGuid().ToString("N"));
     public Uri Address { get; private set; } = null!;
     public HubStore Store => _app!.Services.GetRequiredService<HubStore>();
+    public T Get<T>() where T : notnull => _app!.Services.GetRequiredService<T>();
     public List<string> EntityTypes { get; } = new() { "Recipe", "Poem" };
     /// <summary>Models the hub runs itself. None by default: the tests' fake programs must never be started.</summary>
     public string ComputeHubModels { get; set; } = "";

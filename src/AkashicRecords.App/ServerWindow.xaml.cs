@@ -118,6 +118,16 @@ public partial class ServerWindow : Window
             var rest = d2.Total - d2.Free - Kinds.Sum(k => st.Storage.FirstOrDefault(x => x.Kind == k.Kind)?.Bytes ?? 0);
             if (rest > 0) disk.Children.Add(Legend(Faint, "Système, fichiers perso et le reste", Size(rest)));
         }
+        // Files deleted in the app, waiting before they are removed for good (the hub's BlobCleaner).
+        if (st.Cleanup is { } cl)
+        {
+            var line = cl.PendingFiles > 0
+                ? $"Fichiers supprimés en attente : {cl.PendingFiles} ({Size(cl.PendingBytes)}), effacés pour de bon {cl.GraceDays} jours après leur suppression"
+                  + (cl.NextAt is { } next && DateTimeOffset.TryParse(next, out var at) ? $" (les premiers le {at.ToLocalTime():dd/MM})" : "")
+                : "Aucun fichier supprimé en attente.";
+            disk.Children.Add(Text(line, 12, Muted));
+            if (cl.Brake is not null) disk.Children.Add(Text("Ménage suspendu par sécurité : " + cl.Brake, 12, Late));
+        }
         var browse = new Button { Content = "Parcourir les dossiers  ›", Style = (Style)FindResource("Primary"), Margin = new Thickness(0, 10, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
         browse.Click += async (_, _) => await BrowseAsync("/");
         disk.Children.Add(browse);

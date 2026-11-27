@@ -108,6 +108,19 @@ fun ServerScreen(onClose: () -> Unit) {
                 androidx.compose.material3.Button(onClick = { browsing = "/" }, modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
                     Text("Parcourir les dossiers  ›")
                 }
+                // Files deleted in the app, waiting before they are removed for good (the hub's BlobCleaner).
+                s.optJSONObject("cleanup")?.let { cl ->
+                    val pending = cl.optInt("pending_files")
+                    val next = cl.str("next_at")?.let { runCatching { java.time.OffsetDateTime.parse(it).atZoneSameInstant(java.time.ZoneId.systemDefault()) }.getOrNull() }
+                    Text(
+                        if (pending > 0) "Fichiers supprimés en attente : $pending (${size(cl.optLong("pending_bytes"))}), effacés pour de bon " +
+                            "${cl.optInt("grace_days")} jours après leur suppression" +
+                            (next?.let { " (les premiers le " + java.time.format.DateTimeFormatter.ofPattern("dd/MM").format(it) + ")" } ?: "")
+                        else "Aucun fichier supprimé en attente.",
+                        fontSize = 12.sp, color = Palette.TextMuted, modifier = Modifier.padding(bottom = 12.dp),
+                    )
+                    cl.str("brake")?.let { Text("Ménage suspendu par sécurité : $it", fontSize = 12.sp, color = Late, modifier = Modifier.padding(bottom = 12.dp)) }
+                }
                 BackupCard(s.getJSONObject("backup"))
                 DevicesCard(s.getJSONArray("devices"))
                 Card("TRAVAUX DU SERVEUR") {
