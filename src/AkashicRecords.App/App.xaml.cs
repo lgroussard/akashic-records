@@ -252,6 +252,27 @@ public partial class App : Application
             return;
         }
 
+        // The picture editor on a file, its AI part shown: `Editeur:<image file>`.
+        if (section == "Editeur")
+        {
+            using var picture = Views.ImageEditing.DecodeOriented(subTab ?? "") ?? throw new ArgumentException("image illisible : " + subTab);
+            var editor = new Views.ImageEditWindow(picture.Copy(), subTab!, aiAvailable: true)
+            {
+                WindowStartupLocation = WindowStartupLocation.Manual, Left = 0, Top = 0, Width = 1400, Height = 950,
+            };
+            editor.Show();
+            var editorSettle = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1500) };
+            editorSettle.Tick += (_, _) =>
+            {
+                editorSettle.Stop();
+                try { CaptureElement((FrameworkElement)editor.Content, outputPath); }
+                catch (Exception ex) { LogCrash(ex); }
+                finally { editor.Close(); Shutdown(); }
+            };
+            editorSettle.Start();
+            return;
+        }
+
         // The image upscaler (needs this copy paired with a hub: config\sync.json).
         if (section == "Agrandir")
         {

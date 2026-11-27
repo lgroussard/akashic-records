@@ -45,11 +45,20 @@ public sealed class ImageEditWindow : Window
 
     // The AI zone: brush strokes in preview pixels (only on the unturned picture: the mask matches the stored picture).
     private readonly List<(List<Point> Points, double Size)> _strokes = new();
-    private readonly System.Windows.Controls.Primitives.ToggleButton _brush = new()
+    // A plain button switched on and off (the app's button styles are made for Button only, not ToggleButton).
+    private readonly Button _brush = new()
     {
         Content = "Peindre la zone", Padding = new Thickness(14, 6, 14, 6), Cursor = Cursors.Hand,
         ToolTip = "Peins sur l'image l'endroit à changer : sa place et sa taille. Sans zone, toute l'image suit la phrase.",
     };
+    private bool _painting;
+
+    private void SetPainting(bool on)
+    {
+        _painting = on;
+        _brush.Content = on ? "✓ Peindre la zone" : "Peindre la zone";
+        _overlay.Cursor = on ? Cursors.Pen : Cursors.Cross;
+    }
     private readonly Slider _brushSize = new() { Minimum = 4, Maximum = 160, Value = 40, Width = 120, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
     private readonly TextBox _prompt = new() { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 60, Margin = new Thickness(0, 0, 0, 8) };
     private readonly TextBox _maskText = new() { Margin = new Thickness(0, 0, 0, 8) };
@@ -256,7 +265,7 @@ public sealed class ImageEditWindow : Window
         _turns = ((_turns + by) % 4 + 4) % 4;
         // The AI zone is drawn on the stored picture's orientation: it does not survive a turn.
         ClearStrokes();
-        _brush.IsChecked = false;
+        SetPainting(false);
         _brush.IsEnabled = _turns == 0;
         // The crop follows the picture round.
         if (_crop is { } c)
@@ -362,7 +371,7 @@ public sealed class ImageEditWindow : Window
     private void Overlay_OnMouseDown(object sender, MouseButtonEventArgs e)
     {
         var p = Clamp(e.GetPosition(_overlay));
-        if (_brush.IsChecked == true)
+        if (_painting)
         {
             _currentStroke = [p];
             _strokes.Add((_currentStroke, _brushSize.Value * Math.Max(PreviewWidth, PreviewHeight) / 1000));
@@ -395,7 +404,7 @@ public sealed class ImageEditWindow : Window
     private void Overlay_OnMouseMove(object sender, MouseEventArgs e)
     {
         var p = Clamp(e.GetPosition(_overlay));
-        if (_brush.IsChecked == true)
+        if (_painting)
         {
             _overlay.Cursor = Cursors.Pen;
             if (_currentStroke is not null && e.LeftButton == MouseButtonState.Pressed)
@@ -475,8 +484,7 @@ public sealed class ImageEditWindow : Window
 
         var brushRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
         _brush.Style = Application.Current.TryFindResource("SecondaryButtonStyle") as Style;
-        _brush.Checked += (_, _) => _overlay.Cursor = Cursors.Pen;
-        _brush.Unchecked += (_, _) => _overlay.Cursor = Cursors.Cross;
+        _brush.Click += (_, _) => SetPainting(!_painting);
         brushRow.Children.Add(_brush);
         _brushSize.ToolTip = "Taille du pinceau";
         brushRow.Children.Add(_brushSize);
