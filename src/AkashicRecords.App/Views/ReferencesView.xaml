@@ -77,6 +77,12 @@
                                     Margin="8,0,0,0" Click="ViewerSource_OnClick"/>
                             <Button x:Name="ViewerObservationsButton" Content="✎ Observations" Style="{StaticResource SecondaryButtonStyle}"
                                     Margin="8,0,0,0" Click="ViewerObservations_OnClick"/>
+                            <Button x:Name="ViewerEditButton" Content="Modifier" Style="{StaticResource SecondaryButtonStyle}"
+                                    Margin="8,0,0,0" Click="ViewerEdit_OnClick"
+                                    ToolTip="Tourner, recadrer, régler le contraste et la saturation (l'original est gardé)"/>
+                            <Button x:Name="ViewerRevertButton" Content="Revenir à l'original" Style="{StaticResource SecondaryButtonStyle}"
+                                    Margin="8,0,0,0" Click="ViewerRevert_OnClick" Visibility="Collapsed"
+                                    ToolTip="Remet l'image d'avant les modifications"/>
                             <Button x:Name="ViewerUpscaleButton" Content="Agrandir ×4" Style="{StaticResource SecondaryButtonStyle}"
                                     Margin="8,0,0,0" Click="ViewerUpscale_OnClick"
                                     ToolTip="Demande au serveur une version 4 fois plus grande, ajoutée à côté de l'originale"/>

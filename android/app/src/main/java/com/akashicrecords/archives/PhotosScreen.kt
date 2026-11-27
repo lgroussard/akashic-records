@@ -33,6 +33,8 @@ import com.akashicrecords.journaux.datePart
 import com.akashicrecords.journaux.frenchDate
 import com.akashicrecords.journaux.nowIso
 import com.akashicrecords.media.FileImage
+import com.akashicrecords.media.ImageEdits
+import com.akashicrecords.media.ImageEditor
 import com.akashicrecords.media.LocalImage
 import com.akashicrecords.media.MediaFiles
 import com.akashicrecords.media.cachedImage
@@ -221,9 +223,26 @@ private fun Viewer(
     val paired = remember { SyncService.credentials(context) != null }
     var upscaling by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf<String?>(null) } // the answer to « ×4 », under the photo
+    var menu by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<Photo?>(null) }
+    var reverting by remember { mutableStateOf(false) }
+    // A new path is a new file: the viewer and the gallery's image caches (keyed by path) show it at once.
+    fun replacePath(id: Int, path: String) {
+        list = list.map { if (it.Id == id) it.copy(ImagePath = path) else it }
+        onChanged()
+    }
     LaunchedEffect(page) { note = null }
     if (list.isEmpty()) { onClose(); return }
     val current = list[page.coerceIn(0, list.lastIndex)]
+    editing?.let { p ->
+        ImageEditor(
+            table = "Photo", id = p.Id, currentPath = p.ImagePath,
+            // The whole photo: the file kept here, else the hub's copy the viewer opens (fetched if needed).
+            source = { HubPhotos.original(context, p, state.hashes[HubPhotos.key(p)]) },
+            onClose = { editing = null },
+            onChanged = { path -> replacePath(p.Id, path) },
+        )
+    }
 
     Column(Modifier.fillMaxSize().background(Color(0xFF07070A))) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 4.dp)) {
@@ -247,6 +266,24 @@ private fun Viewer(
                 note = "Envoi pour agrandissement…"
                 scope.launch { note = HubCompute.upscaleNote(context, "Photo", id.toLong()); upscaling = false }
             }) { Text("×4", fontSize = 13.sp) }
+            // ⋮ : « Modifier » (rotate, crop, contrast, saturation) and, after an edit, « Revenir à l'original ».
+            Box {
+                TextButton(enabled = !reverting, onClick = { menu = true }) { Text("⋮", fontSize = 18.sp) }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(text = { Text("Modifier") }, onClick = { menu = false; editing = current })
+                    if (ImageEdits.isEdited(current.ImagePath)) DropdownMenuItem(text = { Text("Revenir à l'original") }, onClick = {
+                        menu = false
+                        val p = current
+                        reverting = true
+                        scope.launch {
+                            ImageEdits.revert(context, "Photo", p.Id, p.ImagePath)
+                                .onSuccess { path -> replacePath(p.Id, path); note = "Original rétabli." }
+                                .onFailure { note = it.message }
+                            reverting = false
+                        }
+                    })
+                }
+            }
             TextButton(onClick = {
                 val updated = current.copy(IsFavorite = !current.IsFavorite)
                 list = list.map { if (it.Id == updated.Id) updated else it }
@@ -256,7 +293,7 @@ private fun Viewer(
         }
         SwipePages(count = list.size, page = page, onPageChange = { page = it }, modifier = Modifier.fillMaxWidth().weight(1f), verticalAlignment = Alignment.CenterVertically) { i ->
             val p = list[i]
-            Thumb(p, state.hashes[HubPhotos.key(p)], remember(p.Id, kept) { HubPhotos.isHere(context, p) }, Modifier.fillMaxSize(), full = true)
+            Thumb(p, state.hashes[HubPhotos.key(p)], remember(p.Id, p.ImagePath, kept) { HubPhotos.isHere(context, p) }, Modifier.fillMaxSize(), full = true)
         }
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
             note?.let { Text(it, fontSize = 12.sp, color = Palette.Accent, modifier = Modifier.padding(bottom = 4.dp)) }

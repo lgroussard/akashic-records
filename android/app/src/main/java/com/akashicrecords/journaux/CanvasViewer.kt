@@ -35,6 +35,7 @@ import com.akashicrecords.data.CanvasElement
 import com.akashicrecords.data.Observation
 import com.akashicrecords.media.LocalImage
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 // Journaux → Archive artistique on the phone: the projects as cards, each opening its real canvas — notes, images,
@@ -150,8 +151,13 @@ private fun CanvasPage(db: AkashicDatabase, project: ArtisticProject, onBack: ()
     // The canvas pictures, for the large view opened by a tap on one (its bar has « Agrandir ×4 » when paired).
     val images = elements.filter { it.Type == 1 && !it.ImagePath.isNullOrBlank() }
     var viewing by remember { mutableStateOf<Int?>(null) } // index in [images]
+    val scope = rememberCoroutineScope()
     viewing?.let { i ->
-        PhotoViewer(images.map { it.ImagePath!! }, i, onDismiss = { viewing = null }, table = "CanvasElement", ids = images.map { it.Id })
+        PhotoViewer(
+            images.map { it.ImagePath!! }, i, onDismiss = { viewing = null }, table = "CanvasElement", ids = images.map { it.Id },
+            // An edited picture: its new path and height, reloaded so the canvas shows it too.
+            onChanged = { scope.launch { elements = withContext(Dispatchers.IO) { db.canvasElementDao().forProject(project.Id) } } },
+        )
     }
     LaunchedEffect(project.Id) {
         withContext(Dispatchers.IO) {

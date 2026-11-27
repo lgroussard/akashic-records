@@ -42,7 +42,9 @@ import com.akashicrecords.journaux.ConfirmDelete
 import com.akashicrecords.journaux.ObservationsBlock
 import com.akashicrecords.journaux.REF_IMAGES_SHARED
 import com.akashicrecords.journaux.nowIso
+import com.akashicrecords.media.ImageEditor
 import com.akashicrecords.media.LocalImage
+import com.akashicrecords.media.MediaFiles
 import com.akashicrecords.music.RemoteImages
 import com.akashicrecords.sync.HubCompute
 import com.akashicrecords.sync.SyncService
@@ -168,6 +170,12 @@ fun ReferencesJournal(db: AkashicDatabase) {
                 scope.launch {
                     ReferenceStore.delete(context, db, img)
                     viewing = null
+                    version++
+                }
+            },
+            onEdited = {
+                scope.launch {
+                    viewing = withContext(Dispatchers.IO) { db.refImageDao().getById(img.Id) }
                     version++
                 }
             },
@@ -318,10 +326,12 @@ private fun SearchResults(db: AkashicDatabase, query: String, key: Int, boards: 
 
 @Composable
 private fun ImageViewer(
-    db: AkashicDatabase, img: RefImage, boards: List<RefBoard>, onMove: (Int?) -> Unit, onNewBoard: () -> Unit, onDelete: () -> Unit, onClose: () -> Unit,
+    db: AkashicDatabase, img: RefImage, boards: List<RefBoard>, onMove: (Int?) -> Unit, onNewBoard: () -> Unit, onDelete: () -> Unit,
+    onEdited: () -> Unit, onClose: () -> Unit,
 ) {
     val context = LocalContext.current
     var confirm by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val paired = remember { SyncService.credentials(context) != null }
     var upscaling by remember { mutableStateOf(false) }
@@ -338,7 +348,9 @@ private fun ImageViewer(
                 // Read-only, and only once the PC and the phone hold the same reference images (see REF_IMAGES_SHARED).
                 if (REF_IMAGES_SHARED) ObservationsBlock(db, "RefImage", img.Id)
                 BoardMenu(boards, img.BoardId, onPick = onMove, onNewBoard = onNewBoard)
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // Wraps onto a second line when the buttons do not fit the width.
+                @OptIn(ExperimentalLayoutApi::class)
+                FlowRow {
                     (img.PageUrl ?: img.SourceUrl)?.let { url -> TextButton(onClick = { open(context, url) }) { Text("Source ↗") } }
                     // Upscale ×4 on the PC or the hub: the result joins the same board, here at the next sync.
                     if (paired) TextButton(enabled = !upscaling, onClick = {
@@ -347,8 +359,9 @@ private fun ImageViewer(
                         note = "Envoi pour agrandissement…"
                         scope.launch { note = HubCompute.upscaleNote(context, "RefImage", id.toLong()); upscaling = false }
                     }) { Text("Agrandir ×4") }
+                    // Rotate, crop, contrast, saturation; the editor also offers « Revenir à l'original » after an edit.
+                    TextButton(onClick = { editing = true }) { Text("Modifier") }
                     TextButton(onClick = { confirm = true }) { Text("Supprimer", color = Palette.TextMuted) }
-                    Spacer(Modifier.weight(1f))
                     TextButton(onClick = onClose) { Text("Fermer") }
                 }
                 note?.let { Text(it, fontSize = 12.sp, color = Palette.Accent) }
@@ -356,6 +369,12 @@ private fun ImageViewer(
         }
     }
     if (confirm) ConfirmDelete("cette image", onConfirm = { confirm = false; onDelete() }, onDismiss = { confirm = false })
+    if (editing) ImageEditor(
+        table = "RefImage", id = img.Id, currentPath = img.ImagePath,
+        source = { MediaFiles.resolve(context, img.ImagePath) },
+        onClose = { editing = false },
+        onChanged = { onEdited() },
+    )
 }
 
 // ---- Share → Akashic ----

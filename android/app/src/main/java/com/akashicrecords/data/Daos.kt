@@ -105,6 +105,10 @@ interface JournalPhotoDao {
 
     @Query("SELECT * FROM JournalPhoto WHERE EntryId = :entryId")
     suspend fun forEntry(entryId: Int): List<JournalPhoto>
+
+    // A picture edited or put back to its original (media/ImageEdits).
+    @Query("UPDATE JournalPhoto SET ImagePath = :path WHERE Id = :id")
+    suspend fun setImagePath(id: Int, path: String)
 }
 
 @Dao
@@ -207,6 +211,9 @@ interface CanvasElementDao {
 
     @Query("SELECT * FROM CanvasElement WHERE ProjectId = :projectId")
     suspend fun forProject(projectId: Int): List<CanvasElement>
+
+    @Query("SELECT * FROM CanvasElement WHERE Id = :id")
+    suspend fun getById(id: Int): CanvasElement?
 }
 
 @Dao
@@ -315,6 +322,10 @@ interface PhotoDao {
 
     @Query("DELETE FROM Photo WHERE Id = :id")
     suspend fun deleteById(id: Int)
+
+    // A picture edited or put back to its original (media/ImageEdits).
+    @Query("UPDATE Photo SET ImagePath = :path WHERE Id = :id")
+    suspend fun setImagePath(id: Int, path: String)
 
     @Query("SELECT * FROM Photo ORDER BY ImportedAt")
     suspend fun getAll(): List<Photo>

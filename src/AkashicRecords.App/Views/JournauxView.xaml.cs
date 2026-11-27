@@ -1178,12 +1178,26 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
             DeleteElement(element, border);
         };
 
-        // Right-click on a picture: have the hub upscale it; the ×4 version lands on this canvas, next to it.
-        if (element.Type == CanvasElementType.Image && !string.IsNullOrEmpty(element.ImagePath) && UpscaleAction.Available)
+        // Right-click on a picture: edit it in place (or undo the edit), or have the hub upscale it; the ×4 version
+        // lands on this canvas, next to it.
+        if (element.Type == CanvasElementType.Image && !string.IsNullOrEmpty(element.ImagePath))
         {
-            var upscaleItem = new MenuItem { Header = UpscaleAction.Label };
-            upscaleItem.Click += async (_, _) => await UpscaleAction.RequestAsync(upscaleItem, "CanvasElement", element.Id);
-            border.ContextMenu = new ContextMenu { Items = { upscaleItem } };
+            var menu = new ContextMenu();
+            var editItem = new MenuItem { Header = ImageEditing.EditLabel };
+            editItem.Click += (_, _) => ShowEditedImage(element, border, content, ImageEditing.Edit(this, "CanvasElement", element.Id));
+            menu.Items.Add(editItem);
+            var revertItem = new MenuItem { Header = ImageEditing.RevertLabel };
+            revertItem.Click += (_, _) => ShowEditedImage(element, border, content, ImageEditing.Revert(this, "CanvasElement", element.Id));
+            menu.Items.Add(revertItem);
+            // The path changes with each edit: whether there is an original to go back to is decided on opening.
+            menu.Opened += (_, _) => revertItem.Visibility = ImageEditing.IsEdited(element.ImagePath) ? Visibility.Visible : Visibility.Collapsed;
+            if (UpscaleAction.Available)
+            {
+                var upscaleItem = new MenuItem { Header = UpscaleAction.Label };
+                upscaleItem.Click += async (_, _) => await UpscaleAction.RequestAsync(upscaleItem, "CanvasElement", element.Id);
+                menu.Items.Add(upscaleItem);
+            }
+            border.ContextMenu = menu;
         }
 
         Point? resizeStart = null;
@@ -1254,6 +1268,21 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
             Source = LoadImage(MediaStorage.ResolveFullPath(element.ImagePath!)),
             Stretch = Stretch.Uniform
         };
+    }
+
+    // After « Modifier » / « Revenir à l'original »: the element shows its new file (and, after an edit, takes the
+    // new picture's shape at the same width), without rebuilding the board.
+    private void ShowEditedImage(CanvasElement element, Border border, FrameworkElement content, ImageEditOutcome? outcome)
+    {
+        if (outcome is null) return;
+        element.ImagePath = outcome.ImagePath;
+        if (content is Image image) image.Source = LoadImage(MediaStorage.ResolveFullPath(outcome.ImagePath));
+        if (outcome.CanvasHeight is double height)
+        {
+            element.Height = height;
+            border.Height = Math.Max(MinElementHeight, height);
+        }
+        UpdateConnectorsFor(element.Id);
     }
 
     private FrameworkElement CreateReferenceContent(CanvasElement element)
@@ -1607,15 +1636,29 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
             {
                 var paths = photos.Select(p => MediaStorage.ResolveFullPath(p.ImagePath)).ToList();
                 var ids = photos.Select(p => (long)p.Id).ToList();
-                new PhotoViewerWindow(paths, photos.ToList().IndexOf(photo), "JournalPhoto", ids) { Owner = Window.GetWindow(this) }.ShowDialog();
+                var viewer = new PhotoViewerWindow(paths, photos.ToList().IndexOf(photo), "JournalPhoto", ids) { Owner = Window.GetWindow(this) };
+                viewer.ShowDialog();
+                if (viewer.ImagesChanged) RefreshEntryPhotos();
             };
+
+            // Right-click: edit (or undo the edit), or upscale, without opening it.
+            var menu = new ContextMenu();
+            var editItem = new MenuItem { Header = ImageEditing.EditLabel };
+            editItem.Click += (_, _) => { if (ImageEditing.Edit(this, "JournalPhoto", photo.Id) is not null) RefreshEntryPhotos(); };
+            menu.Items.Add(editItem);
+            if (ImageEditing.IsEdited(photo.ImagePath))
+            {
+                var revertItem = new MenuItem { Header = ImageEditing.RevertLabel };
+                revertItem.Click += (_, _) => { if (ImageEditing.Revert(this, "JournalPhoto", photo.Id) is not null) RefreshEntryPhotos(); };
+                menu.Items.Add(revertItem);
+            }
             if (UpscaleAction.Available)
             {
-                // Right-click: upscale without opening it.
                 var upscaleItem = new MenuItem { Header = UpscaleAction.Label };
                 upscaleItem.Click += async (_, _) => await UpscaleAction.RequestAsync(image, "JournalPhoto", photo.Id);
-                image.ContextMenu = new ContextMenu { Items = { upscaleItem } };
+                menu.Items.Add(upscaleItem);
             }
+            image.ContextMenu = menu;
 
             var deleteButton = new Button
             {

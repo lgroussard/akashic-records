@@ -198,7 +198,10 @@ private fun EntryPage(
         Spacer(Modifier.height(24.dp))
     }
 
-    viewing?.let { i -> PhotoViewer(photos.map { it.ImagePath }, i, onDismiss = { viewing = null }, table = "JournalPhoto", ids = photos.map { it.Id }) }
+    viewing?.let { i -> PhotoViewer(
+        photos.map { it.ImagePath }, i, onDismiss = { viewing = null }, table = "JournalPhoto", ids = photos.map { it.Id },
+        onChanged = { entryId?.let { id -> scope.launch { photos = withContext(Dispatchers.IO) { db.journalPhotoDao().forEntry(id) } } } },
+    ) }
 
     confirmPhoto?.let { p ->
         ConfirmDelete("cette photo", onConfirm = {
