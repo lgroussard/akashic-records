@@ -32,6 +32,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.akashicrecords.Palette
 import com.akashicrecords.media.ImageEdits
 import com.akashicrecords.media.ImageEditor
+import com.akashicrecords.media.ConfirmMakeFinal
 import com.akashicrecords.media.MediaFiles
 import com.akashicrecords.media.ZoomableLocalImage
 import com.akashicrecords.media.rememberPageZoomState
@@ -64,6 +65,7 @@ internal fun PhotoViewer(
     val paired = remember { SyncService.credentials(context) != null }
     var sending by remember { mutableStateOf(false) }
     var zoomed by remember { mutableStateOf(false) } // the shown photo is zoomed in: no swipe to the next
+    var finalizing by remember { mutableStateOf<Int?>(null) } // page whose « Rendre définitif » awaits confirmation
 
     // Before Android 10 the gallery cannot be written to without a storage permission: the user picks the place.
     val saveAs = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/*")) { uri ->
@@ -115,6 +117,10 @@ internal fun PhotoViewer(
                                 sending = false
                             }
                         })
+                        if (ImageEdits.isEdited(path)) DropdownMenuItem(text = { Text("Rendre définitif") }, onClick = {
+                            menu = false
+                            finalizing = page
+                        })
                     }
                 }
                 TextButton(onClick = {
@@ -140,6 +146,23 @@ internal fun PhotoViewer(
                 ZoomableLocalImage(paths[page], zoom, Modifier.fillMaxSize())
             }
         }
+    }
+    finalizing?.let { page ->
+        val id = ids?.getOrNull(page)
+        if (table != null && id != null) ConfirmMakeFinal(
+            onConfirm = {
+                finalizing = null
+                sending = true
+                message = "Finalisation…"
+                scope.launch {
+                    ImageEdits.makeFinal(context, table, id)
+                        .onSuccess { p -> paths = paths.toMutableList().also { it[page] = p }; onChanged(); message = "Modification rendue définitive." }
+                        .onFailure { message = it.message }
+                    sending = false
+                }
+            },
+            onDismiss = { finalizing = null },
+        )
     }
     editing?.let { page ->
         val id = ids?.getOrNull(page)

@@ -108,6 +108,14 @@ fun LocalImage(relativePath: String?, modifier: Modifier = Modifier, maxSide: In
     FileImage("$relativePath", modifier, maxSide, crop) { MediaFiles.resolve(context, relativePath) }
 }
 
+/** Drops the memory-cached images of the file [relativePath] (any size; `\` and `/` alike, case ignored). */
+fun forgetCachedImages(relativePath: String) {
+    val want = relativePath.replace('\\', '/').trimStart('/').lowercase()
+    for (key in imageCache.snapshot().keys) {
+        if (key.substringBeforeLast('|').replace('\\', '/').trimStart('/').lowercase() == want) imageCache.remove(key)
+    }
+}
+
 /** The memory-cached image of [name] at [maxSide], if it was shown recently (no file access). */
 fun cachedImage(name: String, maxSide: Int): ImageBitmap? = imageCache.get("$name|$maxSide")?.image
 

@@ -208,6 +208,9 @@
                             <Button x:Name="ViewerRevertButton" Content="Revenir à l'original" Click="ViewerRevertButton_OnClick"
                                     Padding="10,6" Cursor="Hand" Margin="6,0,0,0" Visibility="Collapsed"
                                     ToolTip="Remet la photo d'avant les modifications"/>
+                            <Button x:Name="ViewerFinalButton" Content="Rendre définitif" Click="ViewerFinalButton_OnClick"
+                                    Padding="10,6" Cursor="Hand" Margin="6,0,0,0" Visibility="Collapsed"
+                                    ToolTip="Garde cette version et supprime de cet ordinateur l'original et les versions précédentes"/>
                         </StackPanel>
 
                         <Button x:Name="ViewerUpscaleButton" Content="Agrandir ×4" Click="ViewerUpscaleButton_OnClick"

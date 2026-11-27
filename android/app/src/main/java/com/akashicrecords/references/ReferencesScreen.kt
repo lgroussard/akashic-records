@@ -362,7 +362,7 @@ private fun ImageViewer(
                         note = "Envoi pour agrandissement…"
                         scope.launch { note = HubCompute.upscaleNote(context, "RefImage", id.toLong()); upscaling = false }
                     }) { Text("Agrandir ×4") }
-                    // Rotate, crop, contrast, saturation; the editor also offers « Revenir à l'original » after an edit.
+                    // Rotate, crop, contrast, saturation; the editor also offers « Revenir à l'original » and « Rendre définitif » after an edit.
                     TextButton(onClick = { editing = true }) { Text("Modifier") }
                     TextButton(onClick = { confirm = true }) { Text("Supprimer", color = Palette.TextMuted) }
                     TextButton(onClick = onClose) { Text("Fermer") }

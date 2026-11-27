@@ -354,6 +354,7 @@ public partial class ReferencesView : UserControl
         ViewerUpscaleButton.Visibility = UpscaleAction.Available ? Visibility.Visible : Visibility.Collapsed;
         ViewerEditButton.Visibility = Visibility.Visible;
         ViewerRevertButton.Visibility = ImageEditing.IsEdited(img.ImagePath) ? Visibility.Visible : Visibility.Collapsed;
+        ViewerFinalButton.Visibility = ViewerRevertButton.Visibility;
         ViewerStatus.Visibility = Visibility.Collapsed;
         ViewerSourceButton.Visibility = (img.PageUrl ?? img.SourceUrl) is null ? Visibility.Collapsed : Visibility.Visible;
         FillBoardCombo(img.BoardId);
@@ -414,6 +415,7 @@ public partial class ReferencesView : UserControl
         ViewerUpscaleButton.Visibility = Visibility.Collapsed;
         ViewerEditButton.Visibility = Visibility.Collapsed;
         ViewerRevertButton.Visibility = Visibility.Collapsed;
+        ViewerFinalButton.Visibility = Visibility.Collapsed;
         ViewerStatus.Visibility = Visibility.Collapsed;
         ViewerSourceButton.Visibility = hit.PageUrl is null ? Visibility.Collapsed : Visibility.Visible;
         FillBoardCombo(_filter >= 0 ? _filter : null);
@@ -511,6 +513,12 @@ public partial class ReferencesView : UserControl
     {
         if (_viewing is not { } img) return;
         ReopenAfterImageChange(img, ImageEditing.Revert(this, "RefImage", img.Id));
+    }
+
+    private void ViewerFinal_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_viewing is not { } img) return;
+        ReopenAfterImageChange(img, ImageEditing.MakeFinal(this, "RefImage", img.Id));
     }
 
     // The row now points at another file (and has its size): boards and viewer show it.

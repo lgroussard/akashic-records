@@ -22,6 +22,7 @@ public sealed class PhotoViewerWindow : Window
     private readonly Button _next;
     private readonly IReadOnlyList<long>? _ids; // the rows behind _paths, for "Agrandir ×4" and "Modifier"
     private readonly Button? _revert;
+    private readonly Button? _final;
 
     /// <summary>True once a picture was edited or reverted here: the caller refreshes what it shows.</summary>
     public bool ImagesChanged { get; private set; }
@@ -62,6 +63,10 @@ public sealed class PhotoViewerWindow : Window
             _revert = BarButton(ImageEditing.RevertLabel, () => Apply(ImageEditing.Revert(this, upscaleTable, (int)rows[_index])));
             _revert.ToolTip = "Remet la photo d'avant les modifications";
             bar.Children.Add(_revert);
+            bar.Children.Add(new Border { Width = 8 });
+            _final = BarButton(ImageEditing.FinalLabel, () => Apply(ImageEditing.MakeFinal(this, upscaleTable, (int)rows[_index])));
+            _final.ToolTip = "Garde cette version et supprime de cet ordinateur l'original et les versions précédentes";
+            bar.Children.Add(_final);
             bar.Children.Add(new Border { Width = 8 });
         }
         if (upscaleTable is not null && _ids is not null && UpscaleAction.Available)
@@ -155,6 +160,7 @@ public sealed class PhotoViewerWindow : Window
         _next.IsEnabled = index < _paths.Count - 1;
         if (_revert is not null)
             _revert.Visibility = ImageEditing.IsEdited(Path.GetFileName(_paths[index])) ? Visibility.Visible : Visibility.Collapsed;
+        if (_final is not null && _revert is not null) _final.Visibility = _revert.Visibility;
     }
 
     private void Save()
