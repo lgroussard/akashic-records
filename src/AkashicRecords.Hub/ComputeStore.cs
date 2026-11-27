@@ -138,6 +138,10 @@ public sealed class ComputeStore
             // A worker that vanished mid-job gives it back once its hold has run out.
             Exec(c, "UPDATE cp_job SET status = 'queued', worker = NULL, worker_name = NULL, lease_until = NULL, started_at = NULL " +
                     "WHERE status = 'running' AND lease_until < $now", ("$now", NowMs()));
+            // A worker asks only when it is free: a job it still holds was dropped (the app was closed or restarted
+            // mid-job). It goes back to the queue at once, instead of after its hold, and this worker may take it again.
+            Exec(c, "UPDATE cp_job SET status = 'queued', worker = NULL, worker_name = NULL, lease_until = NULL, started_at = NULL " +
+                    "WHERE status = 'running' AND worker = $w", ("$w", worker));
             var job = Query(c, "WHERE status = 'queued' ORDER BY added_at, rowid").FirstOrDefault(mayTake);
             if (job is null) return null;
             Exec(c, "UPDATE cp_job SET status = 'running', worker = $w, worker_name = $wn, lease_until = $l, started_at = $at WHERE id = $id",
