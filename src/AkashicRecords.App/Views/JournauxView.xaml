@@ -250,7 +250,8 @@
                         <!-- Cover photo + choose/remove button -->
                         <StackPanel Grid.Row="1" Margin="0,0,0,16">
                             <Image x:Name="RecipeCoverImage" Height="120" Margin="0,0,0,8"
-                                   Stretch="Uniform" HorizontalAlignment="Left" Visibility="Collapsed"/>
+                                   Stretch="Uniform" HorizontalAlignment="Left" Visibility="Collapsed"
+                                   Cursor="Hand" ToolTip="Ouvrir en grand" MouseLeftButtonUp="RecipeCoverImage_OnMouseLeftButtonUp"/>
                             <StackPanel Orientation="Horizontal">
                                 <Button Content="Choisir une photo…" Style="{StaticResource SecondaryButtonStyle}" Click="SetRecipeCoverButton_OnClick"/>
                                 <Button x:Name="RemoveRecipeCoverButton" Content="Retirer la photo" Style="{StaticResource MiniButtonStyle}" Click="RemoveRecipeCoverButton_OnClick"
@@ -624,7 +625,8 @@
                                          TextWrapping="Wrap" Margin="0,0,0,4"/>
 
                                 <Image x:Name="PoemImage" Grid.Row="2" MaxHeight="180" Margin="0,4,0,12"
-                                       Stretch="Uniform" HorizontalAlignment="Center" Visibility="Collapsed"/>
+                                       Stretch="Uniform" HorizontalAlignment="Center" Visibility="Collapsed"
+                                       Cursor="Hand" ToolTip="Ouvrir en grand" MouseLeftButtonUp="PoemImage_OnMouseLeftButtonUp"/>
 
                                 <!-- Formatting toolbar. Named so the code-behind can tell "focus left the
                                      verse for a formatting tool" (keep the selection) from any other move. -->

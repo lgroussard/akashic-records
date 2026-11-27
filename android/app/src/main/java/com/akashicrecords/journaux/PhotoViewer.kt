@@ -32,8 +32,9 @@ import androidx.compose.ui.window.DialogProperties
 import com.akashicrecords.Palette
 import com.akashicrecords.media.ImageEdits
 import com.akashicrecords.media.ImageEditor
-import com.akashicrecords.media.LocalImage
 import com.akashicrecords.media.MediaFiles
+import com.akashicrecords.media.ZoomableLocalImage
+import com.akashicrecords.media.rememberPageZoomState
 import com.akashicrecords.sync.HubCompute
 import com.akashicrecords.sync.SyncService
 import kotlinx.coroutines.Dispatchers
@@ -62,6 +63,7 @@ internal fun PhotoViewer(
     var message by remember { mutableStateOf<String?>(null) }
     val paired = remember { SyncService.credentials(context) != null }
     var sending by remember { mutableStateOf(false) }
+    var zoomed by remember { mutableStateOf(false) } // the shown photo is zoomed in: no swipe to the next
 
     // Before Android 10 the gallery cannot be written to without a storage permission: the user picks the place.
     val saveAs = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/*")) { uri ->
@@ -131,8 +133,11 @@ internal fun PhotoViewer(
             }
             // A new page clears the "saved" note of the previous one.
             LaunchedEffect(pager.currentPage) { message = null }
-            HorizontalPager(state = pager, modifier = Modifier.fillMaxWidth().weight(1f)) { page ->
-                LocalImage(paths[page], Modifier.fillMaxSize(), maxSide = 2048, crop = false)
+            // Pinch / double tap to zoom (media/Zoomable.kt); while the shown photo is zoomed a drag moves around it
+            // instead of going to the next one.
+            HorizontalPager(state = pager, modifier = Modifier.fillMaxWidth().weight(1f), userScrollEnabled = !zoomed) { page ->
+                val zoom = rememberPageZoomState(page == pager.currentPage) { zoomed = it }
+                ZoomableLocalImage(paths[page], zoom, Modifier.fillMaxSize())
             }
         }
     }

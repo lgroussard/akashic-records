@@ -1,16 +1,12 @@
 package com.akashicrecords.sync
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,7 +27,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,11 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -54,7 +45,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.akashicrecords.Palette
-import com.akashicrecords.media.MediaFiles
+import com.akashicrecords.media.ZoomableFileImage
+import com.akashicrecords.media.rememberZoomState
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -237,21 +230,16 @@ private fun UpscaleViewer(job: HubCompute.Job, onClose: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var before by remember { mutableStateOf(false) }
-    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var picture by remember { mutableStateOf<File?>(null) } // the file shown (before or after)
     var note by remember { mutableStateOf<String?>("Chargement…") }
-    var scale by remember { mutableFloatStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
-    val zoom = rememberTransformableState { z, pan, _ ->
-        scale = (scale * z).coerceIn(1f, 6f)
-        offset = if (scale == 1f) Offset.Zero else offset + pan
-    }
+    // One zoom for both: « Avant » / « Après » compare the same spot.
+    val zoom = rememberZoomState(job.id)
 
     LaunchedEffect(before) {
         note = "Chargement…"
         try {
-            val file = if (before) HubCompute.local(context, job.inputHash, job.inputName.substringAfterLast('.').lowercase())
-                       else HubCompute.local(context, job.resultHash!!, "png")
-            bitmap = withContext(Dispatchers.IO) { MediaFiles.decode(file, 2048) }
+            picture = if (before) HubCompute.local(context, job.inputHash, job.inputName.substringAfterLast('.').lowercase())
+                   else HubCompute.local(context, job.resultHash!!, "png")
             note = null
         } catch (e: Exception) {
             note = "Aperçu impossible : ${e.message}"
@@ -293,17 +281,12 @@ private fun UpscaleViewer(job: HubCompute.Job, onClose: () -> Unit) {
                 }) { Text("Enregistrer") }
             }
             Text(
-                note ?: (if (before) "Avant : ${job.inputName}" else "Après : ${job.resultName}") + "  ·  pince pour zoomer",
+                note ?: (if (before) "Avant : ${job.inputName}" else "Après : ${job.resultName}") + "  ·  pince ou double tap pour zoomer",
                 fontSize = 12.sp, color = Palette.TextMuted, textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
             )
-            Box(Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(0.dp)).transformable(zoom), contentAlignment = Alignment.Center) {
-                bitmap?.let {
-                    Image(
-                        it.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize().graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y),
-                    )
-                }
+            Box(Modifier.fillMaxWidth().weight(1f)) {
+                picture?.let { f -> ZoomableFileImage(f.path, zoom, Modifier.fillMaxSize()) { f } }
             }
         }
     }

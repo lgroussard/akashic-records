@@ -242,12 +242,13 @@ public partial class UpscaleWindow : Window
         PreviewTitle.Text = j is null ? "" : _showBefore || !done ? $"Avant : {j.InputName}" : $"Après : {j.ResultName}";
     }
 
-    private async Task ShowPreviewAsync()
+    // keepView: « Avant » / « Après » of the same picture keep the zoom, to compare the same spot.
+    private async Task ShowPreviewAsync(bool keepView = false)
     {
         var version = ++_previewVersion;
         var j = Selected();
         RenderPreviewButtons();
-        PreviewImage.Source = null;
+        if (!keepView || j is null) PreviewImage.Source = null;
         if (j is null) { PreviewText.Text = "Choisis une demande pour la voir."; return; }
         var before = _showBefore || j.Status != "done";
         PreviewText.Text = before && j.Status != "done" ? "Le résultat s'affichera ici une fois prêt." : "Chargement…";
@@ -256,20 +257,14 @@ public partial class UpscaleWindow : Window
             var path = before
                 ? await ComputeService.Instance.LocalCopyAsync(j.InputHash, Path.GetExtension(j.InputName).ToLowerInvariant())
                 : await ComputeService.Instance.LocalCopyAsync(j.ResultHash!, ".png");
-            var image = await Task.Run(() =>
-            {
-                var bmp = new BitmapImage();
-                bmp.BeginInit();
-                bmp.CacheOption = BitmapCacheOption.OnLoad;
-                bmp.UriSource = new Uri(path);
-                bmp.DecodePixelWidth = 2000; // enough for the window; the file keeps its full size
-                bmp.EndInit();
-                bmp.Freeze();
-                return bmp;
-            });
+            // A 2000 px decode shows quickly; the full resolution follows under the same zoom, for zooming in.
+            var image = await Task.Run(() => Decode(path, 2000));
             if (version != _previewVersion) return;
-            PreviewImage.Source = image;
+            if (keepView) PreviewImage.ReplaceSource(image);
+            else PreviewImage.Source = image;
             if (j.Status == "done") PreviewText.Text = "";
+            var full = await Task.Run(() => Decode(path, 0));
+            if (version == _previewVersion) PreviewImage.ReplaceSource(full);
         }
         catch (Exception ex) when (ex is HubException or IOException or NotSupportedException or System.Net.Http.HttpRequestException)
         {
@@ -277,8 +272,20 @@ public partial class UpscaleWindow : Window
         }
     }
 
-    private void BeforeButton_OnClick(object sender, RoutedEventArgs e) { _showBefore = true; _ = ShowPreviewAsync(); }
-    private void AfterButton_OnClick(object sender, RoutedEventArgs e) { _showBefore = false; _ = ShowPreviewAsync(); }
+    private static BitmapImage Decode(string path, int width)
+    {
+        var bmp = new BitmapImage();
+        bmp.BeginInit();
+        bmp.CacheOption = BitmapCacheOption.OnLoad;
+        bmp.UriSource = new Uri(path);
+        if (width > 0) bmp.DecodePixelWidth = width;
+        bmp.EndInit();
+        bmp.Freeze();
+        return bmp;
+    }
+
+    private void BeforeButton_OnClick(object sender, RoutedEventArgs e) { _showBefore = true; _ = ShowPreviewAsync(keepView: true); }
+    private void AfterButton_OnClick(object sender, RoutedEventArgs e) { _showBefore = false; _ = ShowPreviewAsync(keepView: true); }
 
     private async void OpenButton_OnClick(object sender, RoutedEventArgs e)
     {

@@ -1126,6 +1126,7 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
             Cursor = Cursors.SizeAll
         };
         Panel.SetZIndex(border, 1);
+        border.Tag = element; // read by OpenCanvasImageLarge, to step through the board's pictures
 
         Canvas.SetLeft(border, element.X);
         Canvas.SetTop(border, element.Y);
@@ -1143,6 +1144,17 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
             }
 
             if (ShouldSkipDrag(e.OriginalSource as DependencyObject)) return;
+
+            // Double-click on a picture: shown large (zoom, ←/→ through the board's pictures). The first click of
+            // the pair was an ordinary press-release without a move, so nothing was moved; this one starts no drag.
+            if (e.ClickCount == 2 && element.Type == CanvasElementType.Image && !string.IsNullOrEmpty(element.ImagePath))
+            {
+                e.Handled = true;
+                dragStart = null;
+                if (border.IsMouseCaptured) border.ReleaseMouseCapture();
+                OpenCanvasImageLarge(element);
+                return;
+            }
 
             dragStart = e.GetPosition(ElementCanvas);
             dragStartLeft = Canvas.GetLeft(border);
@@ -1268,6 +1280,35 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
             Source = LoadImage(MediaStorage.ResolveFullPath(element.ImagePath!)),
             Stretch = Stretch.Uniform
         };
+    }
+
+    // The board's pictures in reading order (top to bottom, then left to right), opened large on this one, with
+    // « Modifier » / « Revenir à l'original » / « Agrandir ×4 » as for journal photos. Edits made there show here after.
+    private void OpenCanvasImageLarge(CanvasElement clicked)
+    {
+        var images = _elementVisuals.Values.OfType<Border>()
+            .Where(b => b.Tag is CanvasElement { Type: CanvasElementType.Image, ImagePath.Length: > 0 })
+            .OrderBy(Canvas.GetTop).ThenBy(Canvas.GetLeft)
+            .ToList();
+        var index = images.FindIndex(b => ((CanvasElement)b.Tag).Id == clicked.Id);
+        if (index < 0) return;
+
+        var elements = images.Select(b => (CanvasElement)b.Tag).ToList();
+        var viewer = new PhotoViewerWindow(
+            elements.Select(el => MediaStorage.ResolveFullPath(el.ImagePath!)).ToList(), index,
+            "CanvasElement", elements.Select(el => (long)el.Id).ToList()) { Owner = Window.GetWindow(this) };
+        viewer.ShowDialog();
+        if (!viewer.ImagesChanged) return;
+
+        for (var i = 0; i < images.Count; i++)
+        {
+            var element = elements[i];
+            if (_canvasRepository.GetById(element.Id) is not { } fresh || fresh.ImagePath == element.ImagePath || fresh.ImagePath is null) continue;
+            var content = images[i].Child is Grid { Children.Count: > 0 } grid ? (FrameworkElement)grid.Children[0] : null;
+            if (content is null) continue;
+            var height = fresh.Height is double h && h != element.Height ? h : (double?)null;
+            ShowEditedImage(element, images[i], content, new ImageEditOutcome(fresh.ImagePath, 0, 0, height));
+        }
     }
 
     // After « Modifier » / « Revenir à l'original »: the element shows its new file (and, after an edit, takes the
@@ -2009,6 +2050,19 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
             _recipeRepository.UpdateServings(_selectedRecipe.Id, servings);
         }
         RecipeServingsInput.Text = servings > 0 ? servings.ToString() : string.Empty;
+    }
+
+    // The cover large, to zoom into.
+    private void RecipeCoverImage_OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_selectedRecipe?.CoverImagePath is not { } path) return;
+        PhotoViewerWindow.OpenSingle(this, MediaStorage.ResolveFullPath(path));
+    }
+
+    private void PoemImage_OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_selectedPoem?.ImagePath is not { } path) return;
+        PhotoViewerWindow.OpenSingle(this, MediaStorage.ResolveFullPath(path));
     }
 
     private void RefreshRecipeCoverImage()
