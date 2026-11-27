@@ -103,19 +103,25 @@ public sealed class ComfyUi
 
             // One run per try, each with its own seed: the versions differ, the user keeps one.
             var results = new List<string>();
+            // A removal with Kontext is checked: when the painted zone barely changed, Kontext kept what was to be
+            // removed (it does on some draws), and the try is drawn again with another seed, twice at most.
+            var check = erase && engine == "kontext" && maskFile is not null && job.Kind != "restore";
             for (var t = 0; t < tries; t++)
             {
-                var graph = job.Kind == "restore" ? Restore(name, job.Id)
-                    : engine == "sdxl" ? EditSdxl(name, job.Id, prompt!, maskFile is not null, maskText, erase, width, height)
-                    : Edit(name, job.Id, prompt!, maskFile is not null, maskText, erase, width, height, zone);
-                var (file, subfolder) = await QueueAndWaitAsync(graph);
-                produced.Add(Path.Combine(subfolder, file));
-
                 var result = Path.Combine(work, $"result-{t + 1}.png");
-                var url = $"/view?filename={Uri.EscapeDataString(file)}&subfolder={Uri.EscapeDataString(subfolder)}&type=output";
-                await using (var stream = await _http.GetStreamAsync(url))
-                await using (var target = File.Create(result))
-                    await stream.CopyToAsync(target);
+                for (var attempt = 0; ; attempt++)
+                {
+                    var graph = job.Kind == "restore" ? Restore(name, job.Id)
+                        : engine == "sdxl" ? EditSdxl(name, job.Id, prompt!, maskFile is not null, maskText, erase, width, height)
+                        : Edit(name, job.Id, prompt!, maskFile is not null, maskText, erase, width, height, zone);
+                    var (file, subfolder) = await QueueAndWaitAsync(graph);
+                    produced.Add(Path.Combine(subfolder, file));
+                    var url = $"/view?filename={Uri.EscapeDataString(file)}&subfolder={Uri.EscapeDataString(subfolder)}&type=output";
+                    await using (var stream = await _http.GetStreamAsync(url))
+                    await using (var target = File.Create(result))
+                        await stream.CopyToAsync(target);
+                    if (!check || attempt == 2 || ZoneChange(source, result, maskFile!) >= KeptBelow) break;
+                }
                 results.Add(result);
             }
             return results;
@@ -129,6 +135,37 @@ public sealed class ComfyUi
     }
 
     private const string RealVisXlFile = @"ComfyUI\models\checkpoints\realvisxl_v5_fp16.safetensors";
+
+    /// <summary>
+    /// Below this mean change of the zone (0-255, on a picture an eighth of the size), a removal kept the object.
+    /// Measured on a removed person: kept 1.1, partly removed (hair left) 19, removed 31 to 35.
+    /// </summary>
+    private const double KeptBelow = 25;
+
+    /// <summary>How much the painted zone changed between the picture and a result (mean of the brightness difference).</summary>
+    private static double ZoneChange(string before, string after, string maskFile)
+    {
+        using var source = ImageEditing.DecodeOriented(before) ?? throw new InvalidOperationException("Image illisible.");
+        var info = new SKImageInfo(Math.Max(1, source.Width / 8), Math.Max(1, source.Height / 8));
+        var sampling = new SKSamplingOptions(SKFilterMode.Linear);
+        using var a = source.Resize(info, sampling);
+        using var resultFull = SKBitmap.Decode(after) ?? throw new InvalidOperationException("Résultat illisible.");
+        using var b = resultFull.Resize(info, sampling);
+        using var maskFull = SKBitmap.Decode(maskFile) ?? throw new InvalidOperationException("Masque illisible.");
+        using var m = maskFull.Resize(info, sampling);
+        double total = 0;
+        var count = 0;
+        static double Luma(SKColor c) => 0.299 * c.Red + 0.587 * c.Green + 0.114 * c.Blue;
+        for (var y = 0; y < info.Height; y++)
+            for (var x = 0; x < info.Width; x++)
+            {
+                var z = m.GetPixel(x, y);
+                if (Math.Max(z.Red, Math.Max(z.Green, z.Blue)) * z.Alpha / 255 <= 127) continue;
+                total += Math.Abs(Luma(a.GetPixel(x, y)) - Luma(b.GetPixel(x, y)));
+                count++;
+            }
+        return count == 0 ? 255 : total / count;
+    }
 
     private static (string? Prompt, string? MaskHash, string? MaskText, bool Erase, int Tries, string Engine) ReadParams(HubComputeJob job)
     {
@@ -350,7 +387,11 @@ public sealed class ComfyUi
         // gave the sharp result the user wanted; a LaMa pass first came out blurry (Kontext copies the picture it is
         // given) and a grey fill was kept as grey (4 tries out of 4). Kontext may leave the object in some tries:
         // several tries, keep the good one.
-        var shape = Shaped(zone, maskText, 0, width, height);
+        // « Effacer d'abord » grows the zone by 1 %: painted on the object's edge, the zone left a faint line of its
+        // outline (seen on the removed person's head); grown, the outline is redrawn too and the line is gone.
+        var grow = erase ? Math.Max(8, (int)Math.Round(Math.Max(width, height) * 0.01)) : 0;
+        if (erase) mask = Grown(g, mask, width, height);
+        var shape = Shaped(zone, maskText, grow, width, height);
         g["10"] = Node("InpaintCropImproved", shape is { } t
             ? Crop(Out("1", 0), (JsonArray)mask.DeepClone(), t.Width, t.Height, 8, 32, 1.5, false)
             : Crop(Out("1", 0), (JsonArray)mask.DeepClone(), 1024, 1024, 8, 32, 3.0, false));
