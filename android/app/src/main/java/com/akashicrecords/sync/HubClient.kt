@@ -83,10 +83,11 @@ class HubClient(hubUrl: String, private val token: String? = null) {
     /** An AI edit ("edit": a sentence, optionally a mask blob and words naming the zone, erase first or not) or a
      *  restore ("restore") of a picture of the app; once done, the hub makes the result an edit of the same row. */
     fun addComputeEdit(entityType: String, entityId: String, kind: String, prompt: String?, maskHash: String?, maskText: String?, erase: Boolean,
-                       tries: Int = 1, engine: String = "kontext"): JSONObject =
+                       tries: Int = 1, engine: String = "kontext", frame: DoubleArray? = null): JSONObject =
         addComputeJobFrom(JSONObject().put("entity_type", entityType).put("entity_id", entityId).put("kind", kind)
             .put("prompt", prompt ?: JSONObject.NULL).put("mask_hash", maskHash ?: JSONObject.NULL)
-            .put("mask_text", maskText ?: JSONObject.NULL).put("erase", erase).put("tries", tries).put("engine", engine))
+            .put("mask_text", maskText ?: JSONObject.NULL).put("erase", erase).put("tries", tries).put("engine", engine)
+            .put("frame", frame?.let { f -> org.json.JSONArray().apply { f.forEach { put(it) } } } ?: JSONObject.NULL))
 
     /** Keeps one of the versions of a job asked with several tries. */
     fun chooseCompute(id: String, resultHash: String): JSONObject = call("POST", "/compute/jobs/$id/choose", JSONObject().put("result_hash", resultHash))

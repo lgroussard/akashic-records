@@ -163,10 +163,11 @@ public sealed class HubClient : IDisposable
         await AddComputeJobFromAsync(new { entity_type = entityType, entity_id = entityId }, ct);
 
     /// <summary>Asks for an AI edit of an image already in the app: kind "edit" (a sentence, optionally a mask blob, a
-    /// text to mask, whether to empty the zone first) or "restore". Once done the hub makes the result a revertible edit.</summary>
+    /// text to mask, whether to empty the zone first, optionally a frame [x, y, w, h] in fractions: the only part shown to
+    /// the AI, pasted back) or "restore". Once done the hub makes the result a revertible edit.</summary>
     public async Task<HubComputeJob> AddComputeEditAsync(string entityType, string entityId, string kind, string? prompt,
-        string? maskHash, string? maskText, bool erase, int tries = 1, string? engine = null, CancellationToken ct = default) =>
-        await AddComputeJobFromAsync(new { entity_type = entityType, entity_id = entityId, kind, prompt, mask_hash = maskHash, mask_text = maskText, erase, tries, engine }, ct);
+        string? maskHash, string? maskText, bool erase, int tries = 1, string? engine = null, double[]? frame = null, CancellationToken ct = default) =>
+        await AddComputeJobFromAsync(new { entity_type = entityType, entity_id = entityId, kind, prompt, mask_hash = maskHash, mask_text = maskText, erase, tries, engine, frame }, ct);
 
     private async Task<HubComputeJob> AddComputeJobFromAsync(object body, CancellationToken ct)
     {

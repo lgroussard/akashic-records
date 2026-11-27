@@ -65,6 +65,12 @@ public sealed class ImageEditWindow : Window
     private readonly CheckBox _erase = new() { Content = "Effacer d'abord ce qu'il y a dans la zone", Margin = new Thickness(0, 0, 0, 10) };
     private readonly ComboBox _tries = new() { Width = 70, Margin = new Thickness(8, 0, 16, 0), VerticalAlignment = VerticalAlignment.Center };
     private readonly ComboBox _engine = new() { Width = 170, Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+    private readonly CheckBox _aiFrame = new()
+    {
+        Content = "Ne montrer à l'IA que le rectangle tracé", IsChecked = true, Margin = new Thickness(0, 0, 0, 4),
+        ToolTip = "L'IA ne voit et ne change que ce morceau (agrandi pour plus de détails), puis il est recollé dans la photo entière.",
+    };
+    private readonly TextBlock _aiFrameText = new() { TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(0, 0, 0, 10) };
     private readonly Canvas _paint = new() { IsHitTestVisible = false };
     private List<Point>? _currentStroke;
 
@@ -343,6 +349,13 @@ public sealed class ImageEditWindow : Window
             h = Math.Max(1, (int)Math.Round(c.Height * h));
         }
         _sizeText.Text = $"Image enregistrée : {w} × {h} px (JPEG)";
+        _aiFrame.IsEnabled = _crop is not null;
+        _aiFrameText.Foreground = Brush("TextFaintBrush");
+        _aiFrameText.Text = _crop is null
+            ? "Trace un rectangle sur l'image (comme pour recadrer) pour ne montrer qu'un morceau à l'IA."
+            : _aiFrame.IsChecked == true
+                ? $"L'IA verra seulement ce rectangle ({w} × {h} px), puis il sera recollé dans la photo, le reste intact."
+                : "L'IA verra toute l'image.";
     }
 
     private enum DragMode { None, New, Move, Resize }
@@ -485,6 +498,10 @@ public sealed class ImageEditWindow : Window
             TextWrapping = TextWrapping.Wrap, Foreground = Brush("TextMutedBrush"), FontSize = 11.5, Margin = new Thickness(0, 0, 0, 8),
         });
         panel.Children.Add(_prompt);
+        _aiFrame.Checked += (_, _) => DrawCrop();
+        _aiFrame.Unchecked += (_, _) => DrawCrop();
+        panel.Children.Add(_aiFrame);
+        panel.Children.Add(_aiFrameText);
 
         var brushRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
         _brush.Style = Application.Current.TryFindResource("SecondaryButtonStyle") as Style;
@@ -544,7 +561,7 @@ public sealed class ImageEditWindow : Window
         panel.Children.Add(new TextBlock
         {
             Text = "Fait sur un PC avec ComfyUI (une à quelques minutes). Le résultat remplace l'image ; « " + ImageEditing.RevertLabel + " » reste possible. " +
-                   "La rotation, le recadrage et les couleurs réglés plus haut ne s'appliquent pas à l'IA.",
+                   "La rotation et les couleurs réglées plus haut ne s'appliquent pas à l'IA ; le rectangle tracé sert de cadre (case ci-dessus).",
             TextWrapping = TextWrapping.Wrap, Foreground = Brush("TextFaintBrush"), FontSize = 11, Margin = new Thickness(0, 10, 0, 0),
         });
     }
@@ -565,11 +582,19 @@ public sealed class ImageEditWindow : Window
             MessageBox.Show(this, "RealVisXL redessine seulement une zone : peins-la, ou nomme-la en quelques mots.", "Modifier avec l'IA");
             return;
         }
-        AiResult = new ImageAiRequest("edit", prompt, _strokes.Count > 0 ? RenderMask() : null, maskText, _erase.IsChecked == true, Tries(), engine);
+        AiResult = new ImageAiRequest("edit", prompt, _strokes.Count > 0 ? RenderMask() : null, maskText, _erase.IsChecked == true, Tries(), engine, AiFrame());
         DialogResult = true;
     }
 
     private int Tries() => (_tries.SelectedItem as ComboBoxItem)?.Tag as int? ?? 1;
+
+    // The rectangle drawn, as the AI's frame on the stored (unturned) picture: [x, y, width, height] in fractions.
+    private double[]? AiFrame()
+    {
+        if (_crop is not { } c || _aiFrame.IsChecked != true) return null;
+        for (var i = 0; i < _turns; i++) c = new Rect(c.Y, 1 - c.X - c.Width, c.Height, c.Width); // undo one right turn
+        return [c.X, c.Y, c.Width, c.Height];
+    }
 
     private void ClearStrokes()
     {
@@ -621,5 +646,7 @@ public sealed class ImageEditWindow : Window
 }
 
 /// <summary>An AI request from the editor. Kind "edit" (a sentence; MaskPng = white where the change goes; MaskText =
-/// words naming the zone; Erase = empty the zone first) or "restore".</summary>
-public sealed record ImageAiRequest(string Kind, string? Prompt, byte[]? MaskPng, string? MaskText, bool Erase, int Tries = 1, string Engine = "kontext");
+/// words naming the zone; Erase = empty the zone first; Frame = the only part shown to the AI, [x, y, w, h] in fractions
+/// of the stored picture, pasted back) or "restore".</summary>
+public sealed record ImageAiRequest(string Kind, string? Prompt, byte[]? MaskPng, string? MaskText, bool Erase, int Tries = 1, string Engine = "kontext",
+    double[]? Frame = null);

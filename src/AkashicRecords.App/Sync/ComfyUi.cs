@@ -80,7 +80,7 @@ public sealed class ComfyUi
         var produced = new List<string>();
         try
         {
-            var (prompt, maskHash, maskText, erase, tries, engine) = ReadParams(job);
+            var (prompt, maskHash, maskText, erase, tries, engine, frame) = ReadParams(job);
             if (engine == "sdxl" && !File.Exists(Path.Combine(Dir!, RealVisXlFile)))
                 throw new InvalidOperationException("RealVisXL n'est pas dans ce ComfyUI (" + RealVisXlFile + ").");
 
@@ -93,6 +93,15 @@ public sealed class ComfyUi
             {
                 maskFile = Path.Combine(work, "mask.png");
                 if (!await hub.DownloadFileAsync(maskHash, maskFile)) throw new InvalidOperationException("Le masque n'est plus sur le serveur.");
+            }
+            // A frame: Kontext is only shown that part of the picture (and of the mask); each result is pasted back
+            // into the whole picture afterwards, with a soft edge.
+            string? whole = null;
+            SKRectI frameRect = default;
+            if (frame is not null)
+            {
+                whole = source;
+                (source, maskFile, frameRect) = CutFrame(whole, maskFile, frame, work);
             }
             var name = $"akashic-{job.Id}.png";
             var prepared = Path.Combine(work, name);
@@ -113,7 +122,7 @@ public sealed class ComfyUi
                 {
                     var graph = job.Kind == "restore" ? Restore(name, job.Id)
                         : engine == "sdxl" ? EditSdxl(name, job.Id, prompt!, maskFile is not null, maskText, erase, width, height)
-                        : Edit(name, job.Id, prompt!, maskFile is not null, maskText, erase, width, height, zone);
+                        : Edit(name, job.Id, prompt!, maskFile is not null, maskText, erase, width, height, zone, whole is not null);
                     var (file, subfolder) = await QueueAndWaitAsync(graph);
                     produced.Add(Path.Combine(subfolder, file));
                     var url = $"/view?filename={Uri.EscapeDataString(file)}&subfolder={Uri.EscapeDataString(subfolder)}&type=output";
@@ -122,6 +131,7 @@ public sealed class ComfyUi
                         await stream.CopyToAsync(target);
                     if (!check || attempt == 2 || ZoneChange(source, result, maskFile!) >= KeptBelow) break;
                 }
+                if (whole is not null) PasteFrame(whole, frameRect, result);
                 results.Add(result);
             }
             return results;
@@ -167,17 +177,96 @@ public sealed class ComfyUi
         return count == 0 ? 255 : total / count;
     }
 
-    private static (string? Prompt, string? MaskHash, string? MaskText, bool Erase, int Tries, string Engine) ReadParams(HubComputeJob job)
+    private static (string? Prompt, string? MaskHash, string? MaskText, bool Erase, int Tries, string Engine, double[]? Frame) ReadParams(HubComputeJob job)
     {
         using var doc = JsonDocument.Parse(job.Params ?? "{}");
         var r = doc.RootElement;
         var tries = r.TryGetProperty("tries", out var n) && n.ValueKind == JsonValueKind.Number ? Math.Clamp(n.GetInt32(), 1, 4) : 1;
-        if (job.Kind == "restore") return (RestorePrompt, null, null, false, tries, "kontext");
+        if (job.Kind == "restore") return (RestorePrompt, null, null, false, tries, "kontext", null);
         string? Text(string key) => r.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
         var prompt = Text("prompt");
         if (string.IsNullOrWhiteSpace(prompt)) throw new InvalidOperationException("Demande de modification sans phrase.");
         return (prompt, Text("mask_hash"), Text("mask_text"), r.TryGetProperty("erase", out var e) && e.ValueKind == JsonValueKind.True,
-            tries, Text("engine") ?? "kontext");
+            tries, Text("engine") ?? "kontext", ReadFrame(r));
+    }
+
+    /// <summary>The frame asked ("frame": [x, y, width, height] as fractions of the upright picture), or null for the
+    /// whole picture.</summary>
+    private static double[]? ReadFrame(JsonElement r)
+    {
+        if (!r.TryGetProperty("frame", out var f) || f.ValueKind != JsonValueKind.Array || f.GetArrayLength() != 4) return null;
+        var v = f.EnumerateArray().Select(e => e.ValueKind == JsonValueKind.Number ? e.GetDouble() : double.NaN).ToArray();
+        if (v.Any(double.IsNaN)) return null;
+        return v[2] >= 0.999 && v[3] >= 0.999 ? null : v;
+    }
+
+    /// <summary>The frame in the upright picture's pixels.</summary>
+    private static SKRectI FramePixels(double[] f, int width, int height)
+    {
+        var left = Math.Clamp((int)Math.Round(f[0] * width), 0, width - 1);
+        var top = Math.Clamp((int)Math.Round(f[1] * height), 0, height - 1);
+        var right = Math.Clamp((int)Math.Round((f[0] + f[2]) * width), left + 1, width);
+        var bottom = Math.Clamp((int)Math.Round((f[1] + f[3]) * height), top + 1, height);
+        return new SKRectI(left, top, right, bottom);
+    }
+
+    /// <summary>Writes the framed part of the upright picture (and of the mask, if any) as PNGs in `work`.</summary>
+    private static (string Source, string? Mask, SKRectI Frame) CutFrame(string whole, string? maskFile, double[] frame, string work)
+    {
+        using var picture = ImageEditing.DecodeOriented(whole) ?? throw new InvalidOperationException("Format d'image illisible sur cet ordinateur.");
+        var rect = FramePixels(frame, picture.Width, picture.Height);
+        var source = Path.Combine(work, "framed.png");
+        using (var part = new SKBitmap(rect.Width, rect.Height))
+        {
+            picture.ExtractSubset(part, rect);
+            Save(part, source);
+        }
+        string? mask = null;
+        if (maskFile is not null)
+        {
+            using var m = SKBitmap.Decode(maskFile) ?? throw new InvalidOperationException("Masque illisible.");
+            var mr = FramePixels(frame, m.Width, m.Height);
+            using var part = new SKBitmap(mr.Width, mr.Height);
+            m.ExtractSubset(part, mr);
+            mask = Path.Combine(work, "mask-framed.png");
+            Save(part, mask);
+        }
+        return (source, mask, rect);
+    }
+
+    /// <summary>
+    /// Puts a framed result back into the whole picture (written over `result`): scaled to the frame, blended over a
+    /// thin band along the frame's inner edges (not along the picture's own edges), so a slight colour shift of the
+    /// redrawn part does not leave a hard line. Outside the frame the picture is untouched.
+    /// </summary>
+    private static void PasteFrame(string whole, SKRectI frame, string result)
+    {
+        using var picture = ImageEditing.DecodeOriented(whole) ?? throw new InvalidOperationException("Image illisible.");
+        using var drawn = SKBitmap.Decode(result) ?? throw new InvalidOperationException("Résultat illisible.");
+        using var part = drawn.Width == frame.Width && drawn.Height == frame.Height
+            ? drawn.Copy()
+            : drawn.Resize(new SKImageInfo(frame.Width, frame.Height), new SKSamplingOptions(SKCubicResampler.Mitchell));
+        var band = Math.Max(4, (int)Math.Round(Math.Min(frame.Width, frame.Height) * 0.03));
+        bool fadeLeft = frame.Left > 0, fadeTop = frame.Top > 0, fadeRight = frame.Right < picture.Width, fadeBottom = frame.Bottom < picture.Height;
+        using var output = picture.Copy(SKColorType.Rgba8888);
+        for (var y = 0; y < frame.Height; y++)
+            for (var x = 0; x < frame.Width; x++)
+            {
+                var d = int.MaxValue;
+                if (fadeLeft) d = Math.Min(d, x);
+                if (fadeTop) d = Math.Min(d, y);
+                if (fadeRight) d = Math.Min(d, frame.Width - 1 - x);
+                if (fadeBottom) d = Math.Min(d, frame.Height - 1 - y);
+                var c = part.GetPixel(x, y);
+                if (d < band)
+                {
+                    var a = (d + 0.5) / band;
+                    var o = output.GetPixel(frame.Left + x, frame.Top + y);
+                    c = new SKColor((byte)(o.Red + (c.Red - o.Red) * a), (byte)(o.Green + (c.Green - o.Green) * a), (byte)(o.Blue + (c.Blue - o.Blue) * a));
+                }
+                output.SetPixel(frame.Left + x, frame.Top + y, c.WithAlpha(255));
+            }
+        Save(output, result);
     }
 
     /// <summary>Writes the upright picture as a PNG, the mask (white = zone, any size) as transparency. Returns its size
@@ -245,10 +334,18 @@ public sealed class ComfyUi
         g["41"] = Node("VAEDecode", new { samples = Out("40", 0), vae = Out("32", 0) });
     }
 
-    // Whole picture through Kontext (scaled to its ~1 megapixel), decoded in "41".
-    private static void WholePicture(JsonObject g, string prompt)
+    // Whole picture through Kontext (scaled to its ~1 megapixel), decoded in "41". `keepShape`: scaled to about
+    // 1 megapixel in its exact shape instead of Kontext's nearest preferred size (a framed part is pasted back: a
+    // changed shape would shift it against the picture around).
+    private static void WholePicture(JsonObject g, string prompt, (int Width, int Height)? keepShape = null)
     {
-        g["34"] = Node("FluxKontextImageScale", new { image = Out("1", 0) });
+        if (keepShape is { } s)
+        {
+            var k = Math.Sqrt(1_000_000.0 / ((double)s.Width * s.Height));
+            int Side(double v) => Math.Clamp((int)Math.Round(v * k / 16) * 16, 256, 2048);
+            g["34"] = Node("ImageScale", new { image = Out("1", 0), upscale_method = "lanczos", width = Side(s.Width), height = Side(s.Height), crop = "disabled" });
+        }
+        else g["34"] = Node("FluxKontextImageScale", new { image = Out("1", 0) });
         g["35"] = Node("VAEEncode", new { pixels = Out("34", 0), vae = Out("32", 0) });
         Kontext(g, prompt, Out("35", 0), Out("35", 0));
     }
@@ -363,7 +460,7 @@ public sealed class ComfyUi
         return (Side(w), Side(h));
     }
 
-    private static JsonObject Edit(string name, string jobId, string prompt, bool painted, string? maskText, bool erase, int width, int height, SKRectI? zone)
+    private static JsonObject Edit(string name, string jobId, string prompt, bool painted, string? maskText, bool erase, int width, int height, SKRectI? zone, bool framed = false)
     {
         var g = new JsonObject { ["1"] = Node("LoadImage", new { image = name }) };
 
@@ -373,7 +470,7 @@ public sealed class ComfyUi
         if (mask is null)
         {
             // No zone: the whole picture follows the sentence; a large original gets its size back.
-            WholePicture(g, prompt);
+            WholePicture(g, prompt, framed ? (width, height) : null);
             if ((long)width * height <= 1_300_000) return Save(g, Out("41", 0), jobId);
             Nomos(g, Out("41", 0));
             g["62"] = Node("ImageScale", new { image = Out("61", 0), upscale_method = "lanczos", width, height, crop = "disabled" });

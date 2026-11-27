@@ -341,7 +341,7 @@ public sealed class ComputeService
     /// with ComfyUI; once done, the hub makes the result an edit of the same row. Throws HubException for the user.
     /// </summary>
     public async Task<HubComputeJob> RequestEditAsync(string table, long localId, string kind, string? prompt, byte[]? maskPng, string? maskText, bool erase,
-        int tries = 1, string engine = "kontext")
+        int tries = 1, string engine = "kontext", double[]? frame = null)
     {
         if (!InPlaceKinds.Contains(table)) throw new HubException("Ce type d'image ne peut pas être modifié par l'IA.");
         var s = SyncService.Instance.Settings;
@@ -369,7 +369,7 @@ public sealed class ComputeService
                 try { File.Delete(file); } catch (IOException) { }
             }
         }
-        return await hub.AddComputeEditAsync(table, syncId, kind, prompt, maskHash, maskText, erase, tries, engine);
+        return await hub.AddComputeEditAsync(table, syncId, kind, prompt, maskHash, maskText, erase, tries, engine, frame);
     }
 
     /// <summary>The id a row has on the hub (sync_map), or null when it has not been synchronised yet.</summary>
