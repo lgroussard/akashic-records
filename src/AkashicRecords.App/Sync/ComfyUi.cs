@@ -18,8 +18,9 @@ namespace AkashicRecords.App.Sync;
 /// The three recipes (validated by hand on real photos before being written here):
 ///  - edit, no mask: Kontext redraws the whole picture following the sentence (about 1 megapixel), then a large
 ///    original gets its size back with Nomos ×4;
-///  - edit with a mask (painted and/or found from a text by SAM 3.1): the zone, zoomed to 1024 px, is redrawn there
-///    only and pasted back, so the rest of the picture stays identical; with "erase", LaMa empties the zone first;
+///  - edit with a mask (painted and/or found from a text by SAM 3.1): the zone, zoomed to about 1 megapixel in its
+///    own shape, is redrawn there only and pasted back, so the rest of the picture stays identical; with "erase" the
+///    zone is grown to take the object's outline in (RealVisXL also has LaMa empty it first);
 ///  - restore: Kontext cleans the picture up (blur, noise, compression), then Nomos ×4.
 /// </summary>
 public sealed class ComfyUi
@@ -95,7 +96,7 @@ public sealed class ComfyUi
             }
             var name = $"akashic-{job.Id}.png";
             var prepared = Path.Combine(work, name);
-            var (width, height) = Prepare(source, maskFile, prepared);
+            var (width, height, zone) = Prepare(source, maskFile, prepared);
 
             await EnsureRunningAsync();
             uploaded.Add(await UploadAsync(prepared, name));
@@ -106,7 +107,7 @@ public sealed class ComfyUi
             {
                 var graph = job.Kind == "restore" ? Restore(name, job.Id)
                     : engine == "sdxl" ? EditSdxl(name, job.Id, prompt!, maskFile is not null, maskText, erase, width, height)
-                    : Edit(name, job.Id, prompt!, maskFile is not null, maskText, erase, width, height);
+                    : Edit(name, job.Id, prompt!, maskFile is not null, maskText, erase, width, height, zone);
                 var (file, subfolder) = await QueueAndWaitAsync(graph);
                 produced.Add(Path.Combine(subfolder, file));
 
@@ -142,8 +143,9 @@ public sealed class ComfyUi
             tries, Text("engine") ?? "kontext");
     }
 
-    /// <summary>Writes the upright picture as a PNG, the mask (white = zone, any size) as transparency. Returns its size.</summary>
-    private static (int Width, int Height) Prepare(string source, string? maskFile, string target)
+    /// <summary>Writes the upright picture as a PNG, the mask (white = zone, any size) as transparency. Returns its size
+    /// and the painted zone's bounding box in its pixels (null without a painted zone).</summary>
+    private static (int Width, int Height, SKRectI? Zone) Prepare(string source, string? maskFile, string target)
     {
         using var picture = ImageEditing.DecodeOriented(source) ?? throw new InvalidOperationException("Format d'image illisible sur cet ordinateur.");
         if (maskFile is not null)
@@ -151,6 +153,7 @@ public sealed class ComfyUi
             using var mask = SKBitmap.Decode(maskFile) ?? throw new InvalidOperationException("Masque illisible.");
             using var scaled = mask.Resize(new SKImageInfo(picture.Width, picture.Height), new SKSamplingOptions(SKFilterMode.Linear));
             using var withAlpha = new SKBitmap(new SKImageInfo(picture.Width, picture.Height, SKColorType.Bgra8888, SKAlphaType.Unpremul));
+            int left = int.MaxValue, top = int.MaxValue, right = -1, bottom = -1;
             for (var y = 0; y < picture.Height; y++)
                 for (var x = 0; x < picture.Width; x++)
                 {
@@ -158,11 +161,17 @@ public sealed class ComfyUi
                     var m = scaled.GetPixel(x, y);
                     var zone = Math.Max(m.Red, Math.Max(m.Green, m.Blue)) * m.Alpha / 255;
                     withAlpha.SetPixel(x, y, c.WithAlpha((byte)(255 - zone)));
+                    if (zone > 127)
+                    {
+                        left = Math.Min(left, x); right = Math.Max(right, x);
+                        top = Math.Min(top, y); bottom = Math.Max(bottom, y);
+                    }
                 }
             Save(withAlpha, target);
+            return (picture.Width, picture.Height, right < 0 ? null : new SKRectI(left, top, right + 1, bottom + 1));
         }
-        else Save(picture, target);
-        return (picture.Width, picture.Height);
+        Save(picture, target);
+        return (picture.Width, picture.Height, null);
     }
 
     private static void Save(SKBitmap bitmap, string path)
@@ -227,14 +236,17 @@ public sealed class ComfyUi
         return Save(g, Out("61", 0), jobId);
     }
 
-    private static object Crop(JsonArray image, JsonArray mask, int target, int expand, int blend, double context, bool fillHoles) => new
+    private static object Crop(JsonArray image, JsonArray mask, int target, int expand, int blend, double context, bool fillHoles) =>
+        Crop(image, mask, target, target, expand, blend, context, fillHoles);
+
+    private static object Crop(JsonArray image, JsonArray mask, int targetWidth, int targetHeight, int expand, int blend, double context, bool fillHoles) => new
     {
         image, mask, downscale_algorithm = "bilinear", upscale_algorithm = "bicubic",
         preresize = false, preresize_mode = "ensure minimum resolution", preresize_min_width = 1024, preresize_min_height = 1024,
         preresize_max_width = 16384, preresize_max_height = 16384, mask_fill_holes = fillHoles, mask_expand_pixels = expand, mask_invert = false,
         mask_blend_pixels = blend, mask_hipass_filter = 0.1, extend_for_outpainting = false, extend_up_factor = 1.0, extend_down_factor = 1.0,
         extend_left_factor = 1.0, extend_right_factor = 1.0, context_from_mask_extend_factor = context, output_resize_to_target_size = true,
-        output_target_width = target, output_target_height = target, output_padding = "32", device_mode = "gpu (much faster)",
+        output_target_width = targetWidth, output_target_height = targetHeight, output_padding = "32", device_mode = "gpu (much faster)",
     };
 
     // The zone: painted (transparency of the upload), found from a text by SAM 3.1, or both added together; null if none.
@@ -298,7 +310,23 @@ public sealed class ComfyUi
         return Save(g, Out("13", 0), jobId);
     }
 
-    private static JsonObject Edit(string name, string jobId, string prompt, bool painted, string? maskText, bool erase, int width, int height)
+    /// <summary>
+    /// The size Kontext draws a painted zone at: the zone with half its size again as context, at about 1 megapixel,
+    /// keeping its shape (a tall zone is drawn tall). A fixed 1024 square squeezed a tall zone about five times and the
+    /// result came back blurry. Null (square crop, more context) when the zone is also found from words: its size is
+    /// only known in ComfyUI.
+    /// </summary>
+    private static (int Width, int Height)? Shaped(SKRectI? zone, string? maskText, int grow, int width, int height)
+    {
+        if (zone is not { } z || !string.IsNullOrWhiteSpace(maskText)) return null;
+        var w = Math.Min(width, (z.Width + 2.0 * grow) * 1.5);
+        var h = Math.Min(height, (z.Height + 2.0 * grow) * 1.5);
+        var k = Math.Sqrt(1_000_000 / (w * h));
+        int Side(double v) => Math.Clamp((int)(v * k) / 64 * 64, 256, 2048);
+        return (Side(w), Side(h));
+    }
+
+    private static JsonObject Edit(string name, string jobId, string prompt, bool painted, string? maskText, bool erase, int width, int height, SKRectI? zone)
     {
         var g = new JsonObject { ["1"] = Node("LoadImage", new { image = name }) };
 
@@ -315,12 +343,26 @@ public sealed class ComfyUi
             return Save(g, Out("62", 0), jobId);
         }
 
-        // With a zone: LaMa empties it first if asked (zoomed in at its own scale, the zone grown to take the object's
-        // outline in), then Kontext draws the sentence in the zone only, zoomed to 1024 px, pasted back with a soft
-        // edge: the rest stays identical, at full size.
-        if (erase) mask = Grown(g, mask, width, height);
-        var basePicture = Erased(g, mask, erase);
-        g["10"] = Node("InpaintCropImproved", Crop(basePicture, (JsonArray)mask.DeepClone(), 1024, 8, 32, 3.0, false));
+        // With a zone: Kontext draws the sentence in the zone only, zoomed to about 1 megapixel in its own shape, pasted
+        // back with a soft edge: the rest stays identical, at full size.
+        // « Effacer d'abord »: the zone, grown to take the object's outline in, is painted flat grey in the picture
+        // Kontext sees, and the sentence asks it to fill the grey. Tried on a removed person (2026-11-27): Kontext
+        // alone sometimes drew the person back (it still saw them); a first pass of LaMa came out blurry (drawn small)
+        // and Kontext copies the picture it is given, blur included; the grey hides the object and has no blur to copy.
+        var grow = erase ? Math.Max(8, (int)Math.Round(Math.Max(width, height) * 0.01)) : 0;
+        var source = Out("1", 0);
+        if (erase)
+        {
+            mask = Grown(g, mask, width, height);
+            g["55"] = Node("EmptyImage", new { width, height, batch_size = 1, color = 0x808080 });
+            g["56"] = Node("ImageCompositeMasked", new { destination = Out("1", 0), source = Out("55", 0), x = 0, y = 0, resize_source = false, mask = (JsonArray)mask.DeepClone() });
+            source = Out("56", 0);
+            prompt += " Fill the plain grey area so it blends seamlessly with the rest of the photo, sharp and detailed, same lighting.";
+        }
+        var shape = Shaped(zone, maskText, grow, width, height);
+        g["10"] = Node("InpaintCropImproved", shape is { } t
+            ? Crop(source, (JsonArray)mask.DeepClone(), t.Width, t.Height, 8, 32, 1.5, false)
+            : Crop(source, (JsonArray)mask.DeepClone(), 1024, 1024, 8, 32, 3.0, false));
         g["35"] = Node("VAEEncode", new { pixels = Out("10", 1), vae = Out("32", 0) });
         g["43"] = Node("SetLatentNoiseMask", new { samples = Out("35", 0), mask = Out("10", 2) });
         Kontext(g, prompt, Out("35", 0), Out("43", 0));
