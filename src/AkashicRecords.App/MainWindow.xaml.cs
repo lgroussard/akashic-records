@@ -798,7 +798,8 @@ public partial class MainWindow : Window
 
     private void ToolsDownloads_OnClick(object sender, RoutedEventArgs e) => ToggleDownloader();
     private void ToolsUpscale_OnClick(object sender, RoutedEventArgs e) => ShowUpscale();
-    private void ToolsServer_OnClick(object sender, RoutedEventArgs e) => ShowServer();
+    private void ToolsServer_OnClick(object sender, RoutedEventArgs e) { ShowServer(); _ = _server!.ShowLocalAsync(false); }
+    private void ToolsDisks_OnClick(object sender, RoutedEventArgs e) { ShowServer(); _ = _server!.ShowLocalAsync(true); }
 
     // Toggles the floating music player. It's a separate top-level window so it keeps
     // playing while the main window is hidden; created lazily on first click.
