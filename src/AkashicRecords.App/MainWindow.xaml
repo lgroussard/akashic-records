@@ -110,10 +110,39 @@
                             Style="{StaticResource ChipButtonStyle}"
                             Click="ToolsButton_OnClick">
                         <Button.ContextMenu>
-                            <ContextMenu Background="#F21A1A2E" Foreground="White" BorderBrush="#553B82F6">
-                                <MenuItem Header="Téléchargements" Click="ToolsDownloads_OnClick" Foreground="White"/>
-                                <MenuItem Header="Agrandir des images" Click="ToolsUpscale_OnClick" Foreground="White"/>
-                                <MenuItem Header="Serveur" Click="ToolsServer_OnClick" Foreground="White"/>
+                            <!-- Own look: Windows' default menu draws a grey icon column and grey edges. -->
+                            <ContextMenu HasDropShadow="False">
+                                <ContextMenu.Template>
+                                    <ControlTemplate TargetType="ContextMenu">
+                                        <Border Background="#F21A1A2E" BorderBrush="#553B82F6" BorderThickness="1" CornerRadius="8" Padding="4">
+                                            <ItemsPresenter/>
+                                        </Border>
+                                    </ControlTemplate>
+                                </ContextMenu.Template>
+                                <ContextMenu.ItemContainerStyle>
+                                    <Style TargetType="MenuItem">
+                                        <Setter Property="Foreground" Value="White"/>
+                                        <Setter Property="FontSize" Value="13"/>
+                                        <Setter Property="Cursor" Value="Hand"/>
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="MenuItem">
+                                                    <Border x:Name="Bg" Background="Transparent" CornerRadius="5" Padding="12,7" MinWidth="170">
+                                                        <ContentPresenter ContentSource="Header" RecognizesAccessKey="True"/>
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsHighlighted" Value="True">
+                                                            <Setter TargetName="Bg" Property="Background" Value="#2E2E4D"/>
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </ContextMenu.ItemContainerStyle>
+                                <MenuItem Header="Téléchargements" Click="ToolsDownloads_OnClick"/>
+                                <MenuItem Header="Agrandir des images" Click="ToolsUpscale_OnClick"/>
+                                <MenuItem Header="Serveur" Click="ToolsServer_OnClick"/>
                             </ContextMenu>
                         </Button.ContextMenu>
                     </Button>
