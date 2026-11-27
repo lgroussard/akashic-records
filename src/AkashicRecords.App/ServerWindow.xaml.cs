@@ -139,6 +139,12 @@ public partial class ServerWindow : Window
                 : "Aucun fichier supprimé en attente.";
             disk.Children.Add(Text(line, 12, Muted));
             if (cl.Brake is not null) disk.Children.Add(Text("Ménage suspendu par sécurité : " + cl.Brake, 12, Late));
+            if (cl.PendingFiles > 0)
+            {
+                var now = new Button { Content = "Effacer maintenant", Style = (Style)FindResource("Btn"), Margin = new Thickness(0, 4, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
+                now.Click += async (_, _) => await CleanupNowAsync(cl);
+                disk.Children.Add(now);
+            }
         }
         var browse = new Button { Content = "Parcourir les dossiers  ›", Style = (Style)FindResource("Primary"), Margin = new Thickness(0, 10, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
         browse.Click += async (_, _) => await BrowseAsync("/");
@@ -570,6 +576,31 @@ public partial class ServerWindow : Window
 
     // ------------------------------------------------------------------ window
 
+
+    // « Effacer maintenant »: the deleted files waiting on the hub go for good now, after a yes.
+    private async Task CleanupNowAsync(HubCleanup pending)
+    {
+        var ask = $"Effacer pour de bon {pending.PendingFiles} fichiers supprimés ({Size(pending.PendingBytes)}) du serveur ?\n\n" +
+                  "Ils ne pourront plus être récupérés : la copie du disque externe les perd aussi la nuit suivante. " +
+                  "Ceux supprimés depuis moins d'une heure attendent le passage suivant.";
+        if (MessageBox.Show(this, ask, "Effacer maintenant", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+        var s = SyncService.Instance.Settings;
+        string message;
+        try
+        {
+            using var hub = new HubClient(s.HubUrl, s.Token);
+            var done = await hub.CleanupNowAsync();
+            message = done.Brake is not null ? "Rien n'a été effacé : ménage suspendu par sécurité (" + done.Brake + ")."
+                : $"{done.DeletedBlobs} fichiers effacés ({Size(done.DeletedBytes)} libérés)."
+                  + (done.PendingFiles > 0 ? $" {done.PendingFiles} autres, trop récents, attendent encore." : "");
+        }
+        catch (Exception e)
+        {
+            message = "Échec : " + e.Message;
+        }
+        MessageBox.Show(this, message, "Effacer maintenant");
+        await RefreshAsync();
+    }
     private async void Refresh_OnClick(object sender, RoutedEventArgs e) => await RefreshAsync();
 
     private void TitleBar_OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)

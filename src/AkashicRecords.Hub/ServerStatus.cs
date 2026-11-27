@@ -26,12 +26,15 @@ public static class ServerStatus
         Backup Backup, List<Device> Devices, Dictionary<string, long> Entities, Work Downloads, Work Compute,
         BlobCleaner.Report? Cleanup = null);
 
-    public static void Map(WebApplication app, HubStore store, DownloadStore downloads, ComputeStore compute, HubOptions options)
+    public static void Map(WebApplication app, HubStore store, DownloadStore downloads, ComputeStore compute, HubOptions options, BlobStore blobs)
     {
         app.MapGet("/server", () => Results.Ok(Build(store, downloads, compute, options)));
         // The disk folder by folder (DiskIndex.cs): measured apart, as root; the hub only reads it and asks again.
         app.MapGet("/server/disk", (string? path) => Results.Ok(DiskIndex.Browse(options, path, store, compute)));
         app.MapPost("/server/disk/refresh", () => { DiskIndex.RequestRefresh(options); return Results.Ok(DiskIndex.Browse(options, null, store, compute)); });
+        // « Effacer maintenant »: the files deleted in the apps go now instead of after DeleteAfterDays — those the daily
+        // pass already found unused at least an hour ago (BlobCleaner.Run), brakes kept.
+        app.MapPost("/server/cleanup/now", () => Results.Ok(BlobCleaner.Run(options, store, compute, blobs, DateTime.UtcNow, TimeSpan.FromHours(1))));
     }
 
     public static Status Build(HubStore store, DownloadStore downloads, ComputeStore compute, HubOptions options)

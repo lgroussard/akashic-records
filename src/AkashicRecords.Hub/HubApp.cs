@@ -205,7 +205,7 @@ public static class HubApp
         });
 
         DownloadRoutes.Map(app, store, board, options);
-        ServerStatus.Map(app, store, board, computeJobs, options);
+        ServerStatus.Map(app, store, board, computeJobs, options, blobs);
         ComputeRoutes.Map(app, computeJobs, computeCatalog, computeWorkers, blobs, app.Services.GetRequiredService<ComputeAttach>(), options);
 
         log.Info($"hub {Version} starting on {options.EffectiveUrl}, data in {options.DataDir}, {options.EntityTypes.Count} entity types");
