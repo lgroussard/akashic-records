@@ -27,7 +27,7 @@ public sealed record HubBackupStatus(string State, string? At, string? LastOkAt,
 public sealed record HubServerDevice(string Name, string? LastSeenAt, string? LastChangeAt, long Changes, bool Revoked, bool Hub);
 public sealed record HubWork(int Queued, int Running, int Failed, int Done);
 public sealed record HubDiskFolder(string Name, long Size, long Files, bool Denied, bool Mount, bool HasChildren);
-public sealed record HubDiskFile(string Name, long Size, string Kind = "other", string? Label = null, string? Hash = null);
+public sealed record HubDiskFile(string Name, long Size, string Kind = "other", string? Label = null, string? Hash = null, string? Note = null);
 public sealed record HubDiskView(string State, string? At, long? Seconds, bool Refreshing, string Root, string Path, long Size, long Files,
     List<HubDiskFolder> Folders, List<HubDiskFile> Largest, long OtherFilesBytes, long SmallFoldersBytes, long SmallFolders, bool Catalogue = false);
 public sealed record HubCleanup(string RanAt, int GraceDays, int PendingFiles, long PendingBytes, string? NextAt, int DeletedFiles, int DeletedBlobs, long DeletedBytes, string? Brake);

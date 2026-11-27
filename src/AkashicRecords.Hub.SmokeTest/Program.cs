@@ -1116,6 +1116,17 @@ await Scenario("20. Menage : un fichier que plus rien n'utilise est efface apres
     Check(first.DeletedFiles == 0 && first.DeletedBlobs == 0 && first.PendingFiles == 2,
         "1er passage : rien n'est efface, 2 fichiers en attente (la photo sans fiche, l'envoi jamais liste)");
 
+    // The disk browser says which files are waiting, and shows what is outside the catalogue.
+    DiskIndex.Run(hub.DataDir, Path.Combine(hub.DataDir, DiskIndex.FileName));
+    JsonElement Disk(string p) => JsonDocument.Parse(pc.Http.GetStringAsync("/server/disk?path=" + Uri.EscapeDataString(p)).Result).RootElement;
+    var archiveFiles = Disk("/blobs/media/archive").GetProperty("largest").EnumerateArray().ToDictionary(f => f.GetProperty("name").GetString()!, f => f);
+    Check(archiveFiles["c.jpg"].GetProperty("note").GetString()!.StartsWith("Supprimé") && archiveFiles["a.jpg"].GetProperty("note").ValueKind == JsonValueKind.Null,
+        "navigateur : la photo sans fiche est marquee « Supprime · efface pour de bon le ... »");
+    var outsideView = Disk("/blobs/" + DiskIndex.OutsideName).GetProperty("largest").EnumerateArray().ToDictionary(f => f.GetProperty("hash").GetString()!, f => f);
+    Check(outsideView[d].GetProperty("note").GetString()!.StartsWith("Supprimé") && outsideView[e].GetProperty("note").GetString()!.StartsWith("Dans Agrandir")
+          && outsideView[e].GetProperty("label").GetString() == "x.jpg",
+        "hors catalogue : chaque fichier dit s'il sert encore (Agrandir des images) ou quand il part");
+
     // Photo a is deleted in the app.
     await pc.Http.PostAsJsonAsync("/sync/push", new PushRequest(null, new List<Mutation>
         { new(Guid.NewGuid().ToString(), "Photo", "pa", hub.Store.Rev("Photo", "pa"), null, true) }), SimDevice.Wire);

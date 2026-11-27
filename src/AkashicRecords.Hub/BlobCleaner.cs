@@ -131,6 +131,16 @@ public sealed class BlobCleaner(HubOptions options, HubStore store, ComputeStore
         return report;
     }
 
+    /// <summary>What is waiting to be removed, for the disk browser: listings (MediaFile entity id) and blobs (hash),
+    /// each with the day it was first seen unused, and the delay after which it goes.</summary>
+    public static (Dictionary<string, DateTime> Files, Dictionary<string, DateTime> Blobs, TimeSpan Grace) Pending(HubOptions options)
+    {
+        var grace = TimeSpan.FromDays(Math.Max(1, options.DeleteAfterDays));
+        if (!File.Exists(Path.Combine(options.DataDir, "cleanup.db"))) return (new(), new(), grace);
+        using var marks = OpenMarks(options);
+        return (Marks(marks, "file"), Marks(marks, "blob"), grace);
+    }
+
     /// <summary>"media/archive/x.jpg.edit-1a2b3c4d.from-…jpg" → "media/archive/x.jpg" (the original's key).</summary>
     private static string RootOf(string key)
     {

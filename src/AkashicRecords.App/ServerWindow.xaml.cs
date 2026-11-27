@@ -247,7 +247,9 @@ public partial class ServerWindow : Window
 
         var head = Card(LeftPanel, "CE DOSSIER");
         head.Children.Add(Text($"{Size(d.Size)}  ·  {d.Files:N0} fichiers", 15, Brushes.White, bold: true));
-        if (d.Catalogue)
+        if (d.Catalogue && d.Path.EndsWith(DiskOutsideName))
+            head.Children.Add(Text("Fichiers que le serveur garde sans fiche dans l'app : images envoyées à Agrandir, photos supprimées… Ceux que plus rien n'utilise sont effacés 30 jours après.", 12, Muted));
+        else if (d.Catalogue)
             head.Children.Add(Text("Les fichiers d'Akashic, rangés comme dans l'app (sur le disque, ils sont nommés par empreinte).", 12, Muted));
 
         // The graph: what fills this folder, biggest first.
@@ -294,6 +296,8 @@ public partial class ServerWindow : Window
         Footer.Text = "Lecture seule : la mesure est faite chaque nuit par le mini-PC, ou quand tu la demandes.";
     }
 
+    private const string DiskOutsideName = "Fichiers du serveur hors catalogue"; // the hub's DiskIndex.OutsideName
+
     // Previews already fetched, by hash (a picture's preview never changes).
     private static readonly Dictionary<string, System.Windows.Media.Imaging.BitmapImage?> Thumbs = new();
 
@@ -322,6 +326,9 @@ public partial class ServerWindow : Window
         text.Children.Add(new TextBlock { Text = name, Foreground = Brushes.White, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis });
         var where = f.Label is { } l && l.Contains('/') ? "dans Akashic : " + l[..l.LastIndexOf('/')] : f.Hash is not null ? f.Name[..12] + "…" : null;
         if (where is not null) text.Children.Add(new TextBlock { Text = where, Foreground = Faint, FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis });
+        // Waiting to be removed for good (the hub's clean-up), or kept for shared computing.
+        if (f.Note is { } note)
+            text.Children.Add(new TextBlock { Text = note, Foreground = note.StartsWith("Supprimé") ? Late : Muted, FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis });
         Grid.SetColumn(text, 1); grid.Children.Add(text);
 
         var size = new TextBlock { Text = Size(f.Size), Foreground = Muted, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
