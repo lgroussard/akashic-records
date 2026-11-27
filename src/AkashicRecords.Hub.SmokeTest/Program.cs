@@ -835,5 +835,51 @@ await Scenario("17. Images agrandies depuis l'outil : rangees dans l'album Agran
         "resultat d'avant l'album : range une fois au demarrage du hub, dans le meme album");
 });
 
+await Scenario("16. Ecran Serveur : place, sauvegarde, appareils, travaux", async hub =>
+{
+    JsonElement Json(HttpResponseMessage r) => JsonDocument.Parse(r.Content.ReadAsStringAsync().Result).RootElement;
+    hub.EntityTypes.Add("MediaFile");
+    await hub.RestartAsync();
+    var pc = await hub.Device("pc");
+    var phone = await hub.Device("phone");
+    JsonElement File(string path, long size) => JsonSerializer.SerializeToElement(new { Path = path, Hash = new string('a', 64), Size = size });
+    var push = new PushRequest(null, new List<Mutation>
+    {
+        new(Guid.NewGuid().ToString(), "MediaFile", "1", 0, File("music\\Album\\a.mp3", 5_000_000), false),
+        new(Guid.NewGuid().ToString(), "MediaFile", "2", 0, File("music/Album/b.mp3", 3_000_000), false),
+        new(Guid.NewGuid().ToString(), "MediaFile", "3", 0, File("media\\archive\\x.heic", 2_000_000), false),
+        new(Guid.NewGuid().ToString(), "MediaFile", "4", 0, File("books\\livre.epub", 700_000), false),
+    });
+    await pc.Http.PostAsJsonAsync("/sync/push", push, SimDevice.Wire);
+
+    // No backup has ever run: the screen says so rather than inventing a state.
+    var before = Json(await phone.Http.GetAsync("/server"));
+    Check(before.GetProperty("backup").GetProperty("state").GetString() == "unknown", "aucune sauvegarde connue -> etat 'unknown'");
+
+    var storage = before.GetProperty("storage").EnumerateArray().ToDictionary(k => k.GetProperty("kind").GetString()!, k => k.GetProperty("bytes").GetInt64());
+    Check(storage.GetValueOrDefault("music") == 8_000_000 && storage.GetValueOrDefault("photos") == 2_000_000 && storage.GetValueOrDefault("books") == 700_000,
+        "place par categorie, d'apres le catalogue (musique, photos, livres ; chemins PC ou telephone)");
+    var disk = before.GetProperty("disk");
+    Check(disk.GetProperty("total").GetInt64() > 0 && disk.GetProperty("free").GetInt64() > 0, "disque du hub : taille et place libre");
+    var devices = before.GetProperty("devices").EnumerateArray().ToList();
+    var pcRow = devices.First(d => d.GetProperty("name").GetString() == "simule pc");
+    Check(devices.Count == 2 && pcRow.GetProperty("changes").GetInt64() == 4 && pcRow.GetProperty("last_change_at").ValueKind == JsonValueKind.String,
+        "appareils relies, avec leur derniere modification envoyee");
+
+    // What backup.sh writes after a run.
+    var at = DateTime.UtcNow.AddHours(-2).ToString("yyyy-MM-ddTHH:mm:ssZ");
+    await System.IO.File.WriteAllTextAsync(Path.Combine(hub.DataDir, "backup-status.json"),
+        $$"""{"state": "ok", "at": "{{at}}", "last_ok_at": "{{at}}", "message": "", "bytes": 26000000000, "files": 3165, "disk_total": 1000000000000, "disk_free": 600000000000, "seconds": 793}""");
+    var ok = Json(await phone.Http.GetAsync("/server")).GetProperty("backup");
+    Check(ok.GetProperty("state").GetString() == "ok" && ok.GetProperty("files").GetInt64() == 3165 && ok.GetProperty("disk_free").GetInt64() == 600000000000,
+        "derniere sauvegarde lue depuis backup-status.json");
+
+    var old = DateTime.UtcNow.AddDays(-3).ToString("yyyy-MM-ddTHH:mm:ssZ");
+    await System.IO.File.WriteAllTextAsync(Path.Combine(hub.DataDir, "backup-status.json"), $$"""{"state": "ok", "at": "{{old}}", "last_ok_at": "{{old}}"}""");
+    Check(Json(await phone.Http.GetAsync("/server")).GetProperty("backup").GetProperty("state").GetString() == "late",
+        "sauvegarde de plus d'un jour et demi -> 'late' (une nuit a ete manquee)");
+    Check((await hub.Anonymous().GetAsync("/server")).StatusCode == HttpStatusCode.Unauthorized, "sans jeton -> 401");
+});
+
 Console.WriteLine($"\n{passed} verifications reussies, {failures} en echec.");
 return failures == 0 ? 0 : 1;

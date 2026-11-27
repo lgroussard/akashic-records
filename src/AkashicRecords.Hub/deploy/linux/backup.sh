@@ -20,22 +20,41 @@ KEEP=7
 
 log() { echo "$(date '+%F %T') $*"; }
 
+# What the apps' "Serveur" screen shows (ServerStatus.cs): the last run's outcome, written after every run.
+STATUS="$DATA/backup-status.json"
+start=$(date +%s)
+status() { # state message [bytes files]
+    local last_ok
+    last_ok=$(grep -o '"last_ok_at": *"[^"]*"' "$STATUS" 2>/dev/null | sed 's/.*: *"\(.*\)"/\1/' || true)
+    [ "$1" = ok ] && last_ok=$(date -u +%FT%TZ)
+    local total=null free=null
+    if mountpoint -q "$MOUNT"; then
+        read -r total free < <(df -B1 --output=size,avail "$MOUNT" | tail -1) || true
+    fi
+    cat > "$STATUS.part" <<JSON
+{"state": "$1", "at": "$(date -u +%FT%TZ)", "last_ok_at": "${last_ok}", "message": "$2", "bytes": ${3:-null}, "files": ${4:-null}, "disk_total": ${total:-null}, "disk_free": ${free:-null}, "seconds": $(( $(date +%s) - start ))}
+JSON
+    chmod 644 "$STATUS.part" && mv -f "$STATUS.part" "$STATUS"
+}
+trap 'status failed "la copie s est arretee sur une erreur (journalctl -u akashic-backup)"' ERR
+
 if ! mountpoint -q "$MOUNT"; then
     mount "$MOUNT" 2>/dev/null || true
 fi
 if ! mountpoint -q "$MOUNT"; then
     log "disque de sauvegarde absent : rien a faire cette nuit"
+    status absent "disque de sauvegarde non branche"
     exit 0
 fi
 if ! touch "$MOUNT/.akashic-test" 2>/dev/null; then
     log "disque monte en lecture seule (Windows ne l'a pas ejecte proprement ?) : sauvegarde impossible"
+    status failed "disque en lecture seule (mal ejecte de Windows ?)"
     exit 1
 fi
 rm -f "$MOUNT/.akashic-test"
 
 mkdir -p "$DEST/base" "$DEST/blobs" "$DEST/fichiers"
 day=$(date +%F)
-start=$(date +%s)
 
 for db in hub downloads; do
     if [ -f "$DATA/$db.db" ]; then
@@ -62,3 +81,4 @@ size=$(du -sh "$DEST" | cut -f1)
     echo "Bases gardees : $(ls -1 "$DEST/base" | tr '\n' ' ')"
 } > "$DEST/DERNIERE-SAUVEGARDE.txt"
 log "sauvegarde faite : $size, $blobs fichiers du catalogue"
+status ok "" "$(du -sb "$DEST" | cut -f1)" "$blobs"

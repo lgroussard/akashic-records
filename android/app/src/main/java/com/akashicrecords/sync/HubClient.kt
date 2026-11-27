@@ -61,6 +61,9 @@ class HubClient(hubUrl: String, private val token: String? = null) {
     // ---- Shared computing (the hub's Compute.cs). The phone only asks and looks: it never takes jobs, the PC or
     // the hub run them.
 
+    /** The hub's state for the "Serveur" screen (the hub's ServerStatus.cs). */
+    fun server(): JSONObject = call("GET", "/server", null)
+
     fun compute(): JSONObject = call("GET", "/compute", null)
 
     /** Asks for an image already sent with [uploadStream] to be upscaled with [model]. */
