@@ -6,6 +6,7 @@
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
+        Topmost="True"
         ShowInTaskbar="True"
         ResizeMode="CanResizeWithGrip"
         Width="1120" Height="680" MinWidth="760" MinHeight="420"
