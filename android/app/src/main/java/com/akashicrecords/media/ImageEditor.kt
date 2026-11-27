@@ -382,7 +382,8 @@ fun ImageEditor(
                 }
                 OutlinedTextField(
                     prompt, { prompt = it }, enabled = !busy, minLines = 2, maxLines = 3,
-                    label = { Text("Ce qu'il faut changer (en anglais de préférence)") },
+                    label = { Text("Ce qu'il faut changer, précisément (l'IA ne voit pas ta peinture)") },
+                    placeholder = { Text("remove the woman with short black hair on the right edge") },
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                 )
                 OutlinedTextField(

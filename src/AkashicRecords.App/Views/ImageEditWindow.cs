@@ -479,7 +479,9 @@ public sealed class ImageEditWindow : Window
         panel.Children.Add(new TextBlock
         {
             Text = "Écris ce qu'il faut changer, en anglais de préférence (« replace the blue ball in her hand with a banana »). " +
-                   "Peins la zone pour dire où (et à quelle taille) ; sans zone, toute l'image suit la phrase. Hors de la zone, l'image ne bouge pas.",
+                   "Peins la zone pour dire où (et à quelle taille) ; sans zone, toute l'image suit la phrase. Hors de la zone, l'image ne bouge pas.\n" +
+                   "L'IA ne voit pas ta peinture : décris précisément ce qu'il faut enlever ou changer (« remove the woman with short black hair " +
+                   "on the right edge of the photo »), pas « la zone surlignée ». Une phrase précise réussit bien plus souvent.",
             TextWrapping = TextWrapping.Wrap, Foreground = Brush("TextMutedBrush"), FontSize = 11.5, Margin = new Thickness(0, 0, 0, 8),
         });
         panel.Children.Add(_prompt);
