@@ -27,7 +27,7 @@ public sealed record HubBackupStatus(string State, string? At, string? LastOkAt,
 public sealed record HubServerDevice(string Name, string? LastSeenAt, string? LastChangeAt, long Changes, bool Revoked, bool Hub);
 public sealed record HubWork(int Queued, int Running, int Failed, int Done);
 public sealed record HubDiskFolder(string Name, long Size, long Files, bool Denied, bool Mount, bool HasChildren);
-public sealed record HubDiskFile(string Name, long Size);
+public sealed record HubDiskFile(string Name, long Size, string Kind = "other", string? Label = null, string? Hash = null);
 public sealed record HubDiskView(string State, string? At, long? Seconds, bool Refreshing, string Root, string Path, long Size, long Files,
     List<HubDiskFolder> Folders, List<HubDiskFile> Largest, long OtherFilesBytes, long SmallFoldersBytes, long SmallFolders);
 public sealed record HubServerStatus(string Version, string Host, string StartedAt, HubServerDisk? Disk, List<HubStorageKind> Storage,
@@ -248,6 +248,13 @@ public sealed class HubClient : IDisposable
     /// verified). False when the hub does not have it (yet).</summary>
     public Task<bool> DownloadFileAsync(string hash, string target, CancellationToken ct = default) =>
         DownloadAsync($"media/{hash}", hash, target, ct);
+
+    /// <summary>The hub's small JPEG preview of a picture (~30 KB); null when it is not a picture or unknown.</summary>
+    public async Task<byte[]?> ThumbAsync(string hash, CancellationToken ct = default)
+    {
+        using var resp = await _http.GetAsync($"media/{hash}/thumb", ct);
+        return resp.IsSuccessStatusCode ? await resp.Content.ReadAsByteArrayAsync(ct) : null;
+    }
 
     private async Task<bool> DownloadAsync(string url, string hash, string target, CancellationToken ct)
     {

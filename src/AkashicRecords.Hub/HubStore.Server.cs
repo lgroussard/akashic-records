@@ -62,3 +62,26 @@ public sealed partial class HubStore
         return map;
     }
 }
+
+public sealed partial class HubStore
+{
+    /// <summary>What some blobs are in the catalogue: hash -> the file's path there (MediaFile rows), for the disk
+    /// browser to show "music/Album/titre.mp3" instead of a 64-character hash.</summary>
+    public Dictionary<string, string> CataloguePaths(IReadOnlyCollection<string> hashes)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (hashes.Count == 0) return map;
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        var names = hashes.Select((h, i) => { cmd.Parameters.AddWithValue($"$h{i}", h); return $"$h{i}"; });
+        cmd.CommandText = $"""
+            SELECT lower(json_extract(payload, '$.Hash')), json_extract(payload, '$.Path') FROM entities
+            WHERE entity_type = 'MediaFile' AND deleted = 0 AND payload IS NOT NULL AND json_valid(payload)
+              AND lower(json_extract(payload, '$.Hash')) IN ({string.Join(",", names)})
+            """;
+        using var r = cmd.ExecuteReader();
+        while (r.Read())
+            if (!r.IsDBNull(0) && !r.IsDBNull(1)) map.TryAdd(r.GetString(0), r.GetString(1).Replace('\\', '/'));
+        return map;
+    }
+}

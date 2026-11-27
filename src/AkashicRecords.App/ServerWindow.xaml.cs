@@ -276,11 +276,71 @@ public partial class ServerWindow : Window
         if (d.Largest.Count > 0)
         {
             var files = Card(LeftPanel, "PLUS GROS FICHIERS DE CE DOSSIER");
-            foreach (var f in d.Largest)
-                files.Children.Add(Row(Faint, f.Name, Size(f.Size), d.Size > 0 ? (double)f.Size / d.Size : 0, clickable: false));
+            foreach (var f in d.Largest) files.Children.Add(FileRow(f));
             if (d.OtherFilesBytes > 0) files.Children.Add(Text($"+ les autres fichiers : {Size(d.OtherFilesBytes)}", 11, Faint));
         }
         Footer.Text = "Lecture seule : la mesure est faite chaque nuit par le mini-PC, ou quand tu la demandes.";
+    }
+
+    // Previews already fetched, by hash (a picture's preview never changes).
+    private static readonly Dictionary<string, System.Windows.Media.Imaging.BitmapImage?> Thumbs = new();
+
+    private static string IconOf(string kind) => kind switch
+    {
+        "image" => "🖼", "music" => "🎵", "book" => "📖", "video" => "🎬", "document" => "📄", "unknown" => "🧩", _ => "📦",
+    };
+
+    // A file: its preview (pictures of the catalogue) or an icon, what it is (its name in Akashic for a blob named
+    // by its hash), where it is in Akashic, its size.
+    private FrameworkElement FileRow(HubDiskFile f)
+    {
+        var grid = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var box = new Border { Width = 44, Height = 44, CornerRadius = new CornerRadius(5), Background = Track, ClipToBounds = true, HorizontalAlignment = HorizontalAlignment.Left };
+        box.Child = new TextBlock { Text = IconOf(f.Kind), FontSize = 18, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Foreground = Muted };
+        grid.Children.Add(box);
+        if (f.Hash is { } hash && f.Kind is "image" or "unknown" or "music") _ = LoadThumb(hash, box);
+
+        var label = f.Label ?? (f.Hash is null ? f.Name : "Fichier du serveur (hors catalogue)");
+        var name = label.Contains('/') ? label[(label.LastIndexOf('/') + 1)..] : label;
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        text.Children.Add(new TextBlock { Text = name, Foreground = Brushes.White, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis });
+        var where = f.Label is { } l && l.Contains('/') ? "dans Akashic : " + l[..l.LastIndexOf('/')] : f.Hash is not null ? f.Name[..12] + "…" : null;
+        if (where is not null) text.Children.Add(new TextBlock { Text = where, Foreground = Faint, FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis });
+        Grid.SetColumn(text, 1); grid.Children.Add(text);
+
+        var size = new TextBlock { Text = Size(f.Size), Foreground = Muted, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
+        Grid.SetColumn(size, 2); grid.Children.Add(size);
+        return new Border { Child = grid, Padding = new Thickness(6, 3, 6, 3) };
+    }
+
+    private static async Task LoadThumb(string hash, Border box)
+    {
+        if (!Thumbs.TryGetValue(hash, out var image))
+        {
+            try
+            {
+                var s = SyncService.Instance.Settings;
+                using var hub = new HubClient(s.HubUrl, s.Token);
+                var bytes = await hub.ThumbAsync(hash);
+                if (bytes is not null)
+                {
+                    image = new System.Windows.Media.Imaging.BitmapImage();
+                    image.BeginInit();
+                    image.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+                    image.DecodePixelWidth = 96;
+                    image.StreamSource = new System.IO.MemoryStream(bytes);
+                    image.EndInit();
+                    image.Freeze();
+                }
+            }
+            catch (Exception) { return; } // hub out of reach: tried again next time
+            Thumbs[hash] = image;
+        }
+        if (image is not null) box.Child = new Image { Source = image, Stretch = Stretch.UniformToFill };
     }
 
     // One line of the browser: colour, name, size, and a thin bar for its share of the folder.
