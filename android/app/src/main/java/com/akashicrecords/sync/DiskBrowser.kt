@@ -56,13 +56,29 @@ private val folderColors = listOf(
 )
 
 @Composable
-internal fun DiskBrowser(path: String, onPath: (String?) -> Unit, onClose: () -> Unit) {
+internal fun DiskBrowser(path: String, onPath: (String?) -> Unit, onClose: () -> Unit, phone: Boolean = false) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var view by remember { mutableStateOf<JSONObject?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    // « Ce téléphone » needs Android's all-files access: asked once, looked at again on the way back from the settings.
+    var access by remember { mutableStateOf(!phone || PhoneDisk.hasAccess(context)) }
+    LaunchedEffect(access) { while (!access) { delay(1_000); access = PhoneDisk.hasAccess(context) } }
 
     suspend fun load(p: String, refresh: Boolean = false) {
+        if (phone) {
+            if (!access) return
+            val v = withContext(Dispatchers.IO) {
+                if (refresh) PhoneDisk.startMeasure(context)
+                var v = PhoneDisk.browse(context, p)
+                // Never measured yet: measure now (the count of files seen shows meanwhile).
+                if (v.optString("state") == "none" && !PhoneDisk.measuring) { PhoneDisk.startMeasure(context); v = v.put("refreshing", true) }
+                v
+            }
+            view = v; error = null
+            if (v.optString("path") != p) onPath(v.optString("path"))
+            return
+        }
         val creds = SyncService.credentials(context) ?: return
         runCatching {
             withContext(Dispatchers.IO) {
@@ -73,11 +89,20 @@ internal fun DiskBrowser(path: String, onPath: (String?) -> Unit, onClose: () ->
         }.onSuccess { view = it; error = null; if (it.optString("path") != p) onPath(it.optString("path")) }
             .onFailure { error = "Serveur injoignable : ${it.message}" }
     }
-    LaunchedEffect(path) { load(path) }
+    LaunchedEffect(path, access) { load(path) }
+    // This phone being measured: the count, every second, then the result.
+    var count by remember { mutableStateOf(0L) }
+    LaunchedEffect(phone && view?.optBoolean("refreshing") == true) {
+        while (phone && view?.optBoolean("refreshing") == true) {
+            delay(1_000)
+            count = PhoneDisk.filesSeen
+            if (!PhoneDisk.measuring) load(path)
+        }
+    }
     // While a new measure runs, look again now and then.
     val refreshing = view?.optBoolean("refreshing") == true
     LaunchedEffect(refreshing) {
-        while (refreshing) { delay(15_000); load(path) }
+        while (refreshing && !phone) { delay(15_000); load(path) }
     }
     val parent = path.trimEnd('/').substringBeforeLast('/', "").ifEmpty { "/" }
     val up = { if (path == "/" || path.isEmpty()) onPath(null) else onPath(parent) }
@@ -87,7 +112,7 @@ internal fun DiskBrowser(path: String, onPath: (String?) -> Unit, onClose: () ->
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { up() }) { Text("‹ Retour") }
                 Text(
-                    if (path == "/") "Disque du serveur" else path.substringAfterLast('/'), fontWeight = FontWeight.Bold,
+                    if (path == "/") (if (phone) "Ce téléphone" else "Disque du serveur") else path.substringAfterLast('/'), fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                 )
                 TextButton(onClick = onClose) { Text("Fermer") }
@@ -96,11 +121,30 @@ internal fun DiskBrowser(path: String, onPath: (String?) -> Unit, onClose: () ->
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
                 Text(path, fontSize = 11.sp, color = Palette.TextFaint, modifier = Modifier.padding(bottom = 8.dp))
                 error?.let { Text(it, fontSize = 12.sp, color = BrowseWarn, modifier = Modifier.padding(bottom = 8.dp)) }
+                if (!access) {
+                    Card("ACCÈS AUX FICHIERS") {
+                        Text(
+                            "Pour mesurer tout le téléphone, Android demande de donner à Akashic « l'accès à tous les fichiers ». " +
+                                "Akashic ne fait que lire les tailles et les noms, rien n'est modifié ni envoyé.",
+                            fontSize = 13.sp, color = Palette.TextMuted,
+                        )
+                        androidx.compose.material3.Button(onClick = { PhoneDisk.askAccess(context) }, modifier = Modifier.padding(top = 10.dp)) {
+                            Text("Ouvrir le réglage")
+                        }
+                    }
+                    return@Column
+                }
+                if (phone && refreshing)
+                    Text(
+                        "Mesure du téléphone en cours : $count fichiers vus. Une minute ou deux, l'écran se met à jour tout seul.",
+                        fontSize = 13.sp, color = Color(0xFFFBBF24), modifier = Modifier.padding(bottom = 8.dp),
+                    )
                 if (v == null) {
                     Text("Lecture…", color = Palette.TextMuted)
                     return@Column
                 }
                 if (v.optString("state") == "none") {
+                    if (phone) return@Column
                     Text(
                         if (refreshing) "Première mesure du disque en cours : quelques minutes. L'écran se mettra à jour tout seul."
                         else "Le disque n'a pas encore été mesuré.",
@@ -115,6 +159,10 @@ internal fun DiskBrowser(path: String, onPath: (String?) -> Unit, onClose: () ->
 
                 Card("CE DOSSIER") {
                     Text("${size(total)} · ${v.optLong("files")} fichiers", fontWeight = FontWeight.Bold)
+                    if (phone) {
+                        val t = v.optLong("disk_total"); val fr = v.optLong("disk_free")
+                        if (t > 0) Text("Stockage : ${size(t - fr)} utilisés sur ${size(t)} · ${size(fr)} libres", fontSize = 12.sp, color = if (fr < t / 10) BrowseWarn else Palette.TextMuted)
+                    }
                     if (v.optBoolean("catalogue") && v.optString("path").endsWith("hors catalogue"))
                         Text("Fichiers que le serveur garde sans fiche dans l'app. Ceux que plus rien n'utilise sont effacés 30 jours après.", fontSize = 12.sp, color = Palette.TextMuted)
                     else if (v.optBoolean("catalogue"))
@@ -141,7 +189,7 @@ internal fun DiskBrowser(path: String, onPath: (String?) -> Unit, onClose: () ->
                         val mount = f.optBoolean("mount")
                         val denied = f.optBoolean("denied")
                         val open = f.optBoolean("has_children") && !mount && !denied
-                        val note = when { mount -> "autre disque, non mesuré"; denied -> "illisible"; else -> size(s) }
+                        val note = when { mount -> "autre disque, non mesuré"; denied -> if (s > 0) size(s) + " · non lisible" else "illisible"; else -> size(s) }
                         val target = (if (path == "/") "" else path) + "/" + f.optString("name")
                         BrowseRow(
                             color = if (s > 0) folderColors[i % folderColors.size] else Palette.TextFaint,
@@ -155,13 +203,14 @@ internal fun DiskBrowser(path: String, onPath: (String?) -> Unit, onClose: () ->
 
                 if (largest.isNotEmpty()) Card("PLUS GROS FICHIERS") {
                     largest.forEach { f ->
-                        FileRow(f)
+                        FileRow(f, local = phone)
                     }
                     val other = v.optLong("other_files_bytes")
                     if (other > 0) Text("+ les autres fichiers : ${size(other)}", fontSize = 11.sp, color = Palette.TextFaint)
                 }
                 Text(
-                    "Lecture seule. Le mini-PC mesure son disque chaque nuit, ou quand tu le demandes.",
+                    if (phone) "Lecture seule. « ${PhoneDisk.UNSEEN} » : ce qu'Android ne laisse lire à aucune appli. Le dossier Android/data est fermé de la même façon."
+                    else "Lecture seule. Le mini-PC mesure son disque chaque nuit, ou quand tu le demandes.",
                     fontSize = 11.sp, color = Palette.TextFaint, modifier = Modifier.padding(vertical = 12.dp),
                 )
             }
@@ -195,7 +244,7 @@ private fun iconOf(kind: String) = when (kind) {
 // A file: its preview (pictures and album covers of the catalogue, from the hub) or an icon, what it is (its name in
 // Akashic for a blob named by its hash), where it is in Akashic, its size.
 @Composable
-private fun FileRow(f: JSONObject) {
+private fun FileRow(f: JSONObject, local: Boolean = false) {
     val context = LocalContext.current
     val kind = f.optString("kind", "other")
     val hash = f.str("hash")
@@ -212,12 +261,19 @@ private fun FileRow(f: JSONObject) {
                     }?.asImageBitmap()
                 }
                 thumb?.let { androidx.compose.foundation.Image(it, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.size(44.dp)) }
+            } else if (local && kind == "image") {
+                // A picture of this phone: read from its file, small.
+                var thumb by remember(label) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+                LaunchedEffect(label) {
+                    thumb = withContext(Dispatchers.IO) { runCatching { com.akashicrecords.media.MediaFiles.decode(java.io.File(label), 120) }.getOrNull() }?.asImageBitmap()
+                }
+                thumb?.let { androidx.compose.foundation.Image(it, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.size(44.dp)) }
             }
         }
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(label.substringAfterLast('/'), fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            val where = if (label.contains('/') && f.str("label") != null) "dans Akashic : " + label.substringBeforeLast('/') else null
+            val where = if (!local && label.contains('/') && f.str("label") != null) "dans Akashic : " + label.substringBeforeLast('/') else null
             if (where != null) Text(where, fontSize = 11.sp, color = Palette.TextFaint, maxLines = 1, overflow = TextOverflow.Ellipsis)
             // Waiting to be removed for good (the hub's clean-up), or kept for shared computing.
             f.str("note")?.let { note ->

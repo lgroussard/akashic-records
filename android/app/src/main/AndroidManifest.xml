@@ -1,8 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Music library: reads the audio files of the chosen folder (Music/Akashic by default). -->
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- Serveur → « Ce téléphone »: the storage measured folder by folder (sizes and names only, read-only). Given by
+         the user in the settings (« Accès à tous les fichiers »), asked only from that screen. -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />

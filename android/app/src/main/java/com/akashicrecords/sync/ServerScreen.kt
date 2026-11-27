@@ -89,6 +89,12 @@ fun ServerScreen(onClose: () -> Unit) {
         DiskBrowser(path, onPath = { browsing = it }, onClose = onClose)
         return
     }
+    // « Ce téléphone »: this phone's own storage, same browser (null = the mini-PC's overview).
+    var phonePath by remember { mutableStateOf<String?>(null) }
+    phonePath?.let { path ->
+        DiskBrowser(path, onPath = { phonePath = it }, onClose = onClose, phone = true)
+        return
+    }
 
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(Modifier.fillMaxSize().background(Palette.AppBg)) {
@@ -96,6 +102,12 @@ fun ServerScreen(onClose: () -> Unit) {
                 TextButton(onClick = onClose) { Text("Fermer") }
                 Text("Serveur", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
                 TextButton(onClick = { scope.launch { refresh() } }) { Text("↻") }
+            }
+            // Which storage: the mini-PC (this screen) or this phone.
+            Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), horizontalArrangement = Arrangement.Center) {
+                androidx.compose.material3.FilterChip(selected = true, onClick = {}, label = { Text("Mini-PC") })
+                Spacer(Modifier.width(8.dp))
+                androidx.compose.material3.FilterChip(selected = false, onClick = { phonePath = "/" }, label = { Text("Ce téléphone") })
             }
             val s = status
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
