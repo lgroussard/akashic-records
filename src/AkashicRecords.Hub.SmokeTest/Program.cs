@@ -1067,6 +1067,16 @@ await Scenario("19. Parcourir le disque : les fichiers du catalogue montrent ce 
         "fichier du serveur absent du catalogue : marque 'unknown'");
     Check(files["chanson.mp3"].GetProperty("kind").GetString() == "music" && files["chanson.mp3"].GetProperty("hash").ValueKind == JsonValueKind.Null,
         "fichier ordinaire : type d'apres son extension");
+
+    // The hub's own blobs folder reads like the catalogue, not by hash.
+    DiskIndex.Run(hub.DataDir, Path.Combine(hub.DataDir, DiskIndex.FileName));
+    var blobsView = Json(await pc.Http.GetAsync("/server/disk?path=/blobs"));
+    Check(blobsView.GetProperty("catalogue").GetBoolean() && blobsView.GetProperty("folders").EnumerateArray().Any(f => f.GetProperty("name").GetString() == "media"),
+        "dossier blobs : range comme dans Akashic (media, music...), pas par empreinte");
+    var archive = Json(await pc.Http.GetAsync("/server/disk?path=/blobs/media/archive"));
+    var first = archive.GetProperty("largest")[0];
+    Check(archive.GetProperty("path").GetString() == "/blobs/media/archive" && first.GetProperty("name").GetString() == "Plage.HEIC" && first.GetProperty("hash").GetString() == photo,
+        "on descend dans le catalogue ; les fichiers gardent leur apercu");
 });
 
 Console.WriteLine($"\n{passed} verifications reussies, {failures} en echec.");

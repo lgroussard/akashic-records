@@ -85,3 +85,26 @@ public sealed partial class HubStore
         return map;
     }
 }
+
+public sealed partial class HubStore
+{
+    public sealed record CatalogueFile(string Path, long Size, string Hash);
+
+    /// <summary>Every file of the catalogue (MediaFile rows): its path in Akashic, size and hash. For the disk
+    /// browser, which shows the blobs folder arranged like this instead of by hash.</summary>
+    public List<CatalogueFile> CatalogueFiles()
+    {
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = """
+            SELECT json_extract(payload, '$.Path'), CAST(json_extract(payload, '$.Size') AS INTEGER), lower(json_extract(payload, '$.Hash'))
+            FROM entities WHERE entity_type = 'MediaFile' AND deleted = 0 AND payload IS NOT NULL AND json_valid(payload)
+            """;
+        using var r = cmd.ExecuteReader();
+        var list = new List<CatalogueFile>();
+        while (r.Read())
+            if (!r.IsDBNull(0) && !r.IsDBNull(2))
+                list.Add(new CatalogueFile(r.GetString(0).Replace('\\', '/').Trim('/'), r.IsDBNull(1) ? 0 : r.GetInt64(1), r.GetString(2)));
+        return list;
+    }
+}
