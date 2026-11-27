@@ -1,0 +1,19 @@
+[Unit]
+Description=Akashic hub: measure the disk folder by folder (for the apps' "Serveur" screen)
+After=local-fs.target
+
+[Service]
+Type=oneshot
+# As root, to see every folder; read-only everywhere except where the result goes (DiskIndex.cs).
+ExecStart=/opt/akashic-hub/AkashicRecords.Hub index-disk / /var/lib/akashic-hub/disk-index.json
+ExecStopPost=/bin/rm -f /var/lib/akashic-hub/disk-index.request
+# Anything .NET wants to write for itself goes to its own folder (not the hub's: root-owned files there would
+# get in the hub's way). The rest of the disk is read-only.
+StateDirectory=akashic-disk-index
+Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR=/var/lib/akashic-disk-index HOME=/var/lib/akashic-disk-index
+Nice=15
+IOSchedulingClass=idle
+ProtectSystem=strict
+ReadWritePaths=/var/lib/akashic-hub
+PrivateTmp=true
+NoNewPrivileges=true

@@ -971,5 +971,41 @@ await Scenario("16. Ecran Serveur : place, sauvegarde, appareils, travaux", asyn
     Check((await hub.Anonymous().GetAsync("/server")).StatusCode == HttpStatusCode.Unauthorized, "sans jeton -> 401");
 });
 
+await Scenario("18. Ecran Serveur : parcourir le disque dossier par dossier", async hub =>
+{
+    JsonElement Json(HttpResponseMessage r) => JsonDocument.Parse(r.Content.ReadAsStringAsync().Result).RootElement;
+    var phone = await hub.Device("phone");
+    var none = Json(await phone.Http.GetAsync("/server/disk"));
+    Check(none.GetProperty("state").GetString() == "none", "pas encore d'inventaire -> 'none'");
+
+    // A small disk: big folder with a sub-folder, a tiny folder (folded), loose files.
+    var disk = Path.Combine(hub.DataDir, "disque");
+    Directory.CreateDirectory(Path.Combine(disk, "films", "2024"));
+    Directory.CreateDirectory(Path.Combine(disk, "petit"));
+    void Make(string rel, int mb) { using var f = System.IO.File.Create(Path.Combine(disk, rel)); f.SetLength(mb * 1024L * 1024); }
+    Make("films/a.mkv", 5); Make("films/2024/b.mkv", 3); Make("gros.iso", 2);
+    System.IO.File.WriteAllText(Path.Combine(disk, "petit", "note.txt"), "x");
+    DiskIndex.Run(disk, Path.Combine(hub.DataDir, DiskIndex.FileName));
+
+    var top = Json(await phone.Http.GetAsync("/server/disk"));
+    var folders = top.GetProperty("folders").EnumerateArray().ToList();
+    Check(top.GetProperty("state").GetString() == "ready" && top.GetProperty("size").GetInt64() == 10L * 1024 * 1024 + 1,
+        "racine : taille totale de tout ce qui est dessous");
+    Check(folders.Count == 1 && folders[0].GetProperty("name").GetString() == "films" && folders[0].GetProperty("size").GetInt64() == 8L * 1024 * 1024
+          && top.GetProperty("small_folders").GetInt64() == 1,
+        "dossiers du plus gros au plus petit ; les tout petits regroupes");
+    Check(top.GetProperty("largest").EnumerateArray().First().GetProperty("name").GetString() == "gros.iso", "plus gros fichiers du dossier");
+
+    var films = Json(await phone.Http.GetAsync("/server/disk?path=/films"));
+    Check(films.GetProperty("path").GetString() == "/films" && films.GetProperty("folders")[0].GetProperty("name").GetString() == "2024",
+        "on entre dans un dossier, puis dans ses sous-dossiers");
+    var lost = Json(await phone.Http.GetAsync("/server/disk?path=/films/disparu"));
+    Check(lost.GetProperty("path").GetString() == "/films", "dossier disparu depuis : on reste au plus profond connu");
+
+    var r = Json(await phone.Http.PostAsync("/server/disk/refresh", null));
+    Check(r.GetProperty("refreshing").GetBoolean() && System.IO.File.Exists(Path.Combine(hub.DataDir, DiskIndex.RequestName)),
+        "Actualiser : le hub depose la demande pour la tache systeme");
+});
+
 Console.WriteLine($"\n{passed} verifications reussies, {failures} en echec.");
 return failures == 0 ? 0 : 1;

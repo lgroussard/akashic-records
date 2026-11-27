@@ -13,7 +13,8 @@ if [ "$(id -u)" -ne 0 ]; then echo "A lancer avec sudo : sudo bash uninstall.sh"
 if systemctl list-unit-files akashic-hub.service >/dev/null 2>&1; then
     systemctl disable --now akashic-hub 2>/dev/null || true
 fi
-rm -f /etc/systemd/system/akashic-hub.service
+for u in akashic-disk-index.timer akashic-disk-index.path; do systemctl disable --now $u 2>/dev/null || true; done
+rm -f /etc/systemd/system/akashic-hub.service /etc/systemd/system/akashic-disk-index.{service,timer,path}
 systemctl daemon-reload
 
 # Only remove a folder that really is a hub install.

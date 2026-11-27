@@ -1,0 +1,10 @@
+[Unit]
+Description=Akashic hub: measure the disk when an app asks ("Actualiser" in the Serveur screen)
+
+[Path]
+# The hub writes this file (POST /server/disk/refresh); the service removes it once done.
+PathExists=/var/lib/akashic-hub/disk-index.request
+Unit=akashic-disk-index.service
+
+[Install]
+WantedBy=paths.target

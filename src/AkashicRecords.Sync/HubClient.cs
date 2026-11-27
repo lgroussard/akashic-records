@@ -26,6 +26,10 @@ public sealed record HubStorageKind(string Kind, long Files, long Bytes);
 public sealed record HubBackupStatus(string State, string? At, string? LastOkAt, string? Message, long? Bytes, long? Files, long? DiskTotal, long? DiskFree, long? Seconds);
 public sealed record HubServerDevice(string Name, string? LastSeenAt, string? LastChangeAt, long Changes, bool Revoked, bool Hub);
 public sealed record HubWork(int Queued, int Running, int Failed, int Done);
+public sealed record HubDiskFolder(string Name, long Size, long Files, bool Denied, bool Mount, bool HasChildren);
+public sealed record HubDiskFile(string Name, long Size);
+public sealed record HubDiskView(string State, string? At, long? Seconds, bool Refreshing, string Root, string Path, long Size, long Files,
+    List<HubDiskFolder> Folders, List<HubDiskFile> Largest, long OtherFilesBytes, long SmallFoldersBytes, long SmallFolders);
 public sealed record HubServerStatus(string Version, string Host, string StartedAt, HubServerDisk? Disk, List<HubStorageKind> Storage,
     long BlobBytes, long BlobFiles, HubBackupStatus Backup, List<HubServerDevice> Devices, Dictionary<string, long> Entities, HubWork Downloads, HubWork Compute);
 
@@ -120,6 +124,13 @@ public sealed class HubClient : IDisposable
 
     public async Task RemoveZoneAsync(string id, CancellationToken ct = default) =>
         await Ensure(await Send(() => _http.DeleteAsync($"downloads/zones/{id}", ct)), ct);
+
+    /// <summary>One folder of the server's disk (measured apart, see the hub's DiskIndex.cs); null path = the root.</summary>
+    public async Task<HubDiskView> ServerDiskAsync(string? path, CancellationToken ct = default) =>
+        await Read<HubDiskView>(await Send(() => _http.GetAsync("server/disk?path=" + Uri.EscapeDataString(path ?? ""), ct)), ct);
+
+    public async Task<HubDiskView> RefreshServerDiskAsync(CancellationToken ct = default) =>
+        await Read<HubDiskView>(await Send(() => _http.PostAsJsonAsync("server/disk/refresh", new { }, Wire, ct)), ct);
 
     public async Task<HubServerStatus> ServerAsync(CancellationToken ct = default) =>
         await Read<HubServerStatus>(await Send(() => _http.GetAsync("server", ct)), ct);
