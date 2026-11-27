@@ -108,11 +108,13 @@ public partial class UpscaleWindow : Window
 
         // Models: keep the choice across refreshes.
         var chosen = (ModelBox.SelectedItem as ComboBoxItem)?.Tag as string;
-        var names = b?.Models.Select(m => m.Name).ToList() ?? new();
+        // Upscale models only: the AI edits (FLUX Kontext) are asked from the image editor, not dropped here.
+        var upscalers = b?.Models.Where(m => m.Name != ComfyUi.Model).ToList() ?? new();
+        var names = upscalers.Select(m => m.Name).ToList();
         if (!names.SequenceEqual(ModelBox.Items.OfType<ComboBoxItem>().Select(i => (string)i.Tag)))
         {
             ModelBox.Items.Clear();
-            foreach (var m in b?.Models ?? new())
+            foreach (var m in upscalers)
                 ModelBox.Items.Add(new ComboBoxItem { Content = m.Label, Tag = m.Name });
             ModelBox.SelectedItem = ModelBox.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == chosen)
                                     ?? ModelBox.Items.OfType<ComboBoxItem>().FirstOrDefault();
@@ -165,6 +167,32 @@ public partial class UpscaleWindow : Window
         WorkerText.Text = !c.Worker ? "Ce PC ne prend pas de travail : le serveur ou un autre appareil s'en charge."
             : c.Current is not null ? $"En cours ici : {c.Current}"
             : c.Problem ?? "Prêt : ce PC prend les demandes avec sa carte graphique. Le programme et les modèles viennent du serveur.";
+
+        var missing = ComfyUi.Instance.Missing();
+        ComfyText.Foreground = missing is null ? Muted : Warn;
+        ComfyText.Text = missing is null
+            ? $"Prêt : ce PC fait les modifications par phrase, les remplacements et les restaurations avec {c.ComfyUiDir}."
+            : missing + " Sans lui, ces demandes attendent un PC qui l'a.";
+    }
+
+    private void ComfyButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = "Dossier de ComfyUI portable (celui qui contient python_embeded et ComfyUI)",
+            InitialDirectory = ComputeService.Instance.ComfyUiDir ?? "",
+        };
+        if (dialog.ShowDialog(this) == true) ComputeService.Instance.SetComfyUiDir(dialog.FolderName);
+    }
+
+    private static string EditPrompt(HubComputeJob j)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(j.Params ?? "{}");
+            return doc.RootElement.TryGetProperty("prompt", out var p) ? p.GetString() ?? "" : "";
+        }
+        catch (System.Text.Json.JsonException) { return ""; }
     }
 
     private Border Card(HubComputeJob j)
@@ -180,6 +208,12 @@ public partial class UpscaleWindow : Window
         var panel = new StackPanel();
         panel.Children.Add(new TextBlock { Text = j.InputName, Foreground = Brushes.White, FontSize = 12, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
         panel.Children.Add(new TextBlock { Text = $"{Label(j.Model)} · {j.AddedAt.Replace('T', ' ')[..16]}", Foreground = Muted, FontSize = 10.5 });
+        if (j.Kind is not null)
+            panel.Children.Add(new TextBlock
+            {
+                Text = j.Kind == "restore" ? "Restauration" : "« " + EditPrompt(j) + " »",
+                Foreground = Muted, FontSize = 10.5, FontStyle = FontStyles.Italic, TextWrapping = TextWrapping.Wrap,
+            });
         panel.Children.Add(new TextBlock { Text = status, Foreground = color, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) });
 
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };

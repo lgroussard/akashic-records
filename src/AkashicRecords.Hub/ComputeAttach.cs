@@ -44,7 +44,7 @@ public sealed class ComputeAttach(HubStore store, BlobStore blobs, HubOptions op
 
     /// <summary>The picture of a row, ready to be upscaled: its blob (made readable first if the upscaler cannot
     /// read it, e.g. an iPhone HEIC), its name and size. Throws InvalidOperationException with a message for the user.</summary>
-    public async Task<(string Hash, string Name, long Size)> InputAsync(string kind, string entityId, CancellationToken ct)
+    public async Task<(string Hash, string Name, long Size)> InputAsync(string kind, string entityId, CancellationToken ct, bool refuseUpscaled = true)
     {
         if (!Kinds.TryGetValue(kind, out var field)) throw new InvalidOperationException("Ce type d'image ne peut pas être agrandi.");
         var payload = store.Current(kind, entityId) ?? throw new InvalidOperationException("Cette image n'est pas (encore) sur le serveur : synchronise d'abord.");
@@ -55,7 +55,7 @@ public sealed class ComputeAttach(HubStore store, BlobStore blobs, HubOptions op
 
         var name = Path.GetFileName(path.Replace('\\', '/'));
         // Upscaling an upscaled picture again adds next to nothing (the model works from detail it made up): refused.
-        if (AlreadyUpscaled.IsMatch(RootName(name)) || (kind == "Photo" && InAgrandiesAlbum(payload)))
+        if (refuseUpscaled && (AlreadyUpscaled.IsMatch(RootName(name)) || (kind == "Photo" && InAgrandiesAlbum(payload))))
             throw new InvalidOperationException("Cette image est déjà agrandie : l'agrandir encore n'ajouterait presque rien.");
         if (OnnxUpscaler.InputExtensions.Contains(Path.GetExtension(name).ToLowerInvariant()))
             return (hash, name, new FileInfo(blobs.PathOf(hash)).Length);
@@ -91,9 +91,9 @@ public sealed class ComputeAttach(HubStore store, BlobStore blobs, HubOptions op
         if (job.ResultHash is null) return;
         try
         {
-            var path = job.AttachType is not null && job.AttachId is not null
-                ? Add(job.AttachType, job.AttachId, job.ResultHash)
-                : AddToAlbum(job);
+            var path = job.AttachType is null || job.AttachId is null ? AddToAlbum(job)
+                : job.Kind is null ? Add(job.AttachType, job.AttachId, job.ResultHash)
+                : ReplaceAsEdit(job.AttachType, job.AttachId, job.ResultHash);
             jobs.Attached(job.Id, path, null);
         }
         catch (Exception ex)
@@ -216,6 +216,53 @@ public sealed class ComputeAttach(HubStore store, BlobStore blobs, HubOptions op
             new Mutation(Guid.NewGuid().ToString(), kind, Guid.NewGuid().ToString(), 0, entity, false),
         ]);
         if (result.Results.Any(r => r.Status == MutationStatus.Conflict)) throw new InvalidOperationException("Le catalogue a refusé l'image.");
+        return newPath;
+    }
+
+    /// <summary>
+    /// An AI edit or restore of a picture of the app: the same row now shows the result, exactly as an edit made in the
+    /// apps' editor (ImageEditing on the PC, ImageEdits on the phone): a new JPEG next to the current file, named
+    /// &lt;root&gt;.edit-&lt;8 hex&gt;.jpg, the original left untouched, so « Revenir à l'original » and « Rendre définitif »
+    /// work on it as on any edit.
+    /// </summary>
+    private string ReplaceAsEdit(string kind, string entityId, string resultHash)
+    {
+        var field = Kinds[kind];
+        var current = store.Current(kind, entityId) ?? throw new InvalidOperationException("L'image a été supprimée entre-temps.");
+        var path = current.GetProperty(field).GetString()!;
+        var (hash, size) = Jpeg(resultHash);
+        int width, height;
+        using (var codec = SKCodec.Create(blobs.PathOf(hash))) (width, height) = (codec.Info.Width, codec.Info.Height);
+
+        var cut = path.LastIndexOfAny(['/', '\\']);
+        var folder = cut >= 0 ? path[..(cut + 1)] : "";
+        var root = RootName(path[(cut + 1)..]);
+        string newPath;
+        do newPath = folder + root + ".edit-" + Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(4)).ToLowerInvariant() + ".jpg";
+        while (store.FileHash(newPath) is not null);
+
+        var row = JsonNode.Parse(current.GetRawText())!.AsObject();
+        row[field] = newPath;
+        switch (kind)
+        {
+            case "RefImage":
+                row["Width"] = width;
+                row["Height"] = height;
+                break;
+            case "CanvasElement":
+                // The box on the canvas keeps its width and takes the new picture's shape.
+                if (row["Width"] is JsonValue wv && wv.TryGetValue<double>(out var boxWidth) && boxWidth > 0)
+                    row["Height"] = boxWidth * height / width;
+                break;
+        }
+
+        var mediaFile = JsonSerializer.SerializeToElement(new Dictionary<string, object?> { ["Path"] = newPath.Replace('\\', '/'), ["Hash"] = hash, ["Size"] = size });
+        var result = store.Push(HubStore.HubDevice, [
+            new Mutation(Guid.NewGuid().ToString(), "MediaFile", Guid.NewGuid().ToString(), 0, mediaFile, false),
+            new Mutation(Guid.NewGuid().ToString(), kind, entityId, store.Rev(kind, entityId), JsonSerializer.SerializeToElement(row), false),
+        ]);
+        if (result.Results.Any(r => r.Status == MutationStatus.Conflict))
+            throw new InvalidOperationException("L'image a changé pendant le travail : la version modifiée n'a pas été posée (elle reste dans la liste).");
         return newPath;
     }
 

@@ -27,6 +27,13 @@ public sealed class ComputeCatalog(HubOptions options)
         ["nomos-webphoto-4x"] = ("NomosWebPhoto", "Net et contrasté, pensé pour les photos du web compressées."),
     };
 
+    /// <summary>
+    /// FLUX Kontext, the editing model ("edit" and "restore" jobs: change a picture following a sentence, restore it).
+    /// Not a file of this catalogue yet: a PC runs it with its own ComfyUI (which holds its models) and names it when
+    /// it asks for work. The hub never runs it (far too heavy for its processor), so such jobs wait for that PC.
+    /// </summary>
+    public const string Kontext = "flux-kontext";
+
     public string ModelsDir => Path.Combine(options.ComputeDir, "models");
 
     public string ModelPath(string name) => Path.Combine(ModelsDir, name + ".onnx");

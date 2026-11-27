@@ -128,6 +128,16 @@
                             <TextBlock x:Name="WorkerText" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
                         </StackPanel>
                     </Border>
+
+                    <!-- The AI edits (FLUX Kontext) run through a ComfyUI on this computer. -->
+                    <Border Background="#20203A" CornerRadius="8" Padding="10" Margin="0,10,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Modifications par IA (FLUX Kontext)" Foreground="White" FontSize="12"/>
+                            <TextBlock x:Name="ComfyText" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,8"/>
+                            <Button x:Name="ComfyButton" Content="Choisir le dossier ComfyUI…" HorizontalAlignment="Left" Padding="10,4"
+                                    Click="ComfyButton_OnClick" Cursor="Hand"/>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
 
                 <!-- The jobs, newest first. -->

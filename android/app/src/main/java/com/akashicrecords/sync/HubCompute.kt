@@ -151,6 +151,42 @@ object HubCompute {
     suspend fun upscaleNote(context: Context, table: String, localId: Long): String =
         requestFrom(context, table, localId) ?: "Envoyée : la version ×4 arrivera à côté de l'original."
 
+    /**
+     * Asks for an AI edit of a picture of the app (FLUX Kontext, done by a PC with ComfyUI): [kind] "edit" (a sentence,
+     * optionally [mask] — white where the change goes, any size — and words naming the zone, [erase] = empty the zone
+     * first) or "restore". The result replaces the picture as an edit (« Revenir à l'original » stays possible) and
+     * reaches this phone at a sync. Returns null when it went, else a message for the user.
+     */
+    suspend fun requestEdit(
+        context: Context, table: String, localId: Long, kind: String, prompt: String?, mask: Bitmap?, maskText: String?, erase: Boolean,
+    ): String? = withContext(Dispatchers.IO) {
+        if (table !in inPlaceKinds) return@withContext "Ce type d'image ne peut pas être modifié par l'IA."
+        val hub = hub(context) ?: return@withContext "Ce téléphone n'est pas appairé au serveur (Réglages → Synchronisation)."
+        var syncId = syncIdOf(context, table, localId)
+        if (syncId == null) {
+            SyncService.run(context)
+            syncId = syncIdOf(context, table, localId) ?: return@withContext "Cette image n'a pas encore pu être envoyée au serveur : réessaie dans un moment."
+        }
+        try {
+            var maskHash: String? = null
+            if (mask != null) {
+                val temp = File(dir(context), "mask-" + System.nanoTime() + ".png")
+                try {
+                    temp.outputStream().use { mask.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                    maskHash = sha256(temp)
+                    if (!hub.hasFile(maskHash)) hub.uploadFile(temp, maskHash)
+                } finally {
+                    temp.delete()
+                }
+            }
+            hub.addComputeEdit(table, syncId, kind, prompt, maskHash, maskText, erase)
+            refresh(context)
+            null
+        } catch (e: Exception) {
+            e.message ?: e.javaClass.simpleName
+        }
+    }
+
     /** The id a row has on the hub (sync_map), or null when it has not been synchronised yet. */
     private fun syncIdOf(context: Context, table: String, localId: Long): String? = try {
         com.akashicrecords.data.AkashicDatabase.get(context.applicationContext).openHelper.readableDatabase

@@ -561,8 +561,8 @@ await Scenario("14. Calcul partage : le hub garde les modeles et la liste, les a
 
     var board = Json(await pc.Http.GetAsync("/compute"));
     var names = board.GetProperty("models").EnumerateArray().Select(m => m.GetProperty("name").GetString()).ToList();
-    Check(names.SequenceEqual(new[] { "nomos-webphoto-4x", "autre-4x" }) && board.GetProperty("models")[0].GetProperty("label").GetString() == "NomosWebPhoto",
-        "les modeles du hub sont listes (fichiers .onnx), le modele connu d'abord, avec son nom lisible");
+    Check(names.SequenceEqual(new[] { "nomos-webphoto-4x", "autre-4x", "flux-kontext" }) && board.GetProperty("models")[0].GetProperty("label").GetString() == "NomosWebPhoto",
+        "les modeles du hub sont listes (fichiers .onnx, le connu d'abord, avec son nom lisible), puis Kontext (fait par un PC)");
 
     var manifest = Json(await pc.Http.GetAsync("/compute/manifest"));
     var file = manifest.GetProperty("models")[0].GetProperty("files")[0];
@@ -833,6 +833,96 @@ await Scenario("17. Images agrandies depuis l'outil : rangees dans l'album Agran
     }
     Check(placed is not null && Live("Photo").Count(p => p.GetProperty("Title").GetString() == "ancienne") == 1 && Live("PhotoAlbum").Count == 1,
         "resultat d'avant l'album : range une fois au demarrage du hub, dans le meme album");
+});
+
+await Scenario("18. Modifier par IA : le resultat devient une modification de la meme image", async hub =>
+{
+    hub.EntityTypes.AddRange(["MediaFile", "Photo", "PhotoAlbum", "RefImage"]);
+    await hub.RestartAsync();
+    var pc = await hub.Device("pc");
+    var phone = await hub.Device("phone");
+    var models = Path.Combine(hub.DataDir, "compute", "models");
+    Directory.CreateDirectory(models);
+    File.WriteAllText(Path.Combine(models, "nomos-webphoto-4x.onnx"), "fake model");
+
+    byte[] Picture(SkiaSharp.SKEncodedImageFormat format, int w, int h)
+    {
+        using var bmp = new SkiaSharp.SKBitmap(w, h);
+        bmp.Erase(SkiaSharp.SKColors.SkyBlue);
+        using var img = SkiaSharp.SKImage.FromBitmap(bmp);
+        return img.Encode(format, 90).ToArray();
+    }
+    JsonElement Json(HttpResponseMessage r) => JsonDocument.Parse(r.Content.ReadAsStringAsync().Result).RootElement;
+    async Task<string> Upload(SimDevice d, byte[] bytes) =>
+        (await (await d.Http.PostAsync("/media", new ByteArrayContent(bytes))).Content.ReadFromJsonAsync<MediaResponse>(SimDevice.Wire))!.Hash;
+    Mutation Row(string type, string id, object payload) =>
+        new(Guid.NewGuid().ToString(), type, id, 0, JsonSerializer.SerializeToElement(payload), false);
+
+    var original = Picture(SkiaSharp.SKEncodedImageFormat.Jpeg, 20, 30);
+    var originalHash = await Upload(pc, original);
+    var photo = Guid.NewGuid().ToString();
+    var refImage = Guid.NewGuid().ToString();
+    await pc.PushRawAsync([
+        Row("MediaFile", Guid.NewGuid().ToString(), new { Path = "media/archive/piscine-x4.jpg", Hash = originalHash, Size = original.Length }),
+        Row("Photo", photo, new { ImagePath = @"media\archive\piscine-x4.jpg", Title = "Piscine", Description = "", TakenDate = (string?)null, Tags = "", IsFavorite = 0, AlbumId = (string?)null, ImportedAt = "2026-11-27T10:00:00.0000000" }),
+        Row("RefImage", refImage, new { ImagePath = "media/references/pose.jpg.edit-0badf00d.jpg", Title = "Pose", Width = 20, Height = 30, CreatedAt = "2026-11-27T10:00:00.0000000" }),
+        Row("MediaFile", Guid.NewGuid().ToString(), new { Path = "media/references/pose.jpg.edit-0badf00d.jpg", Hash = originalHash, Size = original.Length }),
+    ]);
+
+    // Bad requests: no sentence, unknown mask, unknown kind.
+    var noPrompt = await phone.Http.PostAsJsonAsync("/compute/jobs/from", new { entity_type = "Photo", entity_id = photo, kind = "edit", prompt = "  " }, SimDevice.Wire);
+    var badMask = await phone.Http.PostAsJsonAsync("/compute/jobs/from", new { entity_type = "Photo", entity_id = photo, kind = "edit", prompt = "add a banana", mask_hash = new string('e', 64) }, SimDevice.Wire);
+    var badKind = await phone.Http.PostAsJsonAsync("/compute/jobs/from", new { entity_type = "Photo", entity_id = photo, kind = "paint" }, SimDevice.Wire);
+    Check(noPrompt.StatusCode == HttpStatusCode.BadRequest && badMask.StatusCode == HttpStatusCode.BadRequest && badKind.StatusCode == HttpStatusCode.BadRequest,
+        "demande IA sans phrase, avec un masque inconnu ou d'un type inconnu : 400");
+
+    // An edit with a mask, asked from the phone. An upscaled picture can be edited (only upscaling it again is refused).
+    var maskHash = await Upload(phone, Picture(SkiaSharp.SKEncodedImageFormat.Png, 10, 15));
+    var asked = await phone.Http.PostAsJsonAsync("/compute/jobs/from", new
+    {
+        entity_type = "Photo", entity_id = photo, kind = "edit", prompt = "A ripe banana held firmly in her hand", mask_hash = maskHash, mask_text = "hand", erase = false,
+    }, SimDevice.Wire);
+    var job = Json(asked);
+    var p = JsonDocument.Parse(job.GetProperty("params").GetString()!).RootElement;
+    Check(asked.StatusCode == HttpStatusCode.Created && job.GetProperty("model").GetString() == "flux-kontext" && job.GetProperty("kind").GetString() == "edit"
+          && p.GetProperty("prompt").GetString() == "A ripe banana held firmly in her hand" && p.GetProperty("mask_hash").GetString() == maskHash
+          && p.GetProperty("mask_text").GetString() == "hand" && !p.GetProperty("erase").GetBoolean(),
+        "demande IA acceptee : modele flux-kontext, phrase, masque, mots et choix d'effacement gardes");
+
+    // Only a device that runs Kontext gets it; the hub never takes it.
+    Check((await pc.Http.PostAsJsonAsync("/compute/claim", new { name = "LOHAN", rid = "win-x64", models = new[] { "nomos-webphoto-4x" } }, SimDevice.Wire)).StatusCode == HttpStatusCode.NoContent,
+        "un appareil sans Kontext ne recoit pas la demande IA");
+    var claimed = await pc.Http.PostAsJsonAsync("/compute/claim", new { name = "LOHAN", rid = "win-x64", models = new[] { "nomos-webphoto-4x", "flux-kontext" } }, SimDevice.Wire);
+    var board = Json(await phone.Http.GetAsync("/compute"));
+    var kontext = board.GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == "flux-kontext");
+    Check(claimed.StatusCode == HttpStatusCode.OK && kontext.GetProperty("runners").EnumerateArray().Any(r => r.GetString() == "LOHAN"),
+        "le PC avec Kontext la prend, et le tableau dit qui sait la faire");
+
+    var resultHash = await Upload(pc, Picture(SkiaSharp.SKEncodedImageFormat.Png, 40, 60));
+    var done = Json(await pc.Http.PostAsJsonAsync($"/compute/jobs/{job.GetProperty("id").GetString()}/complete", new { result_hash = resultHash, seconds = 80.0 }, SimDevice.Wire));
+    var path = done.GetProperty("attached_path").GetString()!;
+    Check(System.Text.RegularExpressions.Regex.IsMatch(path, @"^media\\archive\\piscine-x4\.jpg\.edit-[0-9a-f]{8}\.jpg$") && done.GetProperty("attach_error").ValueKind == JsonValueKind.Null,
+        "resultat pose comme une modification : <nom>.edit-<8 hex>.jpg a cote de l'original");
+    var photos = hub.Store.Snapshot("Photo", null, null, 50).Entities.Where(e => !e.Deleted).ToList();
+    var row = photos.Single();
+    Check(row.EntityId == photo && row.Payload!.Value.GetProperty("ImagePath").GetString() == path && row.Rev == 2
+          && row.Payload.Value.GetProperty("Title").GetString() == "Piscine",
+        "la meme photo pointe vers la version modifiee (pas de nouvelle photo, le reste de la ligne intact)");
+    var file = hub.Store.Snapshot("MediaFile", null, null, 50).Entities.Select(e => e.Payload!.Value)
+        .Single(f => f.GetProperty("Path").GetString() == path.Replace('\\', '/'));
+    var jpeg = await phone.Http.GetByteArrayAsync("/media/" + file.GetProperty("Hash").GetString());
+    Check(jpeg[0] == 0xFF && jpeg[1] == 0xD8 && hub.Store.FileHash("media/archive/piscine-x4.jpg") == originalHash,
+        "le fichier modifie est sur le hub en JPEG, l'original reste liste (« Revenir a l'original » possible)");
+
+    // A restore of an already edited reference picture: same root name, new size written in the row.
+    var restore = Json(await phone.Http.PostAsJsonAsync("/compute/jobs/from", new { entity_type = "RefImage", entity_id = refImage, kind = "restore" }, SimDevice.Wire));
+    await pc.Http.PostAsJsonAsync("/compute/claim", new { name = "LOHAN", rid = "win-x64", models = new[] { "flux-kontext" } }, SimDevice.Wire);
+    var restored = Json(await pc.Http.PostAsJsonAsync($"/compute/jobs/{restore.GetProperty("id").GetString()}/complete", new { result_hash = resultHash, seconds = 90.0 }, SimDevice.Wire));
+    var refRow = hub.Store.Snapshot("RefImage", null, null, 50).Entities.Single(e => e.EntityId == refImage).Payload!.Value;
+    Check(System.Text.RegularExpressions.Regex.IsMatch(restored.GetProperty("attached_path").GetString()!, @"^media/references/pose\.jpg\.edit-[0-9a-f]{8}\.jpg$")
+          && restore.GetProperty("params").ValueKind == JsonValueKind.Null
+          && refRow.GetProperty("Width").GetInt32() == 40 && refRow.GetProperty("Height").GetInt32() == 60,
+        "restauration d'une image deja modifiee : nommee d'apres son premier nom, nouvelle taille dans la ligne");
 });
 
 await Scenario("16. Ecran Serveur : place, sauvegarde, appareils, travaux", async hub =>

@@ -30,10 +30,13 @@ public sealed class ComputeService
     private DateTime _pausedUntil = DateTime.MinValue;
     private bool _started;
 
-    private ComputeService() => Worker = LoadWorkerSetting();
+    private ComputeService() => (Worker, ComfyUiDir) = LoadSettings();
 
     /// <summary>Does this computer take jobs? (The window's checkbox; on by default.)</summary>
     public bool Worker { get; private set; }
+
+    /// <summary>The portable ComfyUI folder used for the AI edits (FLUX Kontext), or null: chosen in the window.</summary>
+    public string? ComfyUiDir { get; private set; }
 
     /// <summary>What this computer is doing now, for the window; null when idle.</summary>
     public string? Current { get; private set; }
@@ -52,25 +55,41 @@ public sealed class ComputeService
     public void SetWorker(bool on)
     {
         Worker = on;
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);
-            File.WriteAllText(_settingsPath, JsonSerializer.Serialize(new { Worker = on }));
-        }
-        catch (IOException) { /* the choice still holds for this run */ }
+        SaveSettings();
         if (on) { _pausedUntil = DateTime.MinValue; Problem = null; }
         StateChanged?.Invoke();
     }
 
-    private bool LoadWorkerSetting()
+    public void SetComfyUiDir(string? dir)
+    {
+        ComfyUiDir = string.IsNullOrWhiteSpace(dir) ? null : dir;
+        SaveSettings();
+        _pausedUntil = DateTime.MinValue;
+        StateChanged?.Invoke();
+    }
+
+    private void SaveSettings()
     {
         try
         {
-            if (!File.Exists(_settingsPath)) return true;
-            using var doc = JsonDocument.Parse(File.ReadAllText(_settingsPath));
-            return !doc.RootElement.TryGetProperty("Worker", out var w) || w.ValueKind != JsonValueKind.False;
+            Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);
+            File.WriteAllText(_settingsPath, JsonSerializer.Serialize(new { Worker, ComfyUi = ComfyUiDir }));
         }
-        catch (Exception ex) when (ex is IOException or JsonException) { return true; }
+        catch (IOException) { /* the choice still holds for this run */ }
+    }
+
+    private (bool Worker, string? ComfyUi) LoadSettings()
+    {
+        try
+        {
+            if (!File.Exists(_settingsPath)) return (true, null);
+            using var doc = JsonDocument.Parse(File.ReadAllText(_settingsPath));
+            var r = doc.RootElement;
+            var worker = !r.TryGetProperty("Worker", out var w) || w.ValueKind != JsonValueKind.False;
+            var comfy = r.TryGetProperty("ComfyUi", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() : null;
+            return (worker, comfy);
+        }
+        catch (Exception ex) when (ex is IOException or JsonException) { return (true, null); }
     }
 
     /// <summary>Starts asking the hub for work, in the background, for the life of the app.</summary>
@@ -134,6 +153,8 @@ public sealed class ComputeService
             return Outcome.NoModel;
         }
         var models = _manifest.Models.Select(m => m.Name).ToList();
+        // The AI edits, when this computer's ComfyUI has what they need.
+        if (ComfyUi.Instance.Available) models.Add(ComfyUi.Model);
         var job = await hub.ClaimComputeAsync(string.IsNullOrEmpty(settings.DeviceName) ? Environment.MachineName : settings.DeviceName, Rid, models);
         if (job is null)
         {
@@ -165,29 +186,39 @@ public sealed class ComputeService
         var work = Path.Combine(WorkDir, job.Id);
         try
         {
-            Current = job.InputName;
+            Current = job.Kind is null ? job.InputName : $"{job.InputName} (IA)";
             StateChanged?.Invoke();
-
-            // The model, fetched from the hub when missing or changed. The engine is part of the app.
-            var model = manifest.Models.FirstOrDefault(m => m.Name == job.Model) ?? throw new InvalidOperationException($"Modèle {job.Model} inconnu du serveur.");
-            await EnsureAsync(hub, model.Files, ModelsDir);
-            var modelPath = Path.Combine(ModelsDir, model.Files[0].Path);
-
             Directory.CreateDirectory(work);
-            var input = Path.Combine(work, "input" + Path.GetExtension(job.InputName).ToLowerInvariant());
-            if (!await hub.DownloadFileAsync(job.InputHash, input)) throw new InvalidOperationException("L'image n'est plus sur le serveur.");
-            var output = Path.Combine(work, "result.png");
-
-            Current = job.InputName;
-            StateChanged?.Invoke();
+            string output;
+            var onGpu = true;
             var clock = Stopwatch.StartNew();
-            var onGpu = await Task.Run(() =>
+            if (job.Kind is null)
             {
-                // Loaded for the job only: the graphics card's memory is given back between jobs.
-                using var upscaler = AkashicRecords.Hub.OnnxUpscaler.Load(modelPath, preferGpu: true);
-                upscaler.Run(input, output);
-                return upscaler.OnGpu;
-            });
+                // The model, fetched from the hub when missing or changed. The engine is part of the app.
+                var model = manifest.Models.FirstOrDefault(m => m.Name == job.Model) ?? throw new InvalidOperationException($"Modèle {job.Model} inconnu du serveur.");
+                await EnsureAsync(hub, model.Files, ModelsDir);
+                var modelPath = Path.Combine(ModelsDir, model.Files[0].Path);
+
+                var input = Path.Combine(work, "input" + Path.GetExtension(job.InputName).ToLowerInvariant());
+                if (!await hub.DownloadFileAsync(job.InputHash, input)) throw new InvalidOperationException("L'image n'est plus sur le serveur.");
+                output = Path.Combine(work, "result.png");
+
+                Current = job.InputName;
+                StateChanged?.Invoke();
+                clock.Restart();
+                onGpu = await Task.Run(() =>
+                {
+                    // Loaded for the job only: the graphics card's memory is given back between jobs.
+                    using var upscaler = AkashicRecords.Hub.OnnxUpscaler.Load(modelPath, preferGpu: true);
+                    upscaler.Run(input, output);
+                    return upscaler.OnGpu;
+                });
+            }
+            else
+            {
+                // An AI edit or restore: FLUX Kontext through this computer's ComfyUI.
+                output = await ComfyUi.Instance.RunAsync(hub, job, work);
+            }
             clock.Stop();
 
             var hash = await HashAsync(output);
@@ -294,6 +325,42 @@ public sealed class ComputeService
         }
         using var hub = new HubClient(s.HubUrl, s.Token);
         return await hub.AddComputeJobFromAsync(table, syncId);
+    }
+
+    /// <summary>
+    /// Asks for an AI edit ("edit": a sentence, optionally a mask PNG — white where the change goes — and words naming
+    /// the zone, and whether to empty it first) or a restore ("restore") of a picture already in the app. Done by a PC
+    /// with ComfyUI; once done, the hub makes the result an edit of the same row. Throws HubException for the user.
+    /// </summary>
+    public async Task<HubComputeJob> RequestEditAsync(string table, long localId, string kind, string? prompt, byte[]? maskPng, string? maskText, bool erase)
+    {
+        if (!InPlaceKinds.Contains(table)) throw new HubException("Ce type d'image ne peut pas être modifié par l'IA.");
+        var s = SyncService.Instance.Settings;
+        if (!s.IsPaired) throw new HubException("Cet ordinateur n'est pas appairé au serveur (Réglages → Synchronisation).");
+        var syncId = SyncIdOf(table, localId);
+        if (syncId is null)
+        {
+            await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => SyncService.Instance.RunAsync()).Task.Unwrap();
+            syncId = SyncIdOf(table, localId) ?? throw new HubException("Cette image n'a pas encore pu être envoyée au serveur : réessaie dans un moment.");
+        }
+        using var hub = new HubClient(s.HubUrl, s.Token);
+        string? maskHash = null;
+        if (maskPng is not null)
+        {
+            Directory.CreateDirectory(WorkDir);
+            var file = Path.Combine(WorkDir, $"mask-{Guid.NewGuid():N}.png");
+            await File.WriteAllBytesAsync(file, maskPng);
+            try
+            {
+                maskHash = await HashAsync(file);
+                if (!await hub.HasFileAsync(maskHash)) await hub.UploadFileAsync(file, maskHash);
+            }
+            finally
+            {
+                try { File.Delete(file); } catch (IOException) { }
+            }
+        }
+        return await hub.AddComputeEditAsync(table, syncId, kind, prompt, maskHash, maskText, erase);
     }
 
     /// <summary>The id a row has on the hub (sync_map), or null when it has not been synchronised yet.</summary>
