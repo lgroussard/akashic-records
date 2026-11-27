@@ -138,7 +138,7 @@ public static class DiskIndex
     /// <summary>A file of the folder. A blob of the catalogue (named by its hash) also says what it is there: Label =
     /// its path in the catalogue, Hash = for the apps to ask for its preview (GET /media/{hash}/thumb). Kind: image,
     /// music, book, video, document, other; "unknown" for a blob the catalogue does not list (results of the hub's work).</summary>
-    public sealed record FileEntry(string Name, long Size, string Kind = "other", string? Label = null, string? Hash = null);
+    public sealed record FileEntry(string Name, long Size, string Kind = "other", string? Label = null, string? Hash = null, string? Note = null);
     public sealed record View(
         string State, string? At, long? Seconds, bool Refreshing, string Root, string Path, long Size, long Files,
         List<Folder> Folders, List<FileEntry> Largest, long OtherFilesBytes, long SmallFoldersBytes, long SmallFolders,
@@ -148,7 +148,7 @@ public static class DiskIndex
     private static readonly object Gate = new();
 
     /// <summary>One folder of the index and what is directly in it; path "" or "/" = the root.</summary>
-    public static View Browse(HubOptions options, string? path, HubStore? store = null)
+    public static View Browse(HubOptions options, string? path, HubStore? store = null, ComputeStore? compute = null)
     {
         var file = System.IO.Path.Combine(options.DataDir, FileName);
         var refreshing = File.Exists(System.IO.Path.Combine(options.DataDir, RequestName));
@@ -166,7 +166,7 @@ public static class DiskIndex
         {
             // (A blobs folder under 1 MB is folded into its parent in the index: the catalogue still answers.)
             var blobsNode = Walk(node, blobs) ?? new JsonObject();
-            return CatalogueView(doc, refreshing, root, blobs, asked.Skip(blobs.Length).ToList(), blobsNode, store);
+            return CatalogueView(doc, refreshing, root, blobs, asked.Skip(blobs.Length).ToList(), blobsNode, store, compute, options);
         }
 
         foreach (var part in asked)
@@ -213,12 +213,42 @@ public static class DiskIndex
     /// stored by hash (see BlobStore), which says nothing to a person. At the top, what the hub keeps outside the
     /// catalogue (results of its computations…) is one more line, so that the sizes still add up to the disk's.
     /// </summary>
-    private static View CatalogueView(JsonObject doc, bool refreshing, string root, string[] blobs, List<string> asked, JsonObject blobsNode, HubStore store)
+    public const string OutsideName = "Fichiers du serveur hors catalogue";
+
+    private static View CatalogueView(JsonObject doc, bool refreshing, string root, string[] blobs, List<string> asked, JsonObject blobsNode,
+        HubStore store, ComputeStore? compute, HubOptions options)
     {
-        static string[] Parts(string p) => p.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        var all = store.CatalogueFiles();
+        static string[] Parts(string p) => p.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var all = store.MediaFileRows();
+        var (fileMarks, blobMarks, grace) = BlobCleaner.Pending(options);
+        string Gone(DateTime since) => $"Supprimé · effacé pour de bon le {(since + grace).ToLocalTime():dd/MM}";
         bool Under(string[] parts, List<string> prefix) =>
             parts.Length > prefix.Count && prefix.Select((s, i) => string.Equals(parts[i], s, StringComparison.OrdinalIgnoreCase)).All(x => x);
+        View Make(string path, long size, long files, List<Folder> folders, List<FileEntry> largest, long otherFiles) =>
+            new("ready", doc["at"]?.GetValue<string>(), doc["seconds"]?.GetValue<long>(), refreshing, root, path, size, files,
+                folders, largest, otherFiles, 0, 0, Catalogue: true);
+
+        // The blobs no listed file names: what the hub keeps for itself (shared computing) or for nothing any more.
+        var listed = all.Select(r => r.Hash).ToHashSet(StringComparer.Ordinal);
+        var outside = BlobFilesOn(options.BlobDir).Where(b => !listed.Contains(b.Hash)).ToList();
+        if (asked.Count > 0 && asked[0] == OutsideName)
+        {
+            var jobs = compute?.Jobs(1000) ?? new List<ComputeJob>();
+            var names = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var j in jobs)
+            {
+                names.TryAdd(j.InputHash, j.InputName);
+                if (j.ResultHash is { } rh) names.TryAdd(rh, j.ResultName ?? "Résultat de " + j.InputName);
+            }
+            var inUse = compute?.ReferencedHashes() ?? new HashSet<string>();
+            var entries = outside.OrderByDescending(b => b.Size).Take(300).Select(b => new FileEntry(
+                b.Hash, b.Size, "unknown", names.GetValueOrDefault(b.Hash) ?? "Fichier sans fiche", b.Hash,
+                inUse.Contains(b.Hash) ? "Dans Agrandir des images : gardé"
+                : blobMarks.TryGetValue(b.Hash, out var since) ? Gone(since)
+                : "Pas encore vu par le ménage (il passe une fois par jour)")).ToList();
+            return Make("/" + string.Join('/', blobs.Append(OutsideName)), outside.Sum(b => b.Size), outside.Count,
+                new List<Folder>(), entries, outside.Skip(300).Sum(b => b.Size));
+        }
 
         // A folder gone since: the deepest one that still holds something.
         var prefix = new List<string>(asked);
@@ -231,22 +261,32 @@ public static class DiskIndex
             .OrderByDescending(f => f.Size).ToList();
         var direct = here.Where(x => x.Parts.Length == prefix.Count + 1).OrderByDescending(x => x.File.Size).ToList();
         const int shown = 200;
-        var largest = direct.Take(shown).Select(x => new FileEntry(x.Parts[^1], x.File.Size, KindOf(x.File.Path), x.File.Path, x.File.Hash)).ToList();
+        var largest = direct.Take(shown).Select(x => new FileEntry(x.Parts[^1], x.File.Size, KindOf(x.File.Path),
+            string.Join('/', x.Parts), x.File.Hash, fileMarks.TryGetValue(x.File.EntityId, out var since) ? Gone(since) : null)).ToList();
         var otherFiles = direct.Skip(shown).Sum(x => x.File.Size);
         long size = here.Sum(x => x.File.Size), files = here.Count;
 
-        if (prefix.Count == 0)
+        if (prefix.Count == 0 && outside.Count > 0)
         {
-            // The disk's truth at the top: the blobs folder's measured size, the rest being the hub's own files.
-            var measured = blobsNode["s"]?.GetValue<long>() ?? size;
-            var outside = measured - size;
-            if (outside > 0) folders.Add(new Folder("Fichiers du serveur hors catalogue", outside, 0, false, false, false));
-            size = Math.Max(size, measured);
-            files = Math.Max(files, blobsNode["f"]?.GetValue<long>() ?? files);
+            var bytes = outside.Sum(b => b.Size);
+            folders.Add(new Folder(OutsideName, bytes, outside.Count, false, false, true));
+            size += bytes;
+            files += outside.Count;
         }
+        return Make("/" + string.Join('/', blobs.Concat(prefix)), size, files, folders, largest, otherFiles);
+    }
 
-        return new View("ready", doc["at"]?.GetValue<string>(), doc["seconds"]?.GetValue<long>(), refreshing, root,
-            "/" + string.Join('/', blobs.Concat(prefix)), size, files, folders, largest, otherFiles, 0, 0, Catalogue: true);
+    private static List<(string Hash, long Size)> BlobFilesOn(string dir)
+    {
+        var list = new List<(string, long)>();
+        if (!Directory.Exists(dir)) return list;
+        foreach (var sub in Directory.EnumerateDirectories(dir))
+        {
+            if (System.IO.Path.GetFileName(sub).Length != 2) continue;
+            foreach (var f in new DirectoryInfo(sub).EnumerateFiles())
+                if (BlobStore.IsHash(f.Name)) list.Add((f.Name, f.Length));
+        }
+        return list;
     }
 
     private static readonly Dictionary<string, string> Kinds = new(StringComparer.OrdinalIgnoreCase)

@@ -115,7 +115,9 @@ internal fun DiskBrowser(path: String, onPath: (String?) -> Unit, onClose: () ->
 
                 Card("CE DOSSIER") {
                     Text("${size(total)} · ${v.optLong("files")} fichiers", fontWeight = FontWeight.Bold)
-                    if (v.optBoolean("catalogue"))
+                    if (v.optBoolean("catalogue") && v.optString("path").endsWith("hors catalogue"))
+                        Text("Fichiers que le serveur garde sans fiche dans l'app. Ceux que plus rien n'utilise sont effacés 30 jours après.", fontSize = 12.sp, color = Palette.TextMuted)
+                    else if (v.optBoolean("catalogue"))
                         Text("Les fichiers d'Akashic, rangés comme dans l'app.", fontSize = 12.sp, color = Palette.TextMuted)
                     // The graph: what fills this folder, biggest first.
                     val loose = largest.sumOf { it.optLong("size") } + v.optLong("other_files_bytes") + v.optLong("small_folders_bytes")
@@ -217,6 +219,10 @@ private fun FileRow(f: JSONObject) {
             Text(label.substringAfterLast('/'), fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             val where = if (label.contains('/') && f.str("label") != null) "dans Akashic : " + label.substringBeforeLast('/') else null
             if (where != null) Text(where, fontSize = 11.sp, color = Palette.TextFaint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // Waiting to be removed for good (the hub's clean-up), or kept for shared computing.
+            f.str("note")?.let { note ->
+                Text(note, fontSize = 11.sp, color = if (note.startsWith("Supprimé")) Color(0xFFFBBF24) else Palette.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
         Spacer(Modifier.width(8.dp))
         Text(size(f.optLong("size")), fontSize = 12.sp, color = Palette.TextMuted)

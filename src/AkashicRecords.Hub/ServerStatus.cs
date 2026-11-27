@@ -30,8 +30,8 @@ public static class ServerStatus
     {
         app.MapGet("/server", () => Results.Ok(Build(store, downloads, compute, options)));
         // The disk folder by folder (DiskIndex.cs): measured apart, as root; the hub only reads it and asks again.
-        app.MapGet("/server/disk", (string? path) => Results.Ok(DiskIndex.Browse(options, path, store)));
-        app.MapPost("/server/disk/refresh", () => { DiskIndex.RequestRefresh(options); return Results.Ok(DiskIndex.Browse(options, null, store)); });
+        app.MapGet("/server/disk", (string? path) => Results.Ok(DiskIndex.Browse(options, path, store, compute)));
+        app.MapPost("/server/disk/refresh", () => { DiskIndex.RequestRefresh(options); return Results.Ok(DiskIndex.Browse(options, null, store, compute)); });
     }
 
     public static Status Build(HubStore store, DownloadStore downloads, ComputeStore compute, HubOptions options)
