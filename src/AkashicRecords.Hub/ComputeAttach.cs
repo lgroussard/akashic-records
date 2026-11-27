@@ -24,6 +24,24 @@ public sealed class ComputeAttach(HubStore store, BlobStore blobs, HubOptions op
         ["CanvasElement"] = "ImagePath",  // Art › Archive artistique (a picture on a project's canvas)
     };
 
+    /// <summary>A file name up to the apps' edit marker (".edit-"): the picture's first name ("abc.heic.edit-1a2b3c4d.jpg" → "abc.heic").</summary>
+    public static string RootName(string fileName)
+    {
+        var i = fileName.IndexOf(".edit-", StringComparison.Ordinal);
+        return i >= 0 ? fileName[..i] : fileName;
+    }
+
+    /// <summary>The name of a copy made by upscaling: "…-x4.jpg" or "…-x4-2.jpg".</summary>
+    private static readonly System.Text.RegularExpressions.Regex AlreadyUpscaled =
+        new(@"-x4(-\d+)?\.jpg$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    /// <summary>A photo of the "Agrandies" album: already the result of an upscale.</summary>
+    private bool InAgrandiesAlbum(JsonElement photo)
+    {
+        var album = store.FindLive("PhotoAlbum", "Name", AlbumName);
+        return album is not null && photo.TryGetProperty("AlbumId", out var a) && a.ValueKind == JsonValueKind.String && a.GetString() == album;
+    }
+
     /// <summary>The picture of a row, ready to be upscaled: its blob (made readable first if the upscaler cannot
     /// read it, e.g. an iPhone HEIC), its name and size. Throws InvalidOperationException with a message for the user.</summary>
     public async Task<(string Hash, string Name, long Size)> InputAsync(string kind, string entityId, CancellationToken ct)
@@ -36,6 +54,9 @@ public sealed class ComputeAttach(HubStore store, BlobStore blobs, HubOptions op
         if (hash is null || !blobs.Exists(hash)) throw new InvalidOperationException("Le fichier de cette image n'est pas (encore) sur le serveur : synchronise d'abord.");
 
         var name = Path.GetFileName(path.Replace('\\', '/'));
+        // Upscaling an upscaled picture again adds next to nothing (the model works from detail it made up): refused.
+        if (AlreadyUpscaled.IsMatch(RootName(name)) || (kind == "Photo" && InAgrandiesAlbum(payload)))
+            throw new InvalidOperationException("Cette image est déjà agrandie : l'agrandir encore n'ajouterait presque rien.");
         if (OnnxUpscaler.InputExtensions.Contains(Path.GetExtension(name).ToLowerInvariant()))
             return (hash, name, new FileInfo(blobs.PathOf(hash)).Length);
 
@@ -158,9 +179,12 @@ public sealed class ComputeAttach(HubStore store, BlobStore blobs, HubOptions op
         var sep = path.Contains('\\') ? '\\' : '/';
         var cut = path.LastIndexOfAny(['/', '\\']);
         var folder = cut >= 0 ? path[..(cut + 1)] : "";
-        var newPath = folder + Path.GetFileNameWithoutExtension(path[(cut + 1)..]) + "-x4.jpg";
+        // Named after the picture's first name: an edit's marker (".edit-…", see the apps' image editing) is left out, so
+        // the copy is a picture of its own, never taken for an edit that could be "reverted".
+        var baseName = Path.GetFileNameWithoutExtension(RootName(path[(cut + 1)..]));
+        var newPath = folder + baseName + "-x4.jpg";
         for (var i = 2; store.FileHash(newPath) is not null; i++)
-            newPath = folder + Path.GetFileNameWithoutExtension(path[(cut + 1)..]) + $"-x4-{i}.jpg";
+            newPath = folder + baseName + $"-x4-{i}.jpg";
 
         var row = JsonNode.Parse(original.GetRawText())!.AsObject();
         row[field] = newPath;

@@ -735,6 +735,25 @@ await Scenario("16. Agrandir une image de l'app : le resultat se range a cote de
     Check(jpeg.Length > 0 && jpeg[0] == 0xFF && jpeg[1] == 0xD8 && file.GetProperty("Size").GetInt64() == jpeg.Length,
         "son fichier est liste et sur le hub, en JPEG");
 
+    // Upscaling the copy again is refused: it would add next to nothing.
+    var copyId = hub.Store.Snapshot("Photo", null, null, 50).Entities.Single(e => !e.Deleted && e.EntityId != photo).EntityId;
+    var twice = await phone.Http.PostAsJsonAsync("/compute/jobs/from", new { entity_type = "Photo", entity_id = copyId }, SimDevice.Wire);
+    Check(twice.StatusCode == HttpStatusCode.UnprocessableEntity && Json(twice).GetProperty("error").GetString()!.Contains("déjà agrandie"),
+        "agrandir une image deja agrandie : refuse avec un message clair");
+
+    // An edited picture (apps' editor: "<root>.edit-<hex>.jpg"): its copy is named after the first name, never as an edit.
+    var edited = Picture(SkiaSharp.SKEncodedImageFormat.Jpeg, 16);
+    var editedHash = await Upload(pc, edited);
+    var editedPhoto = Guid.NewGuid().ToString();
+    await pc.PushRawAsync([
+        Row("MediaFile", Guid.NewGuid().ToString(), new { Path = "media/archive/mer.heic.edit-1a2b3c4d.jpg", Hash = editedHash, Size = edited.Length }),
+        Row("Photo", editedPhoto, new { ImagePath = @"media\archive\mer.heic.edit-1a2b3c4d.jpg", Title = "Mer", Description = "", TakenDate = (string?)null, Tags = "", IsFavorite = 0, AlbumId = album, ImportedAt = "2026-11-21T10:00:00.0000000" }),
+    ]);
+    var fromEdit = Json(await phone.Http.PostAsJsonAsync("/compute/jobs/from", new { entity_type = "Photo", entity_id = editedPhoto }, SimDevice.Wire));
+    await pc.Http.PostAsJsonAsync("/compute/claim", new { name = "LOHAN", rid = "win-x64", models = new[] { "nomos-webphoto-4x" } }, SimDevice.Wire);
+    var editDone = Json(await pc.Http.PostAsJsonAsync($"/compute/jobs/{fromEdit.GetProperty("id").GetString()}/complete", new { result_hash = resultHash, seconds = 9.5 }, SimDevice.Wire));
+    Check(editDone.GetProperty("attached_path").GetString() == @"media\archive\mer-x4.jpg",
+        "copie agrandie d'une image modifiee : nommee d'apres son premier nom (mer-x4.jpg), sans marque de modification");
     // A picture on a canvas: the copy goes beside it.
     var again = Json(await phone.Http.PostAsJsonAsync("/compute/jobs/from", new { entity_type = "CanvasElement", entity_id = element }, SimDevice.Wire));
     await pc.Http.PostAsJsonAsync("/compute/claim", new { name = "LOHAN", rid = "win-x64", models = new[] { "nomos-webphoto-4x" } }, SimDevice.Wire);
