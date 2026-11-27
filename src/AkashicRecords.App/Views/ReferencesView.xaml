@@ -82,6 +82,9 @@
                             <Button x:Name="ViewerEditButton" Content="Modifier" Style="{StaticResource SecondaryButtonStyle}"
                                     Margin="8,0,0,0" Click="ViewerEdit_OnClick"
                                     ToolTip="Tourner, recadrer, régler le contraste et la saturation (l'original est gardé)"/>
+                            <Button x:Name="ViewerUndoButton" Content="Annuler la dernière étape" Style="{StaticResource SecondaryButtonStyle}"
+                                    Margin="8,0,0,0" Click="ViewerUndo_OnClick" Visibility="Collapsed"
+                                    ToolTip="Remet la version d'avant la dernière modification (pas l'original)"/>
                             <Button x:Name="ViewerRevertButton" Content="Revenir à l'original" Style="{StaticResource SecondaryButtonStyle}"
                                     Margin="8,0,0,0" Click="ViewerRevert_OnClick" Visibility="Collapsed"
                                     ToolTip="Remet l'image d'avant les modifications"/>

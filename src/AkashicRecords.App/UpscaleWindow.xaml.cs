@@ -31,6 +31,7 @@ public partial class UpscaleWindow : Window
     private string? _error;
     private string? _selectedId;
     private bool _showBefore;
+    private string? _shownVersion; // the version shown in the preview, for a job asked with several tries
     private bool _busy;
     private int _previewVersion;
 
@@ -217,6 +218,35 @@ public partial class UpscaleWindow : Window
         panel.Children.Add(new TextBlock { Text = status, Foreground = color, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) });
 
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
+        // Several versions waiting: each one can be looked at in the preview, the one shown can be kept.
+        var versions = Versions(j);
+        if (j.Status == "done" && versions.Count > 1 && j.AttachedPath is null)
+        {
+            var picker = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
+            for (var i = 0; i < versions.Count; i++)
+            {
+                var hash = versions[i];
+                var shown = j.Id == _selectedId && ShownResult(j) == hash;
+                var see = SmallButton((shown ? "● " : "") + $"Version {i + 1}", () =>
+                {
+                    _selectedId = j.Id;
+                    _showBefore = false;
+                    _shownVersion = hash;
+                    Render();
+                    return ShowPreviewAsync();
+                });
+                picker.Children.Add(see);
+            }
+            if (j.Id == _selectedId && ShownResult(j) is { } keep && versions.Contains(keep))
+                picker.Children.Add(SmallButton($"Garder la version {versions.IndexOf(keep) + 1}", async () =>
+                {
+                    await Act(h => h.ChooseComputeAsync(j.Id, keep));
+                    _shownVersion = null;
+                    // The hub has just made it the picture's edit: fetch it now rather than at the next pass.
+                    _ = SyncService.Instance.RunAsync();
+                }));
+            panel.Children.Add(picker);
+        }
         if (j.Status == "failed") actions.Children.Add(SmallButton("Relancer", async () => await Act(h => h.RetryComputeAsync(j.Id))));
         if (j.Status != "running")
             actions.Children.Add(SmallButton("Retirer", async () =>
@@ -250,7 +280,9 @@ public partial class UpscaleWindow : Window
 
     /// <summary>For a picture of the app: whether the result was put next to its original.</summary>
     private static string Placed(HubComputeJob j) =>
-        j.AttachType is null ? "" : j.AttachError is not null ? $" · pas rangée : {j.AttachError}" : j.AttachedPath is not null ? " · rangée à côté de l'original" : "";
+        j.AttachType is null ? "" : j.AttachError is not null ? $" · pas rangée : {j.AttachError}"
+        : j.AttachedPath is not null ? (j.Kind is null ? " · rangée à côté de l'original" : " · posée sur l'image")
+        : Versions(j).Count > 1 ? $" · {Versions(j).Count} versions : regarde-les et garde-en une" : "";
 
     private static string Seconds(double? s) => s is null ? "?" : s < 60 ? $"{s:0.#} s" : $"{(int)(s / 60)} min {(int)(s % 60):00} s";
     private static string Mb(long? bytes) => bytes is null ? "" : $"{bytes / 1024d / 1024d:0.#} Mo";
@@ -262,9 +294,21 @@ public partial class UpscaleWindow : Window
         if (_selectedId == id) return;
         _selectedId = id;
         _showBefore = false;
+        _shownVersion = null;
         Render();
         _ = ShowPreviewAsync();
     }
+
+    /// <summary>The versions of a job asked with several tries (empty otherwise).</summary>
+    private static List<string> Versions(HubComputeJob j)
+    {
+        if (j.Results is null) return new();
+        try { return System.Text.Json.JsonSerializer.Deserialize<List<string>>(j.Results) ?? new(); }
+        catch (System.Text.Json.JsonException) { return new(); }
+    }
+
+    /// <summary>The result the preview shows: the chosen version of several, else the job's result.</summary>
+    private string? ShownResult(HubComputeJob j) => _shownVersion is not null && Versions(j).Contains(_shownVersion) ? _shownVersion : j.ResultHash;
 
     private void RenderPreviewButtons()
     {
@@ -273,7 +317,9 @@ public partial class UpscaleWindow : Window
         BeforeButton.IsEnabled = j is not null;
         AfterButton.IsEnabled = OpenButton.IsEnabled = SaveButton.IsEnabled = done;
         BeforeButton.Background = AfterButton.Background = null;
-        PreviewTitle.Text = j is null ? "" : _showBefore || !done ? $"Avant : {j.InputName}" : $"Après : {j.ResultName}";
+        var versions = j is null ? new() : Versions(j);
+        PreviewTitle.Text = j is null ? "" : _showBefore || !done ? $"Avant : {j.InputName}"
+            : versions.Count > 1 ? $"Version {Math.Max(1, versions.IndexOf(ShownResult(j)!) + 1)} sur {versions.Count}" : $"Après : {j.ResultName}";
     }
 
     // keepView: « Avant » / « Après » of the same picture keep the zoom, to compare the same spot.
@@ -290,7 +336,7 @@ public partial class UpscaleWindow : Window
         {
             var path = before
                 ? await ComputeService.Instance.LocalCopyAsync(j.InputHash, Path.GetExtension(j.InputName).ToLowerInvariant())
-                : await ComputeService.Instance.LocalCopyAsync(j.ResultHash!, ".png");
+                : await ComputeService.Instance.LocalCopyAsync(ShownResult(j)!, ".png");
             // A 2000 px decode shows quickly; the full resolution follows under the same zoom, for zooming in.
             var image = await Task.Run(() => Decode(path, 2000));
             if (version != _previewVersion) return;

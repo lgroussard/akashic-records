@@ -80,7 +80,7 @@ fun UpscaleScreen(onClose: () -> Unit) {
         }
     }
     val b = board
-    val chosen = b?.model(model) ?: b?.models?.firstOrNull()
+    val chosen = b?.upscalers?.firstOrNull { it.name == model } ?: b?.upscalers?.firstOrNull()
 
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(10)) { uris ->
         val m = chosen?.name ?: return@rememberLauncherForActivityResult
@@ -100,13 +100,13 @@ fun UpscaleScreen(onClose: () -> Unit) {
         Column(Modifier.fillMaxSize().background(Palette.AppBg)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onClose) { Text("Fermer") }
-                Text("Agrandir des images", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
+                Text("Agrandir et IA", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
                 Spacer(Modifier.width(72.dp))
             }
             Column(Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
                 // ---- Model: what it does, and who would do it now. One model per feature: the chooser only shows
                 // if the hub ever offers several.
-                if ((b?.models?.size ?: 0) > 1) Box {
+                if ((b?.upscalers?.size ?: 0) > 1) Box {
                     Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Palette.Surface2)
                             .clickable(enabled = b != null) { choosing = true }.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -118,7 +118,7 @@ fun UpscaleScreen(onClose: () -> Unit) {
                         Text("Changer ▾", fontSize = 12.sp, color = Palette.Accent)
                     }
                     DropdownMenu(expanded = choosing, onDismissRequest = { choosing = false }) {
-                        b?.models?.forEach { m ->
+                        b?.upscalers?.forEach { m ->
                             DropdownMenuItem(
                                 text = {
                                     Column {
@@ -194,6 +194,10 @@ private fun JobCard(job: HubCompute.Job, label: String, onOpen: () -> Unit, onRe
         Column(Modifier.weight(1f)) {
             Text(job.inputName, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text("$label · ${job.addedAt.replace('T', ' ').take(16)}", fontSize = 11.sp, color = Palette.TextFaint)
+            if (job.kind != null) Text(
+                if (job.kind == "restore") "Restauration" else "« ${job.prompt ?: ""} »",
+                fontSize = 11.sp, color = Palette.TextMuted, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
             Text(status, fontSize = 12.sp, color = color, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         if (!job.running) Box {
@@ -211,7 +215,8 @@ private fun JobCard(job: HubCompute.Job, label: String, onOpen: () -> Unit, onRe
 private fun placed(job: HubCompute.Job) = when {
     job.attachType == null -> ""
     job.attachError != null -> " · pas rangée : ${job.attachError}"
-    job.attachedPath != null -> " · rangée à côté de l'original"
+    job.attachedPath != null -> if (job.kind == null) " · rangée à côté de l'original" else " · posée sur l'image"
+    job.choosing -> " · ${job.results.size} versions : touche pour choisir"
     else -> ""
 }
 
@@ -230,16 +235,20 @@ private fun UpscaleViewer(job: HubCompute.Job, onClose: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var before by remember { mutableStateOf(false) }
+    var shown by remember { mutableIntStateOf(0) } // which version, for a job asked with several tries
+    var keeping by remember { mutableStateOf(false) }
+    val versions = if (job.choosing) job.results else emptyList()
+    val resultHash = versions.getOrNull(shown) ?: job.resultHash
     var picture by remember { mutableStateOf<File?>(null) } // the file shown (before or after)
     var note by remember { mutableStateOf<String?>("Chargement…") }
     // One zoom for both: « Avant » / « Après » compare the same spot.
     val zoom = rememberZoomState(job.id)
 
-    LaunchedEffect(before) {
+    LaunchedEffect(before, shown) {
         note = "Chargement…"
         try {
             picture = if (before) HubCompute.local(context, job.inputHash, job.inputName.substringAfterLast('.').lowercase())
-                   else HubCompute.local(context, job.resultHash!!, "png")
+                   else HubCompute.local(context, resultHash!!, "png")
             note = null
         } catch (e: Exception) {
             note = "Aperçu impossible : ${e.message}"
@@ -265,8 +274,23 @@ private fun UpscaleViewer(job: HubCompute.Job, onClose: () -> Unit) {
                 TextButton(onClick = onClose) { Text("Fermer") }
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = { before = true }) { Text("Avant", fontWeight = if (before) FontWeight.Bold else FontWeight.Normal, color = if (before) Palette.Text else Palette.TextMuted) }
-                TextButton(onClick = { before = false }) { Text("Après", fontWeight = if (!before) FontWeight.Bold else FontWeight.Normal, color = if (!before) Palette.Text else Palette.TextMuted) }
-                TextButton(onClick = {
+                if (versions.isEmpty()) TextButton(onClick = { before = false }) { Text("Après", fontWeight = if (!before) FontWeight.Bold else FontWeight.Normal, color = if (!before) Palette.Text else Palette.TextMuted) }
+                // Several versions: flip between them, keep the one shown (the hub makes it the picture's edit).
+                versions.forEachIndexed { i, _ ->
+                    val on = !before && shown == i
+                    TextButton(onClick = { before = false; shown = i }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp)) {
+                        Text("V${i + 1}", fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, color = if (on) Palette.Text else Palette.TextMuted)
+                    }
+                }
+                if (versions.isNotEmpty()) TextButton(enabled = !keeping && !before, onClick = {
+                    keeping = true
+                    note = "Envoi du choix…"
+                    scope.launch {
+                        if (HubCompute.choose(context, job.id, versions[shown])) onClose()
+                        else { note = "Échec : ${HubCompute.error.value ?: "?"}"; keeping = false }
+                    }
+                }) { Text("Garder", color = Palette.Accent) }
+                if (versions.isEmpty()) TextButton(onClick = {
                     val name = job.resultName ?: "akashic-agrandie.png"
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         scope.launch {
@@ -281,7 +305,8 @@ private fun UpscaleViewer(job: HubCompute.Job, onClose: () -> Unit) {
                 }) { Text("Enregistrer") }
             }
             Text(
-                note ?: (if (before) "Avant : ${job.inputName}" else "Après : ${job.resultName}") + "  ·  pince ou double tap pour zoomer",
+                note ?: (if (before) "Avant : ${job.inputName}" else if (versions.isNotEmpty()) "Version ${shown + 1} sur ${versions.size}" else "Après : ${job.resultName}") +
+                    "  ·  pince ou double tap pour zoomer",
                 fontSize = 12.sp, color = Palette.TextMuted, textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
             )

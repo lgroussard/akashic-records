@@ -124,6 +124,8 @@ fun ImageEditor(
     var painting by remember { mutableStateOf(false) }
     var brush by remember { mutableFloatStateOf(0.06f) }
     val strokes = remember { mutableStateListOf<ZoneStroke>() }
+    var tries by remember { mutableIntStateOf(1) }
+    var engine by remember { mutableStateOf("kontext") }
 
     LaunchedEffect(currentPath) {
         val (f, bmp) = withContext(Dispatchers.IO) {
@@ -189,15 +191,27 @@ fun ImageEditor(
 
     fun sendToAi(kind: String) {
         if (kind == "edit" && prompt.isBlank()) { message = "Écris d'abord ce qu'il faut changer."; return }
+        if (kind == "edit" && engine == "sdxl" && strokes.isEmpty() && zoneWords.isBlank()) { message = "RealVisXL redessine seulement une zone : peins-la ou nomme-la."; return }
         busy = true
         message = "Envoi…"
         scope.launch {
             val failure = HubCompute.requestEdit(
                 context, table, id.toLong(), kind, if (kind == "edit") prompt.trim() else null,
                 if (kind == "edit") zoneMask() else null, zoneWords.trim().ifEmpty { null }.takeIf { kind == "edit" }, eraseFirst && kind == "edit",
+                tries, if (kind == "edit") engine else "kontext",
             )
             busy = false
-            message = failure ?: "Envoyée : l'image modifiée arrivera d'ici quelques minutes (Revenir à l'original restera possible)."
+            message = failure ?: if (tries > 1) "Envoyée : $tries versions à choisir d'ici quelques minutes dans Plus → Agrandir et IA."
+                else "Envoyée : l'image modifiée arrivera d'ici quelques minutes (Revenir à l'original restera possible)."
+        }
+    }
+
+    fun undo() {
+        busy = true
+        scope.launch {
+            ImageEdits.undo(context, table, id, currentPath)
+                .onSuccess { onChanged(it); onClose() }
+                .onFailure { message = it.message; busy = false }
         }
     }
 
@@ -376,6 +390,16 @@ fun ImageEditor(
                     label = { Text("Ou la zone en quelques mots (« blue ball »)") },
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                 )
+                // How many versions (kept one in the computing screen), and which engine.
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Essais", fontSize = 13.sp, color = Palette.TextMuted, modifier = Modifier.padding(start = 8.dp))
+                    for (n in listOf(1, 2, 4)) TextButton(enabled = !busy, onClick = { tries = n }) {
+                        Text(if (tries == n) "✓$n" else "$n", color = if (tries == n) Palette.Accent else Palette.Text)
+                    }
+                    TextButton(enabled = !busy, onClick = { engine = if (engine == "kontext") "sdxl" else "kontext" }) {
+                        Text(if (engine == "kontext") "Moteur : FLUX Kontext" else "Moteur : RealVisXL (zone)")
+                    }
+                }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(eraseFirst, { eraseFirst = it }, enabled = !busy, colors = CheckboxDefaults.colors(checkedColor = Palette.Accent))
                     Text("Effacer d'abord la zone", fontSize = 13.sp, color = Palette.Text, modifier = Modifier.weight(1f))
@@ -399,6 +423,7 @@ fun ImageEditor(
                 AdjustRow("Saturation", saturation, enabled = shown != null && !busy) { saturation = it }
                 if (edited) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("Image déjà modifiée", fontSize = 12.sp, color = Palette.TextFaint, modifier = Modifier.weight(1f).padding(start = 8.dp))
+                    if (ImageEdits.hasPreviousStep(currentPath)) TextButton(enabled = !busy, onClick = { undo() }) { Text("Étape précédente") }
                     TextButton(enabled = !busy, onClick = { revert() }) { Text("Revenir à l'original") }
                     TextButton(enabled = !busy, onClick = { confirmFinal = true }) { Text("Rendre définitif") }
                 }

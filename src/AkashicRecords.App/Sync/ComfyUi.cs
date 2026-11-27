@@ -71,15 +71,17 @@ public sealed class ComfyUi
 
     public bool Available => Missing() is null;
 
-    /// <summary>Does one job: returns the path of the result (PNG) in `work`.</summary>
-    public async Task<string> RunAsync(HubClient hub, HubComputeJob job, string work)
+    /// <summary>Does one job: returns the paths of its versions (PNG, one per try) in `work`.</summary>
+    public async Task<List<string>> RunAsync(HubClient hub, HubComputeJob job, string work)
     {
         await _gate.WaitAsync();
         var uploaded = new List<string>();
         var produced = new List<string>();
         try
         {
-            var (prompt, maskHash, maskText, erase) = ReadParams(job);
+            var (prompt, maskHash, maskText, erase, tries, engine) = ReadParams(job);
+            if (engine == "sdxl" && !File.Exists(Path.Combine(Dir!, RealVisXlFile)))
+                throw new InvalidOperationException("RealVisXL n'est pas dans ce ComfyUI (" + RealVisXlFile + ").");
 
             // The picture upright (orientation applied), with the painted zone as transparency: ComfyUI's LoadImage
             // turns transparency into its mask.
@@ -98,18 +100,24 @@ public sealed class ComfyUi
             await EnsureRunningAsync();
             uploaded.Add(await UploadAsync(prepared, name));
 
-            var graph = job.Kind == "restore"
-                ? Restore(name, job.Id)
-                : Edit(name, job.Id, prompt!, maskFile is not null, maskText, erase, width, height);
-            var (file, subfolder) = await QueueAndWaitAsync(graph);
-            produced.Add(Path.Combine(subfolder, file));
+            // One run per try, each with its own seed: the versions differ, the user keeps one.
+            var results = new List<string>();
+            for (var t = 0; t < tries; t++)
+            {
+                var graph = job.Kind == "restore" ? Restore(name, job.Id)
+                    : engine == "sdxl" ? EditSdxl(name, job.Id, prompt!, maskFile is not null, maskText, erase)
+                    : Edit(name, job.Id, prompt!, maskFile is not null, maskText, erase, width, height);
+                var (file, subfolder) = await QueueAndWaitAsync(graph);
+                produced.Add(Path.Combine(subfolder, file));
 
-            var result = Path.Combine(work, "result.png");
-            var url = $"/view?filename={Uri.EscapeDataString(file)}&subfolder={Uri.EscapeDataString(subfolder)}&type=output";
-            await using (var stream = await _http.GetStreamAsync(url))
-            await using (var target = File.Create(result))
-                await stream.CopyToAsync(target);
-            return result;
+                var result = Path.Combine(work, $"result-{t + 1}.png");
+                var url = $"/view?filename={Uri.EscapeDataString(file)}&subfolder={Uri.EscapeDataString(subfolder)}&type=output";
+                await using (var stream = await _http.GetStreamAsync(url))
+                await using (var target = File.Create(result))
+                    await stream.CopyToAsync(target);
+                results.Add(result);
+            }
+            return results;
         }
         finally
         {
@@ -119,16 +127,19 @@ public sealed class ComfyUi
         }
     }
 
-    private static (string? Prompt, string? MaskHash, string? MaskText, bool Erase) ReadParams(HubComputeJob job)
+    private const string RealVisXlFile = @"ComfyUI\models\checkpoints\realvisxl_v5_fp16.safetensors";
+
+    private static (string? Prompt, string? MaskHash, string? MaskText, bool Erase, int Tries, string Engine) ReadParams(HubComputeJob job)
     {
-        if (job.Kind == "restore") return (RestorePrompt, null, null, false);
-        if (job.Params is null) throw new InvalidOperationException("Demande de modification sans phrase.");
-        using var doc = JsonDocument.Parse(job.Params);
+        using var doc = JsonDocument.Parse(job.Params ?? "{}");
         var r = doc.RootElement;
+        var tries = r.TryGetProperty("tries", out var n) && n.ValueKind == JsonValueKind.Number ? Math.Clamp(n.GetInt32(), 1, 4) : 1;
+        if (job.Kind == "restore") return (RestorePrompt, null, null, false, tries, "kontext");
         string? Text(string key) => r.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
         var prompt = Text("prompt");
         if (string.IsNullOrWhiteSpace(prompt)) throw new InvalidOperationException("Demande de modification sans phrase.");
-        return (prompt, Text("mask_hash"), Text("mask_text"), r.TryGetProperty("erase", out var e) && e.ValueKind == JsonValueKind.True);
+        return (prompt, Text("mask_hash"), Text("mask_text"), r.TryGetProperty("erase", out var e) && e.ValueKind == JsonValueKind.True,
+            tries, Text("engine") ?? "kontext");
     }
 
     /// <summary>Writes the upright picture as a PNG, the mask (white = zone, any size) as transparency. Returns its size.</summary>
@@ -226,24 +237,61 @@ public sealed class ComfyUi
         output_target_width = target, output_target_height = target, output_padding = "32", device_mode = "gpu (much faster)",
     };
 
+    // The zone: painted (transparency of the upload), found from a text by SAM 3.1, or both added together; null if none.
+    private static JsonArray? Zone(JsonObject g, bool painted, string? maskText)
+    {
+        JsonArray? mask = painted ? Out("1", 1) : null;
+        if (string.IsNullOrWhiteSpace(maskText)) return mask;
+        g["50"] = Node("CheckpointLoaderSimple", new { ckpt_name = "sam3.1_multiplex_fp16.safetensors" });
+        g["51"] = Node("CLIPTextEncode", new { text = maskText, clip = Out("50", 1) });
+        g["52"] = Node("SAM3_Detect", new { model = Out("50", 0), image = Out("1", 0), conditioning = Out("51", 0), threshold = 0.4, refine_iterations = 2, individual_masks = false });
+        if (mask is null) return Out("52", 0);
+        g["53"] = Node("MaskComposite", new { destination = Out("1", 1), source = Out("52", 0), x = 0, y = 0, operation = "add" });
+        return Out("53", 0);
+    }
+
+    // LaMa empties the zone first (zoomed in at its own scale), when asked; returns the picture to draw on.
+    private static JsonArray Erased(JsonObject g, JsonArray mask, bool erase)
+    {
+        if (!erase) return Out("1", 0);
+        g["20"] = Node("INPAINT_LoadInpaintModel", new { model_name = "big-lama.pt" });
+        g["21"] = Node("InpaintCropImproved", Crop(Out("1", 0), mask, 512, 10, 16, 2.5, true));
+        g["22"] = Node("INPAINT_InpaintWithModel", new { inpaint_model = Out("20", 0), image = Out("21", 1), mask = Out("21", 2), seed = 0 });
+        g["23"] = Node("InpaintStitchImproved", new { stitcher = Out("21", 0), inpainted_image = Out("22", 0) });
+        return Out("23", 0);
+    }
+
+    /// <summary>
+    /// The other engine, RealVisXL (SDXL), kept "just in case" next to Kontext: it only redraws a zone (inpainting,
+    /// zoomed to 1024 px, soft edge, the rest identical), from the sentence as a description of what must be there.
+    /// </summary>
+    private static JsonObject EditSdxl(string name, string jobId, string prompt, bool painted, string? maskText, bool erase)
+    {
+        var g = new JsonObject { ["1"] = Node("LoadImage", new { image = name }) };
+        var mask = Zone(g, painted, maskText) ?? throw new InvalidOperationException("RealVisXL a besoin d'une zone.");
+        var basePicture = Erased(g, mask, erase);
+        g["2"] = Node("CheckpointLoaderSimple", new { ckpt_name = "realvisxl_v5_fp16.safetensors" });
+        g["3"] = Node("CLIPTextEncode", new { text = prompt + ", photo, natural light, realistic, detailed", clip = Out("2", 1) });
+        g["4"] = Node("CLIPTextEncode", new { text = "blurry, lowres, deformed, watermark, text, signature, jpeg artifacts, cartoon", clip = Out("2", 1) });
+        g["10"] = Node("InpaintCropImproved", Crop(basePicture, mask, 1024, 8, 32, 3.0, false));
+        g["11"] = Node("DifferentialDiffusion", new { model = Out("2", 0) });
+        g["12"] = Node("InpaintModelConditioning", new { positive = Out("3", 0), negative = Out("4", 0), vae = Out("2", 2), pixels = Out("10", 1), mask = Out("10", 2), noise_mask = true });
+        g["5"] = Node("KSampler", new
+        {
+            model = Out("11", 0), positive = Out("12", 0), negative = Out("12", 1), latent_image = Out("12", 2), seed = Seed(),
+            steps = 30, cfg = 6.0, sampler_name = "dpmpp_2m", scheduler = "karras", denoise = 1.0,
+        });
+        g["6"] = Node("VAEDecode", new { samples = Out("5", 0), vae = Out("2", 2) });
+        g["13"] = Node("InpaintStitchImproved", new { stitcher = Out("10", 0), inpainted_image = Out("6", 0) });
+        return Save(g, Out("13", 0), jobId);
+    }
+
     private static JsonObject Edit(string name, string jobId, string prompt, bool painted, string? maskText, bool erase, int width, int height)
     {
         var g = new JsonObject { ["1"] = Node("LoadImage", new { image = name }) };
 
         // The zone: painted (transparency of the upload), found from a text by SAM 3.1, or both added together.
-        JsonArray? mask = painted ? Out("1", 1) : null;
-        if (!string.IsNullOrWhiteSpace(maskText))
-        {
-            g["50"] = Node("CheckpointLoaderSimple", new { ckpt_name = "sam3.1_multiplex_fp16.safetensors" });
-            g["51"] = Node("CLIPTextEncode", new { text = maskText, clip = Out("50", 1) });
-            g["52"] = Node("SAM3_Detect", new { model = Out("50", 0), image = Out("1", 0), conditioning = Out("51", 0), threshold = 0.4, refine_iterations = 2, individual_masks = false });
-            if (mask is null) mask = Out("52", 0);
-            else
-            {
-                g["53"] = Node("MaskComposite", new { destination = Out("1", 1), source = Out("52", 0), x = 0, y = 0, operation = "add" });
-                mask = Out("53", 0);
-            }
-        }
+        JsonArray? mask = Zone(g, painted, maskText);
 
         if (mask is null)
         {
@@ -257,15 +305,7 @@ public sealed class ComfyUi
 
         // With a zone: LaMa empties it first if asked (zoomed in at its own scale), then Kontext draws the sentence in
         // the zone only, zoomed to 1024 px, pasted back with a soft edge: the rest stays identical, at full size.
-        var basePicture = Out("1", 0);
-        if (erase)
-        {
-            g["20"] = Node("INPAINT_LoadInpaintModel", new { model_name = "big-lama.pt" });
-            g["21"] = Node("InpaintCropImproved", Crop(Out("1", 0), mask, 512, 10, 16, 2.5, true));
-            g["22"] = Node("INPAINT_InpaintWithModel", new { inpaint_model = Out("20", 0), image = Out("21", 1), mask = Out("21", 2), seed = 0 });
-            g["23"] = Node("InpaintStitchImproved", new { stitcher = Out("21", 0), inpainted_image = Out("22", 0) });
-            basePicture = Out("23", 0);
-        }
+        var basePicture = Erased(g, mask, erase);
         g["10"] = Node("InpaintCropImproved", Crop(basePicture, (JsonArray)mask.DeepClone(), 1024, 8, 32, 3.0, false));
         g["35"] = Node("VAEEncode", new { pixels = Out("10", 1), vae = Out("32", 0) });
         g["43"] = Node("SetLatentNoiseMask", new { samples = Out("35", 0), mask = Out("10", 2) });

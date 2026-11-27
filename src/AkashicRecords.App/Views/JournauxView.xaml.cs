@@ -1198,6 +1198,9 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
             var editItem = new MenuItem { Header = ImageEditing.EditLabel };
             editItem.Click += (_, _) => ShowEditedImage(element, border, content, ImageEditing.Edit(this, "CanvasElement", element.Id));
             menu.Items.Add(editItem);
+            var undoItem = new MenuItem { Header = ImageEditing.UndoLabel };
+            undoItem.Click += (_, _) => ShowEditedImage(element, border, content, ImageEditing.Undo(this, "CanvasElement", element.Id));
+            menu.Items.Add(undoItem);
             var revertItem = new MenuItem { Header = ImageEditing.RevertLabel };
             revertItem.Click += (_, _) => ShowEditedImage(element, border, content, ImageEditing.Revert(this, "CanvasElement", element.Id));
             menu.Items.Add(revertItem);
@@ -1693,6 +1696,12 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
             menu.Items.Add(editItem);
             if (ImageEditing.IsEdited(photo.ImagePath))
             {
+                if (ImageEditing.HasPreviousStep(photo.ImagePath))
+                {
+                    var undoItem = new MenuItem { Header = ImageEditing.UndoLabel };
+                    undoItem.Click += (_, _) => { if (ImageEditing.Undo(this, "JournalPhoto", photo.Id) is not null) RefreshEntryPhotos(); };
+                    menu.Items.Add(undoItem);
+                }
                 var revertItem = new MenuItem { Header = ImageEditing.RevertLabel };
                 revertItem.Click += (_, _) => { if (ImageEditing.Revert(this, "JournalPhoto", photo.Id) is not null) RefreshEntryPhotos(); };
                 menu.Items.Add(revertItem);

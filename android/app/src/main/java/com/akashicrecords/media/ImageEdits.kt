@@ -30,7 +30,8 @@ import kotlin.random.Random
  *
  *  - the edited picture is a NEW file in the same folder, `<root>.edit-<8 hex>.jpg`, where `<root>` is the
  *    current name up to its first `.edit-` (else the whole name, extension included): `abc.heic` →
- *    `abc.heic.edit-1a2b3c4d.jpg`, and editing that again → `abc.heic.edit-9f8e7d6c.jpg`;
+ *    `abc.heic.edit-1a2b3c4d.jpg`; editing that again names the version it came from →
+ *    `abc.heic.edit-9f8e7d6c.from-1a2b3c4d.jpg`, so « Annuler la dernière étape » ([undo]) goes back one step;
  *  - the row then points at it; nothing is deleted by an edit, so « Revenir à l'original » (the same folder + `<root>`)
  *    works on every device, until « Rendre définitif » ([makeFinal]) keeps only the current version;
  *  - on save: EXIF orientation → rotation → crop (on the rotated picture) → contrast and saturation, JPEG 92.
@@ -65,13 +66,46 @@ object ImageEdits {
         return dir + root(name)
     }
 
-    /** A new edit path next to [path], in the same separator style, not taken yet on this phone. */
+    /** A new edit path next to [path], in the same separator style, not taken yet on this phone. An edit of an
+     *  edit names the version it came from (`.from-<its 8 hex>`), as on the PC and the hub. */
     fun newEditPath(context: Context, path: String): String {
         val (dir, name) = split(path)
+        val from = editId(name)?.let { FROM + it } ?: ""
         while (true) {
-            val candidate = dir + root(name) + MARK + "%08x".format(Random.nextLong(0, 1L shl 32)) + ".jpg"
+            val candidate = dir + root(name) + MARK + "%08x".format(Random.nextLong(0, 1L shl 32)) + from + ".jpg"
             if (MediaFiles.resolve(context, candidate)?.exists() != true) return candidate
         }
+    }
+
+    private const val FROM = ".from-"
+    private val fromPattern = Regex("\\.from-([0-9a-fA-F]{8})\\.jpg$")
+
+    /** The 8 hex naming an edit, or null for a picture that is not an edit. */
+    private fun editId(name: String): String? {
+        val at = name.indexOf(MARK)
+        if (at < 0 || name.length < at + MARK.length + 8) return null
+        return name.substring(at + MARK.length, at + MARK.length + 8).takeIf { id -> id.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' } }?.lowercase()
+    }
+
+    /** True when going back one step is not the same as going back to the original. */
+    fun hasPreviousStep(path: String?): Boolean = path != null && fromPattern.containsMatchIn(split(path).second)
+
+    /**
+     * The version before the current edit: the edit named by `.from-` (found in the folder on this phone or in the
+     * synchronised file list), or the original when the edit came straight from it. Null when unknown here.
+     */
+    fun previousOf(context: Context, path: String): String? {
+        if (!isEdited(path)) return null
+        val (dir, name) = split(path)
+        val from = fromPattern.find(name)?.groupValues?.get(1)?.lowercase() ?: return originalOf(path)
+        val prefix = root(name) + MARK + from
+        MediaFiles.resolve(context, path)?.parentFile?.listFiles()?.firstOrNull { it.name.startsWith(prefix) }?.let { return dir + it.name }
+        val key = (dir + prefix).replace('\\', '/').trimStart('/').lowercase()
+        return runCatching {
+            AkashicDatabase.get(context).openHelper.readableDatabase
+                .query("SELECT Path FROM sync_file WHERE substr(lower(Path), 1, ?) = ? LIMIT 1", arrayOf<Any?>(key.length, key))
+                .use { c -> if (c.moveToFirst()) dir + c.getString(0).substringAfterLast('/') else null }
+        }.getOrNull()
     }
 
     private fun exifTurn(file: File): Matrix? {
@@ -244,6 +278,23 @@ object ImageEdits {
         setPath(AkashicDatabase.get(context), table, id, original, uprightSize(file))
         SyncService.runNow(context)
         Result.success(original)
+    }
+
+    /**
+     * « Annuler la dernière étape »: the row goes back to the version before the current edit (the edits stay on
+     * disk). Returns that path, or the message to show. An Archives photo's file may be only on the hub: the viewer fetches it.
+     */
+    suspend fun undo(context: Context, table: String, id: Int, currentPath: String): Result<String> = withContext(Dispatchers.IO) {
+        if (!isEdited(currentPath)) return@withContext Result.failure(IllegalStateException("Cette image n'a pas été modifiée."))
+        val previous = previousOf(context, currentPath)
+            ?: return@withContext Result.failure(IllegalStateException("La version précédente n'est pas connue sur ce téléphone : synchronise puis réessaie."))
+        val file = MediaFiles.resolve(context, previous)?.takeIf { it.isFile }
+        if (file == null && table != "Photo") {
+            return@withContext Result.failure(IllegalStateException("La version précédente n'est pas encore sur ce téléphone : synchronise puis réessaie."))
+        }
+        setPath(AkashicDatabase.get(context), table, id, previous, uprightSize(file))
+        SyncService.runNow(context)
+        Result.success(previous)
     }
 
     /** The confirmation shown before [makeFinal]. */

@@ -28,7 +28,10 @@ object HubCompute {
         val addedAt: String, val workerName: String?, val seconds: Double?, val resultHash: String?,
         val resultSize: Long?, val resultName: String?, val error: String?,
         val attachType: String? = null, val attachedPath: String? = null, val attachError: String? = null,
+        val kind: String? = null, val prompt: String? = null, val results: List<String> = emptyList(),
     ) {
+        /** Several versions waiting for the user's choice ([choose]). */
+        val choosing get() = done && results.size > 1 && attachedPath == null
         val waiting get() = status == "queued"
         val running get() = status == "running"
         val done get() = status == "done"
@@ -38,6 +41,8 @@ object HubCompute {
     class Board(val enabled: Boolean, val models: List<Model>, val workers: List<String>, val jobs: List<Job>) {
         val busy get() = jobs.any { it.waiting || it.running }
         fun model(name: String?) = models.firstOrNull { it.name == name }
+        /** The upscale models (the AI edits, FLUX Kontext, are asked from the image editor, not here). */
+        val upscalers get() = models.filter { it.name != "flux-kontext" }
     }
 
     private val _board = MutableStateFlow<Board?>(null)
@@ -68,7 +73,9 @@ object HubCompute {
                     it.getString("status"), it.optString("added_at"), it.str("worker_name"),
                     if (it.isNull("seconds")) null else it.optDouble("seconds"), it.str("result_hash"),
                     if (it.isNull("result_size")) null else it.optLong("result_size"), it.str("result_name"), it.str("error"),
-                    it.str("attach_type"), it.str("attached_path"), it.str("attach_error"))
+                    it.str("attach_type"), it.str("attached_path"), it.str("attach_error"), it.str("kind"),
+                    it.str("params")?.let { p -> runCatching { JSONObject(p).optString("prompt").ifEmpty { null } }.getOrNull() },
+                    it.str("results")?.let { r -> runCatching { org.json.JSONArray(r).let { a -> (0 until a.length()).map(a::getString) } }.getOrNull() } ?: emptyList())
             },
         )
     }
@@ -89,6 +96,10 @@ object HubCompute {
     suspend fun refresh(context: Context) = act(context) { }
     suspend fun retry(context: Context, id: String) = act(context) { it.retryCompute(id) }
     suspend fun remove(context: Context, id: String) = act(context) { it.removeCompute(id) }
+
+    /** Keeps one of several versions: the hub makes it the picture's edit; it reaches this phone at the sync started here. */
+    suspend fun choose(context: Context, id: String, hash: String): Boolean =
+        act(context) { it.chooseCompute(id, hash) }.also { if (it) SyncService.runNow(context) }
 
     private fun dir(context: Context) = File(context.cacheDir, "compute").apply { mkdirs() }
 
@@ -159,6 +170,7 @@ object HubCompute {
      */
     suspend fun requestEdit(
         context: Context, table: String, localId: Long, kind: String, prompt: String?, mask: Bitmap?, maskText: String?, erase: Boolean,
+        tries: Int = 1, engine: String = "kontext",
     ): String? = withContext(Dispatchers.IO) {
         if (table !in inPlaceKinds) return@withContext "Ce type d'image ne peut pas être modifié par l'IA."
         val hub = hub(context) ?: return@withContext "Ce téléphone n'est pas appairé au serveur (Réglages → Synchronisation)."
@@ -179,7 +191,7 @@ object HubCompute {
                     temp.delete()
                 }
             }
-            hub.addComputeEdit(table, syncId, kind, prompt, maskHash, maskText, erase)
+            hub.addComputeEdit(table, syncId, kind, prompt, maskHash, maskText, erase, tries, engine)
             refresh(context)
             null
         } catch (e: Exception) {

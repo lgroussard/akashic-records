@@ -122,12 +122,16 @@ public static class ComputeRoutes
 {
     public sealed record JobRequest(string? Model, string? InputHash, string? InputName);
     public sealed record ClaimRequest(string? Name, string? Rid, List<string>? Models);
-    public sealed record CompleteRequest(string? ResultHash, double? Seconds);
+    /// <summary>ResultHashes: every version of a job asked with several tries (ResultHash is then the first).</summary>
+    public sealed record CompleteRequest(string? ResultHash, double? Seconds, List<string>? ResultHashes = null);
+    public sealed record ChooseRequest(string? ResultHash);
     public sealed record FailRequest(string? Error);
     /// <summary>Kind: null/"upscale", "edit" (Prompt required; MaskHash = a PNG blob, white where the change goes;
     /// MaskText = what to find and mask too, in English; Erase = empty the zone first) or "restore".</summary>
+    /// <summary>Tries: 1 to 4 versions (more than one: they wait for a choice, see /choose). Engine: "kontext" (default)
+    /// or "sdxl" (RealVisXL, with a zone only).</summary>
     public sealed record FromRequest(string? EntityType, string? EntityId, string? Kind = null, string? Prompt = null,
-        string? MaskHash = null, string? MaskText = null, bool? Erase = null);
+        string? MaskHash = null, string? MaskText = null, bool? Erase = null, int? Tries = null, string? Engine = null);
 
     public const string KindEdit = "edit";
     public const string KindRestore = "restore";
@@ -206,11 +210,18 @@ public static class ComputeRoutes
                     if (mask is not null && (!BlobStore.IsHash(mask) || !blobs.Exists(mask))) return Results.BadRequest(new { error = "mask_hash: send the mask to /media first" });
                     var maskText = string.IsNullOrWhiteSpace(req.MaskText) ? null : req.MaskText.Trim();
                     if (maskText is { Length: > 200 }) return Results.BadRequest(new { error = "mask_text: 200 characters at most" });
+                    var engine = req.Engine is null or "" ? "kontext" : req.Engine;
+                    if (engine is not ("kontext" or "sdxl")) return Results.BadRequest(new { error = "engine: kontext or sdxl" });
+                    if (engine == "sdxl" && mask is null && maskText is null)
+                        return Results.BadRequest(new { error = "RealVisXL a besoin d'une zone : peins-la ou nomme-la." });
                     parameters = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>
                     {
                         ["prompt"] = prompt, ["mask_hash"] = mask, ["mask_text"] = maskText, ["erase"] = req.Erase == true,
+                        ["tries"] = Math.Clamp(req.Tries ?? 1, 1, 4), ["engine"] = engine,
                     });
                 }
+                else if (req.Tries is > 1)
+                    parameters = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?> { ["tries"] = Math.Clamp(req.Tries.Value, 1, 4) });
             }
             else return Results.BadRequest(new { error = "kind: upscale, edit or restore" });
             try
@@ -247,10 +258,31 @@ public static class ComputeRoutes
             if (!BlobStore.IsHash(hash) || !blobs.Exists(hash!)) return Results.BadRequest(new { error = "result_hash: send the result to /media first" });
             var size = new FileInfo(blobs.PathOf(hash!)).Length;
             var resultName = job.Kind is null ? OnnxUpscaler.ResultName(job.InputName) : Path.GetFileNameWithoutExtension(job.InputName) + "-ia.png";
-            if (!jobs.Complete(id, device, hash!, size, resultName, Math.Max(0, req!.Seconds ?? 0)))
+            var versions = (req!.ResultHashes ?? new()).Select(h => h.ToLowerInvariant()).Distinct().ToList();
+            if (versions.Any(h => !BlobStore.IsHash(h) || !blobs.Exists(h))) return Results.BadRequest(new { error = "result_hashes: send every version to /media first" });
+            if (!jobs.Complete(id, device, hash!, size, resultName, Math.Max(0, req.Seconds ?? 0)))
                 return Results.Conflict(new { error = "not your job (or not running)" });
-            attach.Attach(jobs, jobs.Job(id)!);
+            // Several versions of a picture of the app: they wait for the user's choice (/choose) instead of being posed.
+            if (versions.Count > 1 && job.AttachType is not null)
+                jobs.SetResults(id, System.Text.Json.JsonSerializer.Serialize(versions));
+            else
+                attach.Attach(jobs, jobs.Job(id)!);
             return Results.Ok(jobs.Job(id));
+        });
+
+        // The version kept among several: posed like a single result; the other ones stay only in the job's list.
+        app.MapPost("/compute/jobs/{id}/choose", (string id, ChooseRequest? req) =>
+        {
+            var job = jobs.Job(id);
+            if (job is null) return Results.NotFound();
+            var hash = req?.ResultHash?.ToLowerInvariant();
+            var versions = job.Results is null ? new List<string>() : System.Text.Json.JsonSerializer.Deserialize<List<string>>(job.Results) ?? new();
+            if (hash is null || !versions.Contains(hash)) return Results.BadRequest(new { error = "result_hash: one of the job's versions" });
+            if (job.AttachedPath is not null) return Results.Conflict(new { error = "already chosen" });
+            jobs.Chose(id, hash, new FileInfo(blobs.PathOf(hash)).Length);
+            attach.Attach(jobs, jobs.Job(id)!);
+            var done = jobs.Job(id)!;
+            return done.AttachError is null ? Results.Ok(done) : Results.Json(new { error = done.AttachError }, statusCode: StatusCodes.Status422UnprocessableEntity);
         });
 
         app.MapPost("/compute/jobs/{id}/fail", (string id, FailRequest? req, HttpContext ctx) =>
