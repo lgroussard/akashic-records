@@ -23,7 +23,8 @@ public static class ServerStatus
     public sealed record Work(int Queued, int Running, int Failed, int Done);
     public sealed record Status(
         string Version, string Host, string StartedAt, Disk? Disk, List<StorageKind> Storage, long BlobBytes, long BlobFiles,
-        Backup Backup, List<Device> Devices, Dictionary<string, long> Entities, Work Downloads, Work Compute);
+        Backup Backup, List<Device> Devices, Dictionary<string, long> Entities, Work Downloads, Work Compute,
+        BlobCleaner.Report? Cleanup = null);
 
     public static void Map(WebApplication app, HubStore store, DownloadStore downloads, ComputeStore compute, HubOptions options)
     {
@@ -58,7 +59,20 @@ public static class ServerStatus
         return new Status(
             HubApp.Version, Environment.MachineName, Started.ToString("O"), DiskOf(options.DataDir), kinds,
             sizes["blobs"], sizes["blob_files"], ReadBackup(options), devices, store.EntityCounts(),
-            Count(downloads.Jobs(200).Select(j => j.Status)), Count(compute.Jobs(200).Select(j => j.Status)));
+            Count(downloads.Jobs(200).Select(j => j.Status)), Count(compute.Jobs(200).Select(j => j.Status)), ReadCleanup(options));
+    }
+
+    /// <summary>The last clean-up pass (BlobCleaner.cs): what is waiting to be removed for good, and when.</summary>
+    private static BlobCleaner.Report? ReadCleanup(HubOptions options)
+    {
+        var file = Path.Combine(options.DataDir, BlobCleaner.StatusFile);
+        if (!File.Exists(file)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<BlobCleaner.Report>(File.ReadAllText(file),
+                new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower });
+        }
+        catch (Exception) { return null; }
     }
 
     private static Disk? DiskOf(string path)

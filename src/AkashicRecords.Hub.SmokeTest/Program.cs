@@ -1079,5 +1079,58 @@ await Scenario("19. Parcourir le disque : les fichiers du catalogue montrent ce 
         "on descend dans le catalogue ; les fichiers gardent leur apercu");
 });
 
+await Scenario("20. Menage : un fichier que plus rien n'utilise est efface apres 30 jours", async hub =>
+{
+    hub.EntityTypes.Add("MediaFile");
+    hub.EntityTypes.Add("Photo");
+    await hub.RestartAsync();
+    var pc = await hub.Device("pc");
+    async Task<string> Up(string content)
+    {
+        var r = await pc.Http.PostAsync("/media", new ByteArrayContent(Encoding.UTF8.GetBytes(content)));
+        return (await r.Content.ReadFromJsonAsync<MediaResponse>(SimDevice.Wire))!.Hash;
+    }
+    string a = await Up("photo a"), b = await Up("photo b"), bEdit = await Up("photo b retouchee"), c = await Up("photo c supprimee"),
+        d = await Up("envoye puis jamais liste"), e = await Up("image a agrandir");
+    JsonElement J(object o) => JsonSerializer.SerializeToElement(o);
+    Mutation M(string type, string id, object payload) => new(Guid.NewGuid().ToString(), type, id, 0, J(payload), false);
+    await pc.Http.PostAsJsonAsync("/sync/push", new PushRequest(null, new List<Mutation>
+    {
+        M("MediaFile", "fa", new { Path = "media\\archive\\a.jpg", Hash = a, Size = 7 }),
+        M("MediaFile", "fb", new { Path = "media\\archive\\b.jpg", Hash = b, Size = 7 }),
+        M("MediaFile", "fbe", new { Path = "media\\archive\\b.jpg.edit-1a2b3c4d.jpg", Hash = bEdit, Size = 17 }),
+        M("MediaFile", "fc", new { Path = "media\\archive\\c.jpg", Hash = c, Size = 17 }),
+        M("Photo", "pa", new { ImagePath = "media\\archive\\a.jpg" }),
+        M("Photo", "pb", new { ImagePath = "media\\archive\\b.jpg.edit-1a2b3c4d.jpg" }), // edited: its original stays
+    }), SimDevice.Wire);
+    hub.Get<ComputeStore>().AddJob("nomos-webphoto-4x", e, "x.jpg", 16, "pc");
+
+    var options = hub.Get<HubOptions>();
+    var blobs = hub.Get<BlobStore>();
+    BlobCleaner.Report Run(int days) => BlobCleaner.Run(options, hub.Store, hub.Get<ComputeStore>(), blobs, DateTime.UtcNow.AddDays(days));
+
+    var first = Run(0);
+    Check(first.DeletedFiles == 0 && first.DeletedBlobs == 0 && first.PendingFiles == 2,
+        "1er passage : rien n'est efface, 2 fichiers en attente (la photo sans fiche, l'envoi jamais liste)");
+
+    // Photo a is deleted in the app.
+    await pc.Http.PostAsJsonAsync("/sync/push", new PushRequest(null, new List<Mutation>
+        { new(Guid.NewGuid().ToString(), "Photo", "pa", hub.Store.Rev("Photo", "pa"), null, true) }), SimDevice.Wire);
+
+    var month = Run(31);
+    Check(month.DeletedFiles == 1 && hub.Store.Current("MediaFile", "fc") is null && hub.Store.Current("MediaFile", "fa") is not null,
+        "30 jours plus tard : la photo sans fiche quitte le catalogue ; celle supprimee hier attend encore");
+    Check(!blobs.Exists(d) && !blobs.Exists(c) && blobs.Exists(a), "le fichier jamais liste et celui de la photo sans fiche sont effaces du disque");
+    Check(blobs.Exists(b) && blobs.Exists(bEdit) && blobs.Exists(e), "une photo retouchee garde son original ; une image a agrandir reste");
+
+    var later = Run(62);
+    Check(!blobs.Exists(a) && !blobs.Exists(c) && hub.Store.Current("MediaFile", "fa") is null,
+        "encore 30 jours : la photo supprimee dans l'app est effacee pour de bon");
+    Check(blobs.Exists(b) && blobs.Exists(bEdit) && blobs.Exists(e) && later.PendingFiles == 0, "rien d'autre en attente");
+
+    var status = JsonDocument.Parse(await (await pc.Http.GetAsync("/server")).Content.ReadAsStringAsync()).RootElement;
+    Check(status.GetProperty("cleanup").GetProperty("grace_days").GetInt32() == 30, "l'ecran Serveur voit le menage");
+});
+
 Console.WriteLine($"\n{passed} verifications reussies, {failures} en echec.");
 return failures == 0 ? 0 : 1;

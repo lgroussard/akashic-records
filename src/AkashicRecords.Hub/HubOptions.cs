@@ -37,6 +37,9 @@ public sealed partial class HubOptions
     public bool Compute { get; set; } = true;
     /// <summary>Models the hub runs itself (on its processor) when no device able to run them is around (comma list; empty = none).</summary>
     public string ComputeHubModels { get; set; } = "nomos-webphoto-4x";
+    /// <summary>Files no longer used by the catalogue (a deleted photo…) are kept this many days, then removed for good
+    /// (BlobCleaner.cs). 0 turns the clean-up off.</summary>
+    public int DeleteAfterDays { get; set; } = 30;
 
     /// <summary>Full listen URL; overrides Listen/Port. Used by the smoke test (port 0).</summary>
     public string? Url { get; set; }
@@ -93,6 +96,7 @@ public sealed partial class HubOptions
         o.DownloadArgs = section["DownloadArgs"] ?? o.DownloadArgs;
         if (bool.TryParse(section["Compute"], out var compute)) o.Compute = compute;
         o.ComputeHubModels = section["ComputeHubModels"] ?? o.ComputeHubModels;
+        o.DeleteAfterDays = Int(section["DeleteAfterDays"], o.DeleteAfterDays, "Hub:DeleteAfterDays");
 
         Func<string, string?> env = Environment.GetEnvironmentVariable;
         if (env("AKASHIC_HUB_LISTEN") is { Length: > 0 } l) o.Listen = l;

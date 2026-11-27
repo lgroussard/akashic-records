@@ -229,4 +229,21 @@ public sealed class ComputeStore
         return Query(c, "WHERE status = 'running' AND lease_until >= $now", ("$now", NowMs()))
             .Select(j => j.Worker!).ToHashSet();
     }
+
+    /// <summary>Every blob a listed job still needs (its input, mask, results and their versions): the clean-up
+    /// (BlobCleaner.cs) never removes those. Any 64-hex value of a row counts, whatever column holds it.</summary>
+    public HashSet<string> ReferencedHashes()
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT * FROM cp_job";
+        using var r = cmd.ExecuteReader();
+        while (r.Read())
+            for (var i = 0; i < r.FieldCount; i++)
+                if (!r.IsDBNull(i) && r.GetValue(i) is string s)
+                    foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(s, "[0-9a-fA-F]{64}"))
+                        set.Add(m.Value.ToLowerInvariant());
+        return set;
+    }
 }

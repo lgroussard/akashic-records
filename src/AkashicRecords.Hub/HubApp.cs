@@ -55,6 +55,7 @@ public static class HubApp
         builder.Services.AddSingleton(computeWorkers);
         builder.Services.AddSingleton<ComputeAttach>();
         if (options.Compute) builder.Services.AddHostedService<HubComputeWorker>();
+        builder.Services.AddHostedService<BlobCleaner>(); // files nothing uses any more: removed after DeleteAfterDays
 
         var app = builder.Build();
         var lastTouch = new ConcurrentDictionary<string, long>();

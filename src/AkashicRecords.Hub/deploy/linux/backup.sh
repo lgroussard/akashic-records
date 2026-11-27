@@ -7,8 +7,10 @@
 #       fichiers/                                         the user's own folder (~lgroussard/fichiers)
 #       DERNIERE-SAUVEGARDE.txt                           when and what, readable from any computer
 #
-# The databases are copied with SQLite's online backup (consistent while the hub runs). Files are only added
-# or updated, never removed from the copy: a file deleted by mistake on the server is still on the disk.
+# The databases are copied with SQLite's online backup (consistent while the hub runs). The catalogue's files follow the
+# hub (removed here once the hub removed them for good, 30 days after they stopped being used). The user's own
+# files are only added
+# or updated, never removed from the copy: a file deleted by mistake there is still on the disk.
 # No disk plugged in: nothing happens, the next night tries again.
 set -euo pipefail
 
@@ -67,8 +69,18 @@ for db in hub downloads; do
     ls -1 "$DEST/base/$db-"*.db 2>/dev/null | sort | head -n -"$KEEP" | xargs -r rm -f
 done
 
-# Content-addressed blobs never change once written: a plain add-only copy.
-rsync -rt --size-only "$DATA/blobs/" "$DEST/blobs/"
+# Content-addressed blobs never change once written. The copy follows the hub: a file the hub removed for good
+# (BlobCleaner.cs, 30 days after nothing used it any more) leaves the copy too.
+# Brake: if the hub holds less than half of what the copy holds, something went wrong on the hub (lost data, wrong
+# folder): add only, remove nothing, and say so.
+here=$(find "$DATA/blobs" -type f ! -path '*/tmp/*' | wc -l)
+there=$(find "$DEST/blobs" -type f 2>/dev/null | wc -l)
+if [ "$there" -gt 100 ] && [ $((here * 2)) -lt "$there" ]; then
+    log "frein : le hub n'a que $here fichiers contre $there dans la copie, rien n'est retire de la copie"
+    rsync -rt --size-only --exclude tmp/ "$DATA/blobs/" "$DEST/blobs/"
+else
+    rsync -rt --size-only --delete --exclude tmp/ "$DATA/blobs/" "$DEST/blobs/"
+fi
 [ -d "$USER_FILES" ] && rsync -rt "$USER_FILES/" "$DEST/fichiers/"
 
 blobs=$(find "$DEST/blobs" -type f | wc -l)

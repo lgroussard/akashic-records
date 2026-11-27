@@ -30,8 +30,10 @@ public sealed record HubDiskFolder(string Name, long Size, long Files, bool Deni
 public sealed record HubDiskFile(string Name, long Size, string Kind = "other", string? Label = null, string? Hash = null);
 public sealed record HubDiskView(string State, string? At, long? Seconds, bool Refreshing, string Root, string Path, long Size, long Files,
     List<HubDiskFolder> Folders, List<HubDiskFile> Largest, long OtherFilesBytes, long SmallFoldersBytes, long SmallFolders, bool Catalogue = false);
+public sealed record HubCleanup(string RanAt, int GraceDays, int PendingFiles, long PendingBytes, string? NextAt, int DeletedFiles, int DeletedBlobs, long DeletedBytes, string? Brake);
 public sealed record HubServerStatus(string Version, string Host, string StartedAt, HubServerDisk? Disk, List<HubStorageKind> Storage,
-    long BlobBytes, long BlobFiles, HubBackupStatus Backup, List<HubServerDevice> Devices, Dictionary<string, long> Entities, HubWork Downloads, HubWork Compute);
+    long BlobBytes, long BlobFiles, HubBackupStatus Backup, List<HubServerDevice> Devices, Dictionary<string, long> Entities, HubWork Downloads, HubWork Compute,
+    HubCleanup? Cleanup = null);
 
 // Shared computing (the hub's Compute.cs): the hub keeps the model, devices run it when they can.
 public sealed record HubComputeModel(string Name, string Label, string Description, bool Hub, List<string>? Runners);
