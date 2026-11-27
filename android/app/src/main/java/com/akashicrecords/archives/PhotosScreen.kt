@@ -35,6 +35,7 @@ import com.akashicrecords.journaux.nowIso
 import com.akashicrecords.media.FileImage
 import com.akashicrecords.media.ImageEdits
 import com.akashicrecords.media.ImageEditor
+import com.akashicrecords.media.ConfirmMakeFinal
 import com.akashicrecords.media.LocalImage
 import com.akashicrecords.media.MediaFiles
 import com.akashicrecords.media.ZoomState
@@ -241,6 +242,7 @@ private fun Viewer(
     var menu by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Photo?>(null) }
     var reverting by remember { mutableStateOf(false) }
+    var finalizing by remember { mutableStateOf<Photo?>(null) } // « Rendre définitif » waiting for its confirmation
     var zoomed by remember { mutableStateOf(false) } // the shown photo is zoomed in: no swipe to the next
     // A new path is a new file: the viewer and the gallery's image caches (keyed by path) show it at once.
     fun replacePath(id: Int, path: String) {
@@ -298,6 +300,10 @@ private fun Viewer(
                             reverting = false
                         }
                     })
+                    if (ImageEdits.isEdited(current.ImagePath)) DropdownMenuItem(text = { Text("Rendre définitif") }, onClick = {
+                        menu = false
+                        finalizing = current
+                    })
                 }
             }
             TextButton(onClick = {
@@ -324,6 +330,22 @@ private fun Viewer(
             if (date != null) Text(frenchDate(date), fontSize = 12.sp, color = Palette.TextMuted)
             if (current.Description.isNotBlank()) Text(current.Description, fontSize = 13.sp, color = Palette.TextMuted, modifier = Modifier.padding(top = 4.dp))
         }
+    }
+    finalizing?.let { p ->
+        ConfirmMakeFinal(
+            onConfirm = {
+                finalizing = null
+                reverting = true
+                note = "Finalisation…"
+                scope.launch {
+                    ImageEdits.makeFinal(context, "Photo", p.Id)
+                        .onSuccess { path -> replacePath(p.Id, path); note = "Modification rendue définitive." }
+                        .onFailure { note = it.message }
+                    reverting = false
+                }
+            },
+            onDismiss = { finalizing = null },
+        )
     }
     if (confirm) ConfirmDelete("cette photo", onConfirm = {
         confirm = false

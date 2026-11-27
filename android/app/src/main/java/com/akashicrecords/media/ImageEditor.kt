@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -149,6 +150,21 @@ fun ImageEditor(
         }
     }
 
+    var confirmFinal by remember { mutableStateOf(false) }
+    if (confirmFinal) ConfirmMakeFinal(
+        onConfirm = {
+            confirmFinal = false
+            busy = true
+            message = "Finalisation…"
+            scope.launch {
+                ImageEdits.makeFinal(context, table, id)
+                    .onSuccess { onChanged(it); onClose() }
+                    .onFailure { message = it.message; busy = false }
+            }
+        },
+        onDismiss = { confirmFinal = false },
+    )
+
     Dialog(onDismissRequest = { if (!busy) onClose() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(Modifier.fillMaxSize().background(Palette.AppBg)) {
             // Top bar: leave, what is going on, save.
@@ -270,10 +286,22 @@ fun ImageEditor(
                 if (edited) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("Image déjà modifiée", fontSize = 12.sp, color = Palette.TextFaint, modifier = Modifier.weight(1f).padding(start = 8.dp))
                     TextButton(enabled = !busy, onClick = { revert() }) { Text("Revenir à l'original") }
+                    TextButton(enabled = !busy, onClick = { confirmFinal = true }) { Text("Rendre définitif") }
                 }
             }
         }
     }
+}
+
+/** The confirmation before « Rendre définitif » ([ImageEdits.makeFinal]), shared by every entry point. */
+@Composable
+fun ConfirmMakeFinal(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        text = { Text(ImageEdits.FINAL_QUESTION) },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Oui") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } },
+    )
 }
 
 @Composable

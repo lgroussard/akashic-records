@@ -1201,8 +1201,12 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
             var revertItem = new MenuItem { Header = ImageEditing.RevertLabel };
             revertItem.Click += (_, _) => ShowEditedImage(element, border, content, ImageEditing.Revert(this, "CanvasElement", element.Id));
             menu.Items.Add(revertItem);
+            var finalItem = new MenuItem { Header = ImageEditing.FinalLabel };
+            finalItem.Click += (_, _) => ShowEditedImage(element, border, content, ImageEditing.MakeFinal(this, "CanvasElement", element.Id));
+            menu.Items.Add(finalItem);
             // The path changes with each edit: whether there is an original to go back to is decided on opening.
-            menu.Opened += (_, _) => revertItem.Visibility = ImageEditing.IsEdited(element.ImagePath) ? Visibility.Visible : Visibility.Collapsed;
+            menu.Opened += (_, _) => finalItem.Visibility = revertItem.Visibility =
+                ImageEditing.IsEdited(element.ImagePath) ? Visibility.Visible : Visibility.Collapsed;
             if (UpscaleAction.Available)
             {
                 var upscaleItem = new MenuItem { Header = UpscaleAction.Label };
@@ -1692,6 +1696,9 @@ public partial class JournauxView : UserControl, ISearchNavigable, IRemembersVie
                 var revertItem = new MenuItem { Header = ImageEditing.RevertLabel };
                 revertItem.Click += (_, _) => { if (ImageEditing.Revert(this, "JournalPhoto", photo.Id) is not null) RefreshEntryPhotos(); };
                 menu.Items.Add(revertItem);
+                var finalItem = new MenuItem { Header = ImageEditing.FinalLabel };
+                finalItem.Click += (_, _) => { if (ImageEditing.MakeFinal(this, "JournalPhoto", photo.Id) is not null) RefreshEntryPhotos(); };
+                menu.Items.Add(finalItem);
             }
             if (UpscaleAction.Available)
             {

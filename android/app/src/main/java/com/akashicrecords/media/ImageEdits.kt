@@ -11,7 +11,9 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.media.ExifInterface
 import android.os.Build
+import com.akashicrecords.archives.HubPhotos
 import com.akashicrecords.data.AkashicDatabase
+import com.akashicrecords.sync.AkashicCatalog
 import com.akashicrecords.sync.FileSync
 import com.akashicrecords.sync.SyncService
 import kotlinx.coroutines.Dispatchers
@@ -29,8 +31,8 @@ import kotlin.random.Random
  *  - the edited picture is a NEW file in the same folder, `<root>.edit-<8 hex>.jpg`, where `<root>` is the
  *    current name up to its first `.edit-` (else the whole name, extension included): `abc.heic` →
  *    `abc.heic.edit-1a2b3c4d.jpg`, and editing that again → `abc.heic.edit-9f8e7d6c.jpg`;
- *  - the row then points at it; nothing is ever deleted, so « Revenir à l'original » (the same folder + `<root>`)
- *    works on every device;
+ *  - the row then points at it; nothing is deleted by an edit, so « Revenir à l'original » (the same folder + `<root>`)
+ *    works on every device, until « Rendre définitif » ([makeFinal]) keeps only the current version;
  *  - on save: EXIF orientation → rotation → crop (on the rotated picture) → contrast and saturation, JPEG 92.
  */
 object ImageEdits {
@@ -242,6 +244,93 @@ object ImageEdits {
         setPath(AkashicDatabase.get(context), table, id, original, uprightSize(file))
         SyncService.runNow(context)
         Result.success(original)
+    }
+
+    /** The confirmation shown before [makeFinal]. */
+    const val FINAL_QUESTION = "Rendre cette modification définitive ? L'original et les versions précédentes seront supprimés " +
+        "de ce téléphone, et « Revenir à l'original » ne sera plus possible."
+
+    /** The columns that may point at a picture: a file one of them names is never deleted by [makeFinal]. */
+    private val imageColumns = (
+        listOf(
+            "Photo" to "ImagePath", "JournalPhoto" to "ImagePath", "RefImage" to "ImagePath", "CanvasElement" to "ImagePath",
+            "Recipe" to "CoverImagePath", "Artwork" to "CoverImagePath", "Poem" to "ImagePath",
+        ) + AkashicCatalog.fileColumns
+        ).distinct()
+
+    private fun pathKey(path: String) = path.replace('\\', '/').trimStart('/').lowercase()
+
+    /** Every path the database still names (normalised by [pathKey]). */
+    private fun referencedKeys(db: AkashicDatabase): Set<String> {
+        val sql = db.openHelper.readableDatabase
+        val keys = HashSet<String>()
+        for ((table, column) in imageColumns) {
+            val exists = runCatching {
+                sql.query("SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?", arrayOf<Any?>(table, column))
+                    .use { c -> c.moveToFirst() && c.getLong(0) > 0 }
+            }.getOrDefault(false)
+            if (!exists) continue
+            sql.query("SELECT `$column` FROM `$table` WHERE `$column` IS NOT NULL AND `$column` <> ''").use { c ->
+                while (c.moveToNext()) keys.add(pathKey(c.getString(0)))
+            }
+        }
+        return keys
+    }
+
+    private fun currentPath(db: AkashicDatabase, table: String, id: Int): String? {
+        require(table in listOf("Photo", "JournalPhoto", "RefImage", "CanvasElement")) { "Table inconnue : $table" }
+        return db.openHelper.readableDatabase.query("SELECT ImagePath FROM `$table` WHERE Id = ?", arrayOf<Any?>(id))
+            .use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getString(0) else null }
+    }
+
+    /**
+     * « Rendre définitif » (same rules as the PC): the current edit is copied to a clean name in the same folder,
+     * `<base>-<8 hex>.jpg` (`<base>` = `<root>` without its extension: `abc.heic` → `abc-1a2b3c4d.jpg`), the row
+     * points at it (sizes unchanged), then the original and every `<root>.edit-*` are deleted from THIS phone —
+     * only the files no row names any more. Returns the new path, or the message to show.
+     */
+    suspend fun makeFinal(context: Context, table: String, id: Int): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val db = AkashicDatabase.get(context)
+            val path = currentPath(db, table, id) ?: error("Image introuvable.")
+            if (!isEdited(path)) error("Cette image n'a pas été modifiée.")
+            val (dir, name) = split(path)
+            val root = root(name)
+            // The edited file: here, or (an Archives photo only on the hub) fetched like the viewer does.
+            val source = MediaFiles.resolve(context, path)?.takeIf { it.isFile }
+                ?: if (table == "Photo") db.photoDao().getById(id)?.let { p ->
+                    HubPhotos.original(context, p, HubPhotos.load(db).hashes[HubPhotos.key(p)])
+                }?.takeIf { it.isFile } else null
+            source ?: error("L'image modifiée n'est pas sur ce téléphone (hors ligne ?) : synchronise puis réessaie.")
+
+            val base = root.lastIndexOf('.').let { if (it > 0) root.substring(0, it) else root }
+            var newPath: String
+            var target: File
+            do {
+                newPath = dir + base + "-" + "%08x".format(Random.nextLong(0, 1L shl 32)) + ".jpg"
+                target = requireNotNull(MediaFiles.resolve(context, newPath))
+            } while (target.exists())
+            target.parentFile?.mkdirs()
+            val part = File(target.path + ".part")
+            source.inputStream().use { input -> part.outputStream().use { input.copyTo(it) } }
+            if (!part.renameTo(target)) { part.delete(); error("Impossible d'écrire le fichier.") }
+
+            setPath(db, table, id, newPath, null)
+            if (table == "Photo") FileSync.setKeep(db.openHelper.writableDatabase, newPath, true)
+
+            // The original and the earlier edits, when nothing points at them any more.
+            val folder = MediaFiles.resolve(context, dir + root)?.parentFile
+            val referenced = referencedKeys(db)
+            val newKey = pathKey(newPath)
+            folder?.listFiles()?.forEach { f ->
+                if (!f.isFile || !(f.name == root || f.name.startsWith(root + MARK))) return@forEach
+                val rel = dir + f.name
+                if (pathKey(rel) == newKey || pathKey(rel) in referenced) return@forEach
+                if (f.delete()) forgetCachedImages(rel)
+            }
+            SyncService.runNow(context)
+            newPath
+        }
     }
 
     private suspend fun setPath(db: AkashicDatabase, table: String, id: Int, path: String, size: Pair<Int, Int>?) {

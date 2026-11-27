@@ -85,6 +85,9 @@
                             <Button x:Name="ViewerRevertButton" Content="Revenir à l'original" Style="{StaticResource SecondaryButtonStyle}"
                                     Margin="8,0,0,0" Click="ViewerRevert_OnClick" Visibility="Collapsed"
                                     ToolTip="Remet l'image d'avant les modifications"/>
+                            <Button x:Name="ViewerFinalButton" Content="Rendre définitif" Style="{StaticResource SecondaryButtonStyle}"
+                                    Margin="8,0,0,0" Click="ViewerFinal_OnClick" Visibility="Collapsed"
+                                    ToolTip="Garde cette version et supprime de cet ordinateur l'original et les versions précédentes"/>
                             <Button x:Name="ViewerUpscaleButton" Content="Agrandir ×4" Style="{StaticResource SecondaryButtonStyle}"
                                     Margin="8,0,0,0" Click="ViewerUpscale_OnClick"
                                     ToolTip="Demande au serveur une version 4 fois plus grande, ajoutée à côté de l'originale"/>

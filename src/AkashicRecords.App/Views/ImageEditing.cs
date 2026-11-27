@@ -19,11 +19,14 @@ public sealed record ImageEditOutcome(string ImagePath, int PixelWidth, int Pixe
 //  - an edit is a new JPEG next to the current file, named <root>.edit-<8 hex>.jpg, where <root> is the current name
 //    up to its first ".edit-" (else the whole name, extension included): abc.heic → abc.heic.edit-1a2b3c4d.jpg;
 //  - the row's ImagePath is pointed at it (the path keeps its own separator style);
-//  - no file is ever deleted: the original (folder + <root>) is what « Revenir à l'original » points back to.
+//  - an edit deletes nothing: the original (folder + <root>) is what « Revenir à l'original » points back to;
+//  - « Rendre définitif » copies the edit to <base>-<8 hex>.jpg (<base> = <root> without its extension), points the
+//    row at it, then deletes from this computer the original and every <root>.edit-* file no row references anymore.
 public static class ImageEditing
 {
     public const string EditLabel = "Modifier";
     public const string RevertLabel = "Revenir à l'original";
+    public const string FinalLabel = "Rendre définitif";
     public const string EditMarker = ".edit-";
     public const int JpegQuality = 92;
 
@@ -133,6 +136,194 @@ public static class ImageEditing
             Say(owner, "Le retour à l'original n'a pas pu se faire : " + ex.Message);
             return null;
         }
+    }
+
+    /// <summary>
+    /// « Rendre définitif »: after a confirmation, the current edit is copied to a clean name
+    /// (<base>-<8 hex>.jpg), the row points at it, and the original and every <root>.edit-* file that no row
+    /// references anymore are deleted from this computer. Returns the new state, or null (cancelled, failed).
+    /// </summary>
+    public static ImageEditOutcome? MakeFinal(DependencyObject? from, string table, int id)
+    {
+        var owner = from is null ? null : from as Window ?? Window.GetWindow(from);
+        try
+        {
+            var row = ReadRow(table, id);
+            if (row is null || !IsEdited(row.Value.Path)) return null;
+            var currentFull = MediaStorage.ResolveFullPath(row.Value.Path);
+            if (!File.Exists(currentFull))
+            {
+                Say(owner, "Le fichier de cette image n'est pas sur cet ordinateur : synchronise puis réessaie.");
+                return null;
+            }
+            if (!ConfirmFinal(owner)) return null;
+
+            var (finalPath, message) = MakeFinal(table, id, row.Value.Path);
+            if (message is not null) Say(owner, message);
+            return new ImageEditOutcome(finalPath, 0, 0, null);
+        }
+        catch (Exception ex)
+        {
+            Say(owner, "La modification n'a pas pu être rendue définitive : " + ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The work behind « Rendre définitif », without any dialog. Returns the clean path now in the row, and null or
+    /// a message for the user (once the row is updated, only the deletions can still go wrong).
+    /// </summary>
+    public static (string FinalPath, string? Message) MakeFinal(string table, int id, string storedPath)
+    {
+        if (!Tables.Contains(table)) throw new ArgumentException("Table inconnue : " + table);
+        var finalPath = NewFinalPath(storedPath);
+        File.Copy(MediaStorage.ResolveFullPath(storedPath), MediaStorage.ResolveFullPath(finalPath), overwrite: false);
+
+        // Path only: the content is the same picture, so RefImage / CanvasElement sizes stay as they are.
+        using (var connection = new SqliteConnectionFactory().CreateOpenConnection())
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = $"UPDATE {table} SET ImagePath = $path WHERE Id = $id;";
+            command.Parameters.AddWithValue("$id", id);
+            command.Parameters.AddWithValue("$path", finalPath);
+            command.ExecuteNonQuery();
+        }
+        string? message;
+        try
+        {
+            message = DeleteFormerFiles(storedPath, finalPath);
+        }
+        catch (Exception ex)
+        {
+            message = "La modification est définitive, mais les anciens fichiers n'ont pas pu être supprimés : " + ex.Message;
+        }
+        _ = SyncService.Instance.RunAsync();
+        return (finalPath, message);
+    }
+
+    private static string? DeleteFormerFiles(string storedPath, string finalPath)
+    {
+        // The original and every edit of it, unless some row still uses it (another photo pointing at the same file).
+        var (folder, name) = Split(storedPath);
+        var root = RootName(name);
+        var candidates = new List<string> { folder + root };
+        var fullFolder = Path.GetDirectoryName(MediaStorage.ResolveFullPath(folder + root));
+        if (fullFolder is not null && Directory.Exists(fullFolder))
+        {
+            foreach (var file in Directory.EnumerateFiles(fullFolder))
+            {
+                var fileName = Path.GetFileName(file);
+                if (fileName.StartsWith(root + EditMarker, StringComparison.OrdinalIgnoreCase)) candidates.Add(folder + fileName);
+            }
+        }
+
+        var referenced = ReferencedPaths();
+        var failed = 0;
+        foreach (var candidate in candidates)
+        {
+            if (SamePath(candidate, finalPath) || referenced.Contains(NormalisePath(candidate))) continue;
+            var full = MediaStorage.ResolveFullPath(candidate);
+            if (referenced.Contains(NormaliseFull(full)) || !File.Exists(full)) continue;
+            try { File.Delete(full); }
+            catch (IOException) { failed++; }
+            catch (UnauthorizedAccessException) { failed++; }
+        }
+
+        return failed == 0 ? null
+            : $"La modification est définitive, mais {failed} ancien(s) fichier(s) n'ont pas pu être supprimés (peut-être ouverts ailleurs).";
+    }
+
+    /// <summary>A clean path next to the current file: <root> without its extension + "-" + 8 hex + ".jpg".</summary>
+    public static string NewFinalPath(string storedPath)
+    {
+        var (folder, name) = Split(storedPath);
+        var root = RootName(name);
+        var dot = root.LastIndexOf('.');
+        var stem = dot > 0 ? root[..dot] : root;
+        while (true)
+        {
+            var hex = Convert.ToHexString(RandomNumberGenerator.GetBytes(4)).ToLowerInvariant();
+            var candidate = folder + stem + "-" + hex + ".jpg";
+            if (!File.Exists(MediaStorage.ResolveFullPath(candidate))) return candidate;
+        }
+    }
+
+    // Every picture path some row of the app points at, normalised (both as stored and as resolved on this computer).
+    private static readonly (string Table, string Column)[] ImageColumns =
+    [
+        ("Photo", "ImagePath"), ("JournalPhoto", "ImagePath"), ("RefImage", "ImagePath"), ("CanvasElement", "ImagePath"),
+        ("Recipe", "CoverImagePath"), ("Artwork", "CoverImagePath"), ("Poem", "ImagePath"),
+        ("MusicTrack", "CoverImagePath"), ("WatchlistItem", "CoverImagePath"), ("Book", "CoverPath"),
+    ];
+
+    private static HashSet<string> ReferencedPaths()
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        using var connection = new SqliteConnectionFactory().CreateOpenConnection();
+        foreach (var (table, column) in ImageColumns)
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = $"SELECT {column} FROM {table} WHERE {column} IS NOT NULL AND {column} <> '';";
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                var path = reader.GetString(0);
+                set.Add(NormalisePath(path));
+                try { set.Add(NormaliseFull(MediaStorage.ResolveFullPath(path))); }
+                catch (ArgumentException) { /* not a usable path: the stored form is enough */ }
+            }
+        }
+        return set;
+    }
+
+    private static string NormalisePath(string path) => path.Replace('\\', '/').ToLowerInvariant();
+
+    private static string NormaliseFull(string fullPath) => NormalisePath(Path.GetFullPath(fullPath));
+
+    private static bool SamePath(string a, string b) => NormalisePath(a) == NormalisePath(b);
+
+    // « Oui » / « Annuler », « Annuler » being the default (Entrée and Échap both cancel).
+    private static bool ConfirmFinal(Window? owner)
+    {
+        Brush? Find(string key) => Application.Current.TryFindResource(key) as Brush;
+        var dialog = new Window
+        {
+            Title = FinalLabel,
+            Owner = owner,
+            WindowStartupLocation = owner is null ? WindowStartupLocation.CenterScreen : WindowStartupLocation.CenterOwner,
+            SizeToContent = SizeToContent.WidthAndHeight,
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+            Background = Find("AppBgBrush") ?? Brushes.White,
+            Foreground = Find("TextBrush") ?? Brushes.Black,
+        };
+        var text = new System.Windows.Controls.TextBlock
+        {
+            Text = "Rendre cette modification définitive ? L'original et les versions précédentes seront supprimés de cet ordinateur, et « "
+                + RevertLabel + " » ne sera plus possible.",
+            TextWrapping = TextWrapping.Wrap, MaxWidth = 420, Margin = new Thickness(0, 0, 0, 16),
+        };
+        var yes = new System.Windows.Controls.Button
+        {
+            Content = "Oui", Padding = new Thickness(14, 6, 14, 6), Cursor = System.Windows.Input.Cursors.Hand,
+            Style = Application.Current.TryFindResource("PrimaryButtonStyle") as Style,
+        };
+        yes.Click += (_, _) => dialog.DialogResult = true;
+        var cancel = new System.Windows.Controls.Button
+        {
+            Content = "Annuler", Padding = new Thickness(14, 6, 14, 6), Margin = new Thickness(8, 0, 0, 0), Cursor = System.Windows.Input.Cursors.Hand,
+            IsCancel = true, IsDefault = true,
+            Style = Application.Current.TryFindResource("SecondaryButtonStyle") as Style,
+        };
+        var buttons = new System.Windows.Controls.StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        buttons.Children.Add(yes);
+        buttons.Children.Add(cancel);
+        var stack = new System.Windows.Controls.StackPanel { Margin = new Thickness(20) };
+        stack.Children.Add(text);
+        stack.Children.Add(buttons);
+        dialog.Content = stack;
+        dialog.Loaded += (_, _) => cancel.Focus();
+        return dialog.ShowDialog() == true;
     }
 
     private static void Say(Window? owner, string message)
