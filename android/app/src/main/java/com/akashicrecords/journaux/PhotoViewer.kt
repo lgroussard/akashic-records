@@ -8,6 +8,9 @@ import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,6 +30,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.akashicrecords.Palette
+import com.akashicrecords.media.ImageEdits
+import com.akashicrecords.media.ImageEditor
 import com.akashicrecords.media.LocalImage
 import com.akashicrecords.media.MediaFiles
 import com.akashicrecords.sync.HubCompute
@@ -40,14 +45,20 @@ import kotlinx.coroutines.withContext
 // never over it.
 @Composable
 internal fun PhotoViewer(
-    paths: List<String>, start: Int, onDismiss: () -> Unit,
+    initialPaths: List<String>, start: Int, onDismiss: () -> Unit,
     // The rows the pictures come from (same order as [paths]): with them, and once paired, « ×4 » asks the hub
     // to upscale the shown one (HubCompute.requestFrom); the result arrives next to it at a sync.
     table: String? = null, ids: List<Int>? = null,
+    // Told after « Modifier » or « Revenir à l'original » changed a row's picture, so the screen behind reloads.
+    onChanged: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // Local copy: an edited picture (a new path) shows here at once.
+    var paths by remember(initialPaths) { mutableStateOf(initialPaths) }
     val pager = rememberPagerState(initialPage = start.coerceIn(0, (paths.size - 1).coerceAtLeast(0))) { paths.size }
+    var menu by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<Int?>(null) } // page being edited
     var message by remember { mutableStateOf<String?>(null) }
     val paired = remember { SyncService.credentials(context) != null }
     var sending by remember { mutableStateOf(false) }
@@ -85,6 +96,25 @@ internal fun PhotoViewer(
                         sending = false
                     }
                 }) { Text("Agrandir ×4") }
+                // ⋮ : « Modifier » (rotate, crop, contrast, saturation) and, after an edit, « Revenir à l'original ».
+                if (table != null && id != null) Box {
+                    TextButton(enabled = !sending, onClick = { menu = true }) { Text("⋮", fontSize = 18.sp) }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(text = { Text("Modifier") }, onClick = { menu = false; editing = pager.currentPage })
+                        val page = pager.currentPage
+                        val path = paths.getOrNull(page)
+                        if (ImageEdits.isEdited(path)) DropdownMenuItem(text = { Text("Revenir à l'original") }, onClick = {
+                            menu = false
+                            sending = true
+                            scope.launch {
+                                ImageEdits.revert(context, table, id, path!!)
+                                    .onSuccess { p -> paths = paths.toMutableList().also { it[page] = p }; onChanged(); message = "Original rétabli." }
+                                    .onFailure { message = it.message }
+                                sending = false
+                            }
+                        })
+                    }
+                }
                 TextButton(onClick = {
                     val path = paths[pager.currentPage]
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -105,6 +135,16 @@ internal fun PhotoViewer(
                 LocalImage(paths[page], Modifier.fillMaxSize(), maxSide = 2048, crop = false)
             }
         }
+    }
+    editing?.let { page ->
+        val id = ids?.getOrNull(page)
+        val path = paths.getOrNull(page)
+        if (table != null && id != null && path != null) ImageEditor(
+            table = table, id = id, currentPath = path,
+            source = { MediaFiles.resolve(context, path) },
+            onClose = { editing = null },
+            onChanged = { p -> paths = paths.toMutableList().also { it[page] = p }; onChanged() },
+        )
     }
 }
 

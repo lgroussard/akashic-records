@@ -12,18 +12,22 @@ namespace AkashicRecords.App.Views;
 // "Enregistrer sous…" writes a copy of the shown file wherever the user says. Esc or Fermer closes.
 public sealed class PhotoViewerWindow : Window
 {
-    private readonly IReadOnlyList<string> _paths; // full paths
+    private readonly List<string> _paths; // full paths
     private int _index;
 
     private readonly Image _image = new() { Stretch = Stretch.Uniform, Margin = new Thickness(16) };
     private readonly TextBlock _counter = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 12, 0) };
     private readonly Button _previous;
     private readonly Button _next;
-    private readonly IReadOnlyList<long>? _ids; // the rows behind _paths, for "Agrandir ×4"
+    private readonly IReadOnlyList<long>? _ids; // the rows behind _paths, for "Agrandir ×4" and "Modifier"
+    private readonly Button? _revert;
+
+    /// <summary>True once a picture was edited or reverted here: the caller refreshes what it shows.</summary>
+    public bool ImagesChanged { get; private set; }
 
     public PhotoViewerWindow(IReadOnlyList<string> fullPaths, int startIndex, string? upscaleTable = null, IReadOnlyList<long>? ids = null)
     {
-        _paths = fullPaths;
+        _paths = fullPaths.ToList();
         _ids = ids is not null && ids.Count == fullPaths.Count ? ids : null;
         _index = Math.Clamp(startIndex, 0, Math.Max(0, fullPaths.Count - 1));
 
@@ -47,6 +51,18 @@ public sealed class PhotoViewerWindow : Window
         bar.Children.Add(new Border { Width = 28 });
         bar.Children.Add(save);
         bar.Children.Add(new Border { Width = 8 });
+        if (upscaleTable is not null && _ids is not null)
+        {
+            var rows = _ids;
+            var edit = BarButton(ImageEditing.EditLabel, () => Apply(ImageEditing.Edit(this, upscaleTable, (int)rows[_index])));
+            edit.ToolTip = "Tourner, recadrer, régler le contraste et la saturation (l'original est gardé)";
+            bar.Children.Add(edit);
+            bar.Children.Add(new Border { Width = 8 });
+            _revert = BarButton(ImageEditing.RevertLabel, () => Apply(ImageEditing.Revert(this, upscaleTable, (int)rows[_index])));
+            _revert.ToolTip = "Remet la photo d'avant les modifications";
+            bar.Children.Add(_revert);
+            bar.Children.Add(new Border { Width = 8 });
+        }
         if (upscaleTable is not null && _ids is not null && UpscaleAction.Available)
         {
             var rowIds = _ids;
@@ -95,6 +111,15 @@ public sealed class PhotoViewerWindow : Window
         return button;
     }
 
+    // The shown row now points at another file.
+    private void Apply(ImageEditOutcome? outcome)
+    {
+        if (outcome is null) return;
+        _paths[_index] = AkashicRecords.Infrastructure.Persistence.MediaStorage.ResolveFullPath(outcome.ImagePath);
+        ImagesChanged = true;
+        Show(_index);
+    }
+
     private void Step(int by)
     {
         var target = _index + by;
@@ -123,6 +148,8 @@ public sealed class PhotoViewerWindow : Window
         _counter.Text = $"{index + 1} / {_paths.Count}";
         _previous.IsEnabled = index > 0;
         _next.IsEnabled = index < _paths.Count - 1;
+        if (_revert is not null)
+            _revert.Visibility = ImageEditing.IsEdited(Path.GetFileName(_paths[index])) ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void Save()

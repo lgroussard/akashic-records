@@ -352,6 +352,8 @@ public partial class ReferencesView : UserControl
         ViewerObservationsButton.Visibility = Visibility.Visible;
         ViewerObservationsButton.Content = ObservationsDialog.ButtonLabel(Observation.RefImageOwner, img.Id);
         ViewerUpscaleButton.Visibility = UpscaleAction.Available ? Visibility.Visible : Visibility.Collapsed;
+        ViewerEditButton.Visibility = Visibility.Visible;
+        ViewerRevertButton.Visibility = ImageEditing.IsEdited(img.ImagePath) ? Visibility.Visible : Visibility.Collapsed;
         ViewerStatus.Visibility = Visibility.Collapsed;
         ViewerSourceButton.Visibility = (img.PageUrl ?? img.SourceUrl) is null ? Visibility.Collapsed : Visibility.Visible;
         FillBoardCombo(img.BoardId);
@@ -374,6 +376,8 @@ public partial class ReferencesView : UserControl
         ViewerDeleteButton.Visibility = Visibility.Collapsed;
         ViewerObservationsButton.Visibility = Visibility.Collapsed; // a search hit is not saved yet
         ViewerUpscaleButton.Visibility = Visibility.Collapsed;
+        ViewerEditButton.Visibility = Visibility.Collapsed;
+        ViewerRevertButton.Visibility = Visibility.Collapsed;
         ViewerStatus.Visibility = Visibility.Collapsed;
         ViewerSourceButton.Visibility = hit.PageUrl is null ? Visibility.Collapsed : Visibility.Visible;
         FillBoardCombo(_filter >= 0 ? _filter : null);
@@ -458,6 +462,26 @@ public partial class ReferencesView : UserControl
             ViewerStatus.Text = message;
             ViewerStatus.Visibility = Visibility.Visible;
         });
+    }
+
+    private void ViewerEdit_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_viewing is not { } img) return;
+        ReopenAfterImageChange(img, ImageEditing.Edit(this, "RefImage", img.Id));
+    }
+
+    private void ViewerRevert_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_viewing is not { } img) return;
+        ReopenAfterImageChange(img, ImageEditing.Revert(this, "RefImage", img.Id));
+    }
+
+    // The row now points at another file (and has its size): boards and viewer show it.
+    private void ReopenAfterImageChange(RefImage img, ImageEditOutcome? outcome)
+    {
+        if (outcome is null) return;
+        Refresh();
+        if (_images.FirstOrDefault(i => i.Id == img.Id) is { } updated) OpenSaved(updated);
     }
 
     // Opens a saved image in the viewer by id (a global-search hit, or a card of a project's Fil).

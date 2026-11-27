@@ -618,6 +618,7 @@ public partial class ArchivesView : UserControl, ISearchNavigable, IRemembersVie
         ViewerObservationsButton.Content = ObservationsDialog.ButtonLabel(Observation.PhotoOwner, photo.Id);
         ViewerUpscaleButton.Visibility = UpscaleAction.Available ? Visibility.Visible : Visibility.Collapsed;
         ViewerUpscaleStatus.Visibility = Visibility.Collapsed;
+        ViewerRevertButton.Visibility = ImageEditing.IsEdited(photo.ImagePath) ? Visibility.Visible : Visibility.Collapsed;
 
         _isRebuildingCombos = true;
         RebuildViewerAlbums();
@@ -803,6 +804,31 @@ public partial class ArchivesView : UserControl, ISearchNavigable, IRemembersVie
             ViewerUpscaleStatus.Text = message;
             ViewerUpscaleStatus.Visibility = Visibility.Visible;
         });
+    }
+
+    private void ViewerEditButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (CurrentPhoto is not { } photo) return;
+        SaveViewerFields(); // the viewer is about to be refilled from the row
+        if (ImageEditing.Edit(this, "Photo", photo.Id) is null) return;
+        ReloadAfterImageChange();
+    }
+
+    private void ViewerRevertButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (CurrentPhoto is not { } photo) return;
+        SaveViewerFields();
+        if (ImageEditing.Revert(this, "Photo", photo.Id) is null) return;
+        ReloadAfterImageChange();
+    }
+
+    // The row now points at another file: grid and viewer show it, on the same photo.
+    private void ReloadAfterImageChange()
+    {
+        var id = CurrentPhoto?.Id;
+        RefreshGrid();
+        var index = _filteredPhotos.FindIndex(p => p.Id == id);
+        ShowPhotoAt(index >= 0 ? index : _viewerIndex);
     }
 
     private void ViewerObservationsButton_OnClick(object sender, RoutedEventArgs e)
