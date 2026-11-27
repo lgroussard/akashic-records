@@ -107,6 +107,16 @@ internal fun PhotoViewer(
                         DropdownMenuItem(text = { Text("Modifier") }, onClick = { menu = false; editing = pager.currentPage })
                         val page = pager.currentPage
                         val path = paths.getOrNull(page)
+                        if (ImageEdits.hasPreviousStep(path)) DropdownMenuItem(text = { Text("Annuler la dernière étape") }, onClick = {
+                            menu = false
+                            sending = true
+                            scope.launch {
+                                ImageEdits.undo(context, table, id, path!!)
+                                    .onSuccess { p -> paths = paths.toMutableList().also { it[page] = p }; onChanged(); message = "Version précédente rétablie." }
+                                    .onFailure { message = it.message }
+                                sending = false
+                            }
+                        })
                         if (ImageEdits.isEdited(path)) DropdownMenuItem(text = { Text("Revenir à l'original") }, onClick = {
                             menu = false
                             sending = true

@@ -236,9 +236,15 @@ public sealed class ComputeAttach(HubStore store, BlobStore blobs, HubOptions op
 
         var cut = path.LastIndexOfAny(['/', '\\']);
         var folder = cut >= 0 ? path[..(cut + 1)] : "";
-        var root = RootName(path[(cut + 1)..]);
+        var name = path[(cut + 1)..];
+        var root = RootName(name);
+        // An edit of an edit names the version it came from (".from-<its 8 hex>"), as in the apps: « Annuler la
+        // dernière étape » then goes back to it instead of the original.
+        var at = name.IndexOf(".edit-", StringComparison.Ordinal);
+        var previous = at >= 0 && name.Length >= at + 14 ? name.Substring(at + 6, 8) : null;
+        var from = previous is not null && previous.All(Uri.IsHexDigit) ? ".from-" + previous.ToLowerInvariant() : "";
         string newPath;
-        do newPath = folder + root + ".edit-" + Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(4)).ToLowerInvariant() + ".jpg";
+        do newPath = folder + root + ".edit-" + Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(4)).ToLowerInvariant() + from + ".jpg";
         while (store.FileHash(newPath) is not null);
 
         var row = JsonNode.Parse(current.GetRawText())!.AsObject();

@@ -40,7 +40,7 @@ public sealed record HubComputeJob(string Id, string Model, string InputHash, st
     string AddedAt, string AddedBy, string? Worker, string? WorkerName, string? StartedAt, string? FinishedAt,
     double? Seconds, string? ResultHash, long? ResultSize, string? ResultName, string? Error,
     string? AttachType = null, string? AttachId = null, string? AttachedPath = null, string? AttachError = null,
-    string? Kind = null, string? Params = null);
+    string? Kind = null, string? Params = null, string? Results = null);
 public sealed record HubComputeBoard(bool Enabled, List<HubComputeModel> Models, List<HubComputeWorker> Workers, List<HubComputeJob> Jobs);
 public sealed record HubComputeFile(string Path, string Hash, long Size);
 public sealed record HubComputeModelFiles(string Name, string Label, bool Hub, List<HubComputeFile> Files);
@@ -163,8 +163,8 @@ public sealed class HubClient : IDisposable
     /// <summary>Asks for an AI edit of an image already in the app: kind "edit" (a sentence, optionally a mask blob, a
     /// text to mask, whether to empty the zone first) or "restore". Once done the hub makes the result a revertible edit.</summary>
     public async Task<HubComputeJob> AddComputeEditAsync(string entityType, string entityId, string kind, string? prompt,
-        string? maskHash, string? maskText, bool erase, CancellationToken ct = default) =>
-        await AddComputeJobFromAsync(new { entity_type = entityType, entity_id = entityId, kind, prompt, mask_hash = maskHash, mask_text = maskText, erase }, ct);
+        string? maskHash, string? maskText, bool erase, int tries = 1, string? engine = null, CancellationToken ct = default) =>
+        await AddComputeJobFromAsync(new { entity_type = entityType, entity_id = entityId, kind, prompt, mask_hash = maskHash, mask_text = maskText, erase, tries, engine }, ct);
 
     private async Task<HubComputeJob> AddComputeJobFromAsync(object body, CancellationToken ct)
     {
@@ -182,8 +182,26 @@ public sealed class HubClient : IDisposable
         return await Read<HubComputeJob>(resp, ct);
     }
 
-    public async Task CompleteComputeAsync(string id, string resultHash, double seconds, CancellationToken ct = default) =>
-        await Ensure(await Send(() => _http.PostAsJsonAsync($"compute/jobs/{id}/complete", new { result_hash = resultHash, seconds }, Wire, ct)), ct);
+    /// <summary>`resultHashes`: every version of a job asked with several tries (they then wait for a choice).</summary>
+    public async Task CompleteComputeAsync(string id, string resultHash, double seconds, IReadOnlyList<string>? resultHashes = null, CancellationToken ct = default) =>
+        await Ensure(await Send(() => _http.PostAsJsonAsync($"compute/jobs/{id}/complete", new { result_hash = resultHash, seconds, result_hashes = resultHashes }, Wire, ct)), ct);
+
+    /// <summary>Keeps one of the versions of a job asked with several tries: the hub poses it as an edit of the picture.</summary>
+    public async Task ChooseComputeAsync(string id, string resultHash, CancellationToken ct = default)
+    {
+        var resp = await Send(() => _http.PostAsJsonAsync($"compute/jobs/{id}/choose", new { result_hash = resultHash }, Wire, ct));
+        if (resp.StatusCode == HttpStatusCode.UnprocessableEntity)
+        {
+            using (resp)
+            {
+                var text = await resp.Content.ReadAsStringAsync(ct);
+                string? message = null;
+                try { message = JsonDocument.Parse(text).RootElement.GetProperty("error").GetString(); } catch (Exception) { }
+                throw new HubException(message ?? text, resp.StatusCode);
+            }
+        }
+        await Ensure(resp, ct);
+    }
 
     public async Task FailComputeAsync(string id, string error, CancellationToken ct = default) =>
         await Ensure(await Send(() => _http.PostAsJsonAsync($"compute/jobs/{id}/fail", new { error }, Wire, ct)), ct);

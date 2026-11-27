@@ -14,7 +14,7 @@ public sealed record ComputeJob(
     string AddedAt, string AddedBy, string? Worker, string? WorkerName, string? StartedAt, string? FinishedAt,
     double? Seconds, string? ResultHash, long? ResultSize, string? ResultName, string? Error,
     string? AttachType = null, string? AttachId = null, string? AttachedPath = null, string? AttachError = null,
-    string? Kind = null, string? Params = null);
+    string? Kind = null, string? Params = null, string? Results = null);
 
 /// <summary>The shared job list (its own SQLite file next to hub.db: working state, not synchronised data).</summary>
 public sealed class ComputeStore
@@ -52,7 +52,7 @@ public sealed class ComputeStore
             );
             """);
         // Added later: the image of the app a job came from (it gets its result next to it), and what became of that.
-        foreach (var col in new[] { "attach_type", "attach_id", "attached_path", "attach_error", "kind", "params" })
+        foreach (var col in new[] { "attach_type", "attach_id", "attached_path", "attach_error", "kind", "params", "results" })
         {
             using var has = c.CreateCommand();
             has.CommandText = "SELECT COUNT(*) FROM pragma_table_info('cp_job') WHERE name = $n";
@@ -84,7 +84,7 @@ public sealed class ComputeStore
         cmd.CommandText = $"""
             SELECT id, model, input_hash, input_name, input_size, status, added_at, added_by, worker, worker_name,
                    started_at, finished_at, seconds, result_hash, result_size, result_name, error,
-                   attach_type, attach_id, attached_path, attach_error, kind, params
+                   attach_type, attach_id, attached_path, attach_error, kind, params, results
             FROM cp_job {where}
             """;
         foreach (var (n, v) in args) cmd.Parameters.AddWithValue(n, v ?? DBNull.Value);
@@ -94,7 +94,7 @@ public sealed class ComputeStore
         while (r.Read())
             list.Add(new ComputeJob(r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetInt64(4), r.GetString(5),
                 r.GetString(6), r.GetString(7), S(8), S(9), S(10), S(11), r.IsDBNull(12) ? null : r.GetDouble(12),
-                S(13), r.IsDBNull(14) ? null : r.GetInt64(14), S(15), S(16), S(17), S(18), S(19), S(20), S(21), S(22)));
+                S(13), r.IsDBNull(14) ? null : r.GetInt64(14), S(15), S(16), S(17), S(18), S(19), S(20), S(21), S(22), S(23)));
         return list;
     }
 
@@ -188,6 +188,26 @@ public sealed class ComputeStore
         {
             using var c = Open();
             return Exec(c, "DELETE FROM cp_job WHERE id = $id AND status <> 'running'", ("$id", id)) > 0;
+        }
+    }
+
+    /// <summary>The versions of a job asked with several tries (JSON array of blob hashes), waiting for a choice.</summary>
+    public void SetResults(string id, string resultsJson)
+    {
+        lock (_lock)
+        {
+            using var c = Open();
+            Exec(c, "UPDATE cp_job SET results = $r WHERE id = $id", ("$r", resultsJson), ("$id", id));
+        }
+    }
+
+    /// <summary>The version kept among several: it becomes the job's result.</summary>
+    public void Chose(string id, string resultHash, long resultSize)
+    {
+        lock (_lock)
+        {
+            using var c = Open();
+            Exec(c, "UPDATE cp_job SET result_hash = $h, result_size = $s WHERE id = $id", ("$h", resultHash), ("$s", resultSize), ("$id", id));
         }
     }
 

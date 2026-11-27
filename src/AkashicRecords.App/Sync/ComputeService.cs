@@ -190,6 +190,7 @@ public sealed class ComputeService
             StateChanged?.Invoke();
             Directory.CreateDirectory(work);
             string output;
+            var versions = new List<string>(); // several tries: every version (the first is `output`)
             var onGpu = true;
             var clock = Stopwatch.StartNew();
             if (job.Kind is null)
@@ -217,13 +218,20 @@ public sealed class ComputeService
             else
             {
                 // An AI edit or restore: FLUX Kontext through this computer's ComfyUI.
-                output = await ComfyUi.Instance.RunAsync(hub, job, work);
+                versions = await ComfyUi.Instance.RunAsync(hub, job, work);
+                output = versions[0];
             }
             clock.Stop();
 
             var hash = await HashAsync(output);
-            await hub.UploadFileAsync(output, hash);
-            await hub.CompleteComputeAsync(job.Id, hash, clock.Elapsed.TotalSeconds);
+            var hashes = new List<string>();
+            foreach (var version in versions.Count > 0 ? versions : [output])
+            {
+                var h = await HashAsync(version);
+                if (!await hub.HasFileAsync(h)) await hub.UploadFileAsync(version, h);
+                hashes.Add(h);
+            }
+            await hub.CompleteComputeAsync(job.Id, hash, clock.Elapsed.TotalSeconds, hashes.Count > 1 ? hashes : null);
             // A picture of the app: the hub has just put the result next to it; fetch it now rather than at the next pass.
             if (job.AttachType is not null)
                 _ = System.Windows.Application.Current?.Dispatcher.InvokeAsync(() => SyncService.Instance.RunAsync());
@@ -332,7 +340,8 @@ public sealed class ComputeService
     /// the zone, and whether to empty it first) or a restore ("restore") of a picture already in the app. Done by a PC
     /// with ComfyUI; once done, the hub makes the result an edit of the same row. Throws HubException for the user.
     /// </summary>
-    public async Task<HubComputeJob> RequestEditAsync(string table, long localId, string kind, string? prompt, byte[]? maskPng, string? maskText, bool erase)
+    public async Task<HubComputeJob> RequestEditAsync(string table, long localId, string kind, string? prompt, byte[]? maskPng, string? maskText, bool erase,
+        int tries = 1, string engine = "kontext")
     {
         if (!InPlaceKinds.Contains(table)) throw new HubException("Ce type d'image ne peut pas être modifié par l'IA.");
         var s = SyncService.Instance.Settings;
@@ -360,7 +369,7 @@ public sealed class ComputeService
                 try { File.Delete(file); } catch (IOException) { }
             }
         }
-        return await hub.AddComputeEditAsync(table, syncId, kind, prompt, maskHash, maskText, erase);
+        return await hub.AddComputeEditAsync(table, syncId, kind, prompt, maskHash, maskText, erase, tries, engine);
     }
 
     /// <summary>The id a row has on the hub (sync_map), or null when it has not been synchronised yet.</summary>

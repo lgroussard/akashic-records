@@ -919,10 +919,40 @@ await Scenario("18. Modifier par IA : le resultat devient une modification de la
     await pc.Http.PostAsJsonAsync("/compute/claim", new { name = "LOHAN", rid = "win-x64", models = new[] { "flux-kontext" } }, SimDevice.Wire);
     var restored = Json(await pc.Http.PostAsJsonAsync($"/compute/jobs/{restore.GetProperty("id").GetString()}/complete", new { result_hash = resultHash, seconds = 90.0 }, SimDevice.Wire));
     var refRow = hub.Store.Snapshot("RefImage", null, null, 50).Entities.Single(e => e.EntityId == refImage).Payload!.Value;
-    Check(System.Text.RegularExpressions.Regex.IsMatch(restored.GetProperty("attached_path").GetString()!, @"^media/references/pose\.jpg\.edit-[0-9a-f]{8}\.jpg$")
+    Check(System.Text.RegularExpressions.Regex.IsMatch(restored.GetProperty("attached_path").GetString()!, @"^media/references/pose\.jpg\.edit-[0-9a-f]{8}\.from-0badf00d\.jpg$")
           && restore.GetProperty("params").ValueKind == JsonValueKind.Null
           && refRow.GetProperty("Width").GetInt32() == 40 && refRow.GetProperty("Height").GetInt32() == 60,
         "restauration d'une image deja modifiee : nommee d'apres son premier nom, nouvelle taille dans la ligne");
+
+    // Several tries: the versions wait for a choice; the chosen one is posed as an edit OF THE EDIT (".from-<its hex>").
+    var firstHex = System.Text.RegularExpressions.Regex.Match(path, @"\.edit-([0-9a-f]{8})\.jpg$").Groups[1].Value;
+    var tries = Json(await phone.Http.PostAsJsonAsync("/compute/jobs/from", new
+    {
+        entity_type = "Photo", entity_id = photo, kind = "edit", prompt = "Make the water darker", tries = 3,
+    }, SimDevice.Wire));
+    Check(JsonDocument.Parse(tries.GetProperty("params").GetString()!).RootElement.GetProperty("tries").GetInt32() == 3
+          && tries.GetProperty("input_hash").GetString() == file.GetProperty("Hash").GetString(),
+        "demande IA en 3 essais : le nombre est garde, et c'est la version modifiee qui sert d'entree");
+    await pc.Http.PostAsJsonAsync("/compute/claim", new { name = "LOHAN", rid = "win-x64", models = new[] { "flux-kontext" } }, SimDevice.Wire);
+    var versions = new List<string>();
+    foreach (var side in new[] { 50, 52, 54 }) versions.Add(await Upload(pc, Picture(SkiaSharp.SKEncodedImageFormat.Png, side, side + 10)));
+    var three = Json(await pc.Http.PostAsJsonAsync($"/compute/jobs/{tries.GetProperty("id").GetString()}/complete",
+        new { result_hash = versions[0], result_hashes = versions, seconds = 240.0 }, SimDevice.Wire));
+    var still = hub.Store.Snapshot("Photo", null, null, 50).Entities.Single(e => e.EntityId == photo).Payload!.Value.GetProperty("ImagePath").GetString();
+    Check(three.GetProperty("attached_path").ValueKind == JsonValueKind.Null && still == path
+          && JsonSerializer.Deserialize<List<string>>(three.GetProperty("results").GetString()!)!.SequenceEqual(versions),
+        "3 versions rendues : gardees dans la demande, l'image n'est pas encore remplacee");
+    var wrong = await phone.Http.PostAsJsonAsync($"/compute/jobs/{tries.GetProperty("id").GetString()}/choose", new { result_hash = resultHash }, SimDevice.Wire);
+    var chose = await phone.Http.PostAsJsonAsync($"/compute/jobs/{tries.GetProperty("id").GetString()}/choose", new { result_hash = versions[1] }, SimDevice.Wire);
+    var chosen = Json(chose);
+    var again2 = await phone.Http.PostAsJsonAsync($"/compute/jobs/{tries.GetProperty("id").GetString()}/choose", new { result_hash = versions[2] }, SimDevice.Wire);
+    var newPath = chosen.GetProperty("attached_path").GetString()!;
+    Check(wrong.StatusCode == HttpStatusCode.BadRequest && chose.StatusCode == HttpStatusCode.OK && again2.StatusCode == HttpStatusCode.Conflict
+          && chosen.GetProperty("result_hash").GetString() == versions[1],
+        "choix : une version de la liste seulement, une seule fois ; la version choisie devient le resultat");
+    Check(System.Text.RegularExpressions.Regex.IsMatch(newPath, @"^media\\archive\\piscine-x4\.jpg\.edit-[0-9a-f]{8}\.from-" + firstHex + @"\.jpg$")
+          && hub.Store.Snapshot("Photo", null, null, 50).Entities.Single(e => e.EntityId == photo).Payload!.Value.GetProperty("ImagePath").GetString() == newPath,
+        "la version choisie est posee comme modification de la modification (.from-<8 hex precedents>) : retour d'une etape possible");
 });
 
 await Scenario("16. Ecran Serveur : place, sauvegarde, appareils, travaux", async hub =>

@@ -57,17 +57,76 @@ public static class ImageEditing
         return folder + RootName(name);
     }
 
-    /// <summary>A fresh edit path next to the current file, not yet taken on this computer.</summary>
+    /// <summary>
+    /// A fresh edit path next to the current file, not yet taken on this computer. An edit of an edit names the
+    /// version it came from: &lt;root&gt;.edit-&lt;new hex&gt;.from-&lt;previous hex&gt;.jpg, so « Annuler la dernière étape » can
+    /// go back one step on any device (same rule on the phone and on the hub).
+    /// </summary>
     public static string NewEditPath(string storedPath)
     {
         var (folder, name) = Split(storedPath);
         var root = RootName(name);
+        var from = EditId(name) is { } previous ? FromMarker + previous : "";
         while (true)
         {
             var hex = Convert.ToHexString(RandomNumberGenerator.GetBytes(4)).ToLowerInvariant();
-            var candidate = folder + root + EditMarker + hex + ".jpg";
+            var candidate = folder + root + EditMarker + hex + from + ".jpg";
             if (!File.Exists(MediaStorage.ResolveFullPath(candidate))) return candidate;
         }
+    }
+
+    public const string FromMarker = ".from-";
+    public const string UndoLabel = "Annuler la dernière étape";
+
+    /// <summary>The 8 hex naming an edit ("abc.jpg.edit-1a2b3c4d…" → "1a2b3c4d"), or null for a picture that is not an edit.</summary>
+    public static string? EditId(string fileName)
+    {
+        var at = fileName.IndexOf(EditMarker, StringComparison.Ordinal);
+        if (at < 0 || fileName.Length < at + EditMarker.Length + 8) return null;
+        var id = fileName.Substring(at + EditMarker.Length, 8);
+        return id.All(Uri.IsHexDigit) ? id.ToLowerInvariant() : null;
+    }
+
+    /// <summary>The 8 hex of the version an edit came from (".from-xxxxxxxx.jpg"), or null (it came from the original).</summary>
+    public static string? FromId(string fileName)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(fileName, @"\.from-([0-9a-fA-F]{8})\.jpg$");
+        return m.Success ? m.Groups[1].Value.ToLowerInvariant() : null;
+    }
+
+    /// <summary>True when going back one step is not the same as going back to the original.</summary>
+    public static bool HasPreviousStep(string? storedPath) => storedPath is not null && FromId(Split(storedPath).Name) is not null;
+
+    /// <summary>
+    /// The path of the version before the current edit: the edit named by ".from-", looked for in the folder on this
+    /// computer and in the synchronised file list; the original when the edit came straight from it. Null when not
+    /// an edit or when that version is unknown here.
+    /// </summary>
+    public static string? PreviousPath(string storedPath)
+    {
+        var (folder, name) = Split(storedPath);
+        if (!IsEdited(storedPath)) return null;
+        var from = FromId(name);
+        if (from is null) return OriginalPath(storedPath);
+        var prefix = RootName(name) + EditMarker + from;
+
+        var fullFolder = Path.GetDirectoryName(MediaStorage.ResolveFullPath(storedPath));
+        if (fullFolder is not null && Directory.Exists(fullFolder))
+            foreach (var file in Directory.EnumerateFiles(fullFolder, prefix + "*"))
+                return folder + Path.GetFileName(file);
+
+        // Not here yet: the synchronised list knows every file of the app (forward slashes there).
+        using var connection = new SqliteConnectionFactory().CreateOpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Path FROM sync_file WHERE lower(Path) LIKE $p ESCAPE '\\' LIMIT 1;";
+        var key = (folder + prefix).Replace('\\', '/').ToLowerInvariant().Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
+        command.Parameters.AddWithValue("$p", key + "%");
+        try
+        {
+            if (command.ExecuteScalar() is string known) return folder + known[(known.LastIndexOf('/') + 1)..];
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException) { /* never synchronised: no sync_file */ }
+        return null;
     }
 
     // ---- Actions (called from the views) ----
@@ -124,10 +183,11 @@ public static class ImageEditing
         string message;
         try
         {
-            await ComputeService.Instance.RequestEditAsync(table, id, ai.Kind, ai.Prompt, ai.MaskPng, ai.MaskText, ai.Erase);
-            message = (ai.Kind == "restore" ? "Envoyée à la restauration" : "Envoyée à l'IA") +
-                      " : la version modifiée remplacera l'image d'ici quelques minutes (suivi dans la fenêtre des calculs). « " +
-                      RevertLabel + " » restera possible.";
+            await ComputeService.Instance.RequestEditAsync(table, id, ai.Kind, ai.Prompt, ai.MaskPng, ai.MaskText, ai.Erase, ai.Tries, ai.Engine);
+            message = (ai.Kind == "restore" ? "Envoyée à la restauration" : "Envoyée à l'IA") + (ai.Tries > 1
+                ? $" : {ai.Tries} versions seront prêtes d'ici quelques minutes, à choisir dans la fenêtre des calculs (« Garder celle-ci »)."
+                : " : la version modifiée remplacera l'image d'ici quelques minutes (suivi dans la fenêtre des calculs).") +
+                " « " + UndoLabel + " » et « " + RevertLabel + " » resteront possibles.";
         }
         catch (AkashicRecords.Sync.HubException ex)
         {
@@ -161,6 +221,36 @@ public static class ImageEditing
         catch (Exception ex)
         {
             Say(owner, "Le retour à l'original n'a pas pu se faire : " + ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>« Annuler la dernière étape »: points the row at the version before the current edit. Returns the new state, or null.</summary>
+    public static ImageEditOutcome? Undo(DependencyObject? from, string table, int id)
+    {
+        var owner = from is null ? null : from as Window ?? Window.GetWindow(from);
+        try
+        {
+            var row = ReadRow(table, id);
+            if (row is null || !IsEdited(row.Value.Path)) return null;
+            var previous = PreviousPath(row.Value.Path);
+            if (previous is null)
+            {
+                Say(owner, "La version précédente n'est pas connue sur cet ordinateur : synchronise puis réessaie.");
+                return null;
+            }
+            var fullPath = MediaStorage.ResolveFullPath(previous);
+            if (!File.Exists(fullPath))
+            {
+                Say(owner, "La version précédente n'est pas encore sur cet ordinateur : synchronise puis réessaie.");
+                return null;
+            }
+            var (w, h) = ReadOrientedSize(fullPath);
+            return Apply(table, id, previous, w, h, row.Value.Width);
+        }
+        catch (Exception ex)
+        {
+            Say(owner, "Le retour en arrière n'a pas pu se faire : " + ex.Message);
             return null;
         }
     }

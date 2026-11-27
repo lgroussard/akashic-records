@@ -619,6 +619,7 @@ public partial class ArchivesView : UserControl, ISearchNavigable, IRemembersVie
         ViewerUpscaleButton.Visibility = UpscaleAction.Available ? Visibility.Visible : Visibility.Collapsed;
         ViewerUpscaleStatus.Visibility = Visibility.Collapsed;
         ViewerRevertButton.Visibility = ImageEditing.IsEdited(photo.ImagePath) ? Visibility.Visible : Visibility.Collapsed;
+        ViewerUndoButton.Visibility = ImageEditing.HasPreviousStep(photo.ImagePath) ? Visibility.Visible : Visibility.Collapsed;
         ViewerFinalButton.Visibility = ViewerRevertButton.Visibility;
 
         _isRebuildingCombos = true;
@@ -812,6 +813,14 @@ public partial class ArchivesView : UserControl, ISearchNavigable, IRemembersVie
         if (CurrentPhoto is not { } photo) return;
         SaveViewerFields(); // the viewer is about to be refilled from the row
         if (ImageEditing.Edit(this, "Photo", photo.Id) is null) return;
+        ReloadAfterImageChange();
+    }
+
+    private void ViewerUndoButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (CurrentPhoto is not { } photo) return;
+        SaveViewerFields();
+        if (ImageEditing.Undo(this, "Photo", photo.Id) is null) return;
         ReloadAfterImageChange();
     }
 

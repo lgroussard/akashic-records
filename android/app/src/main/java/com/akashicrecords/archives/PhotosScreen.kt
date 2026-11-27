@@ -289,6 +289,17 @@ private fun Viewer(
                 TextButton(enabled = !reverting, onClick = { menu = true }) { Text("⋮", fontSize = 18.sp) }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(text = { Text("Modifier") }, onClick = { menu = false; editing = current })
+                    if (ImageEdits.hasPreviousStep(current.ImagePath)) DropdownMenuItem(text = { Text("Annuler la dernière étape") }, onClick = {
+                        menu = false
+                        val p = current
+                        reverting = true
+                        scope.launch {
+                            ImageEdits.undo(context, "Photo", p.Id, p.ImagePath)
+                                .onSuccess { path -> replacePath(p.Id, path); note = "Version précédente rétablie." }
+                                .onFailure { note = it.message }
+                            reverting = false
+                        }
+                    })
                     if (ImageEdits.isEdited(current.ImagePath)) DropdownMenuItem(text = { Text("Revenir à l'original") }, onClick = {
                         menu = false
                         val p = current

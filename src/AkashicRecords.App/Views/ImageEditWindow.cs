@@ -63,6 +63,8 @@ public sealed class ImageEditWindow : Window
     private readonly TextBox _prompt = new() { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 60, Margin = new Thickness(0, 0, 0, 8) };
     private readonly TextBox _maskText = new() { Margin = new Thickness(0, 0, 0, 8) };
     private readonly CheckBox _erase = new() { Content = "Effacer d'abord ce qu'il y a dans la zone", Margin = new Thickness(0, 0, 0, 10) };
+    private readonly ComboBox _tries = new() { Width = 70, Margin = new Thickness(8, 0, 16, 0), VerticalAlignment = VerticalAlignment.Center };
+    private readonly ComboBox _engine = new() { Width = 170, Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
     private readonly Canvas _paint = new() { IsHitTestVisible = false };
     private List<Point>? _currentStroke;
 
@@ -503,6 +505,21 @@ public sealed class ImageEditWindow : Window
         _erase.ToolTip = "Coché : ce qui est dans la zone disparaît d'abord (pour remplacer un objet). Décoché : la zone dit seulement où placer le nouvel objet.";
         panel.Children.Add(_erase);
 
+        // How many versions (they wait in the computing window, where one is kept), and which engine.
+        foreach (var n in new[] { 1, 2, 4 }) _tries.Items.Add(new ComboBoxItem { Content = n.ToString(), Tag = n });
+        _tries.SelectedIndex = 0;
+        _tries.ToolTip = "Plusieurs essais : l'IA fait plusieurs versions (environ 1 min 20 chacune), tu gardes la meilleure dans la fenêtre des calculs.";
+        _engine.Items.Add(new ComboBoxItem { Content = "FLUX Kontext", Tag = "kontext" });
+        _engine.Items.Add(new ComboBoxItem { Content = "RealVisXL (zone seulement)", Tag = "sdxl" });
+        _engine.SelectedIndex = 0;
+        _engine.ToolTip = "FLUX Kontext comprend la phrase et la scène (conseillé). RealVisXL redessine seulement la zone, d'après la phrase comme description : un autre essai, au cas où.";
+        var options = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
+        options.Children.Add(new TextBlock { Text = "Essais", VerticalAlignment = VerticalAlignment.Center, Foreground = Brush("TextMutedBrush") });
+        options.Children.Add(_tries);
+        options.Children.Add(new TextBlock { Text = "Moteur", VerticalAlignment = VerticalAlignment.Center, Foreground = Brush("TextMutedBrush") });
+        options.Children.Add(_engine);
+        panel.Children.Add(options);
+
         var send = new Button
         {
             Content = "Envoyer à l'IA", Padding = new Thickness(14, 6, 14, 6), Cursor = Cursors.Hand, HorizontalAlignment = HorizontalAlignment.Left,
@@ -519,7 +536,7 @@ public sealed class ImageEditWindow : Window
             Text = "Pour une petite photo floue ou abîmée : l'IA la nettoie puis l'agrandit ×4. Elle peut redessiner un peu les visages.",
             TextWrapping = TextWrapping.Wrap, Foreground = Brush("TextMutedBrush"), FontSize = 11.5, Margin = new Thickness(0, 0, 0, 8),
         });
-        var restore = SideButton("Restaurer (IA)", () => { AiResult = new ImageAiRequest("restore", null, null, null, false); DialogResult = true; });
+        var restore = SideButton("Restaurer (IA)", () => { AiResult = new ImageAiRequest("restore", null, null, null, false, Tries(), "kontext"); DialogResult = true; });
         restore.HorizontalAlignment = HorizontalAlignment.Left;
         panel.Children.Add(restore);
         panel.Children.Add(new TextBlock
@@ -540,9 +557,17 @@ public sealed class ImageEditWindow : Window
             return;
         }
         var maskText = string.IsNullOrWhiteSpace(_maskText.Text) ? null : _maskText.Text.Trim();
-        AiResult = new ImageAiRequest("edit", prompt, _strokes.Count > 0 ? RenderMask() : null, maskText, _erase.IsChecked == true);
+        var engine = (_engine.SelectedItem as ComboBoxItem)?.Tag as string ?? "kontext";
+        if (engine == "sdxl" && _strokes.Count == 0 && maskText is null)
+        {
+            MessageBox.Show(this, "RealVisXL redessine seulement une zone : peins-la, ou nomme-la en quelques mots.", "Modifier avec l'IA");
+            return;
+        }
+        AiResult = new ImageAiRequest("edit", prompt, _strokes.Count > 0 ? RenderMask() : null, maskText, _erase.IsChecked == true, Tries(), engine);
         DialogResult = true;
     }
+
+    private int Tries() => (_tries.SelectedItem as ComboBoxItem)?.Tag as int? ?? 1;
 
     private void ClearStrokes()
     {
@@ -595,4 +620,4 @@ public sealed class ImageEditWindow : Window
 
 /// <summary>An AI request from the editor. Kind "edit" (a sentence; MaskPng = white where the change goes; MaskText =
 /// words naming the zone; Erase = empty the zone first) or "restore".</summary>
-public sealed record ImageAiRequest(string Kind, string? Prompt, byte[]? MaskPng, string? MaskText, bool Erase);
+public sealed record ImageAiRequest(string Kind, string? Prompt, byte[]? MaskPng, string? MaskText, bool Erase, int Tries = 1, string Engine = "kontext");

@@ -205,6 +205,9 @@
                             <Button x:Name="ViewerEditButton" Content="Modifier" Click="ViewerEditButton_OnClick"
                                     Padding="10,6" Cursor="Hand"
                                     ToolTip="Tourner, recadrer, régler le contraste et la saturation (l'original est gardé)"/>
+                            <Button x:Name="ViewerUndoButton" Content="Annuler la dernière étape" Click="ViewerUndoButton_OnClick"
+                                    Padding="10,6" Cursor="Hand" Margin="6,0,0,0" Visibility="Collapsed"
+                                    ToolTip="Remet la version d'avant la dernière modification (pas l'original)"/>
                             <Button x:Name="ViewerRevertButton" Content="Revenir à l'original" Click="ViewerRevertButton_OnClick"
                                     Padding="10,6" Cursor="Hand" Margin="6,0,0,0" Visibility="Collapsed"
                                     ToolTip="Remet la photo d'avant les modifications"/>

@@ -354,6 +354,7 @@ public partial class ReferencesView : UserControl
         ViewerUpscaleButton.Visibility = UpscaleAction.Available ? Visibility.Visible : Visibility.Collapsed;
         ViewerEditButton.Visibility = Visibility.Visible;
         ViewerRevertButton.Visibility = ImageEditing.IsEdited(img.ImagePath) ? Visibility.Visible : Visibility.Collapsed;
+        ViewerUndoButton.Visibility = ImageEditing.HasPreviousStep(img.ImagePath) ? Visibility.Visible : Visibility.Collapsed;
         ViewerFinalButton.Visibility = ViewerRevertButton.Visibility;
         ViewerStatus.Visibility = Visibility.Collapsed;
         ViewerSourceButton.Visibility = (img.PageUrl ?? img.SourceUrl) is null ? Visibility.Collapsed : Visibility.Visible;
@@ -507,6 +508,12 @@ public partial class ReferencesView : UserControl
     {
         if (_viewing is not { } img) return;
         ReopenAfterImageChange(img, ImageEditing.Edit(this, "RefImage", img.Id));
+    }
+
+    private void ViewerUndo_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_viewing is not { } img) return;
+        ReopenAfterImageChange(img, ImageEditing.Undo(this, "RefImage", img.Id));
     }
 
     private void ViewerRevert_OnClick(object sender, RoutedEventArgs e)
