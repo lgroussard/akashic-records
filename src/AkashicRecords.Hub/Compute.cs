@@ -129,10 +129,10 @@ public static class ComputeRoutes
     /// <summary>Kind: null/"upscale", "edit" (Prompt required; MaskHash = a PNG blob, white where the change goes;
     /// MaskText = what to find and mask too, in English; Erase = empty the zone first) or "restore".</summary>
     /// <summary>Tries: 1 to 4 versions (more than one: they wait for a choice, see /choose). Engine: "kontext" (default)
-    /// or "sdxl" (RealVisXL, with a zone only). Frame: [x, y, width, height] as fractions of the upright picture — the AI
-    /// is only shown that part, which is pasted back into the whole picture.</summary>
+    /// or "sdxl" (RealVisXL, with a zone only). HideHash: a PNG blob, white where the picture is hidden from the AI
+    /// (restored as it was in the result).</summary>
     public sealed record FromRequest(string? EntityType, string? EntityId, string? Kind = null, string? Prompt = null,
-        string? MaskHash = null, string? MaskText = null, bool? Erase = null, int? Tries = null, string? Engine = null, double[]? Frame = null);
+        string? MaskHash = null, string? MaskText = null, bool? Erase = null, int? Tries = null, string? Engine = null, string? HideHash = null);
 
     public const string KindEdit = "edit";
     public const string KindRestore = "restore";
@@ -215,18 +215,12 @@ public static class ComputeRoutes
                     if (engine is not ("kontext" or "sdxl")) return Results.BadRequest(new { error = "engine: kontext or sdxl" });
                     if (engine == "sdxl" && mask is null && maskText is null)
                         return Results.BadRequest(new { error = "RealVisXL a besoin d'une zone : peins-la ou nomme-la." });
-                    double[]? frame = null;
-                    if (req.Frame is { } fr)
-                    {
-                        if (fr.Length != 4 || fr.Any(v => double.IsNaN(v) || v < -0.001 || v > 1.001) || fr[2] < 0.01 || fr[3] < 0.01
-                            || fr[0] + fr[2] > 1.001 || fr[1] + fr[3] > 1.001)
-                            return Results.BadRequest(new { error = "frame: [x, y, width, height], fractions of the picture" });
-                        if (fr[2] < 0.999 || fr[3] < 0.999) frame = fr.Select(v => Math.Round(Math.Clamp(v, 0, 1), 5)).ToArray();
-                    }
+                    var hide = req.HideHash?.ToLowerInvariant();
+                    if (hide is not null && (!BlobStore.IsHash(hide) || !blobs.Exists(hide))) return Results.BadRequest(new { error = "hide_hash: send the mask to /media first" });
                     parameters = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>
                     {
                         ["prompt"] = prompt, ["mask_hash"] = mask, ["mask_text"] = maskText, ["erase"] = req.Erase == true,
-                        ["tries"] = Math.Clamp(req.Tries ?? 1, 1, 4), ["engine"] = engine, ["frame"] = frame,
+                        ["tries"] = Math.Clamp(req.Tries ?? 1, 1, 4), ["engine"] = engine, ["hide_hash"] = hide,
                     });
                 }
                 else if (req.Tries is > 1)

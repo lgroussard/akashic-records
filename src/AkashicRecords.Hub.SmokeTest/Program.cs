@@ -876,25 +876,25 @@ await Scenario("18. Modifier par IA : le resultat devient une modification de la
     var noPrompt = await phone.Http.PostAsJsonAsync("/compute/jobs/from", new { entity_type = "Photo", entity_id = photo, kind = "edit", prompt = "  " }, SimDevice.Wire);
     var badMask = await phone.Http.PostAsJsonAsync("/compute/jobs/from", new { entity_type = "Photo", entity_id = photo, kind = "edit", prompt = "add a banana", mask_hash = new string('e', 64) }, SimDevice.Wire);
     var badKind = await phone.Http.PostAsJsonAsync("/compute/jobs/from", new { entity_type = "Photo", entity_id = photo, kind = "paint" }, SimDevice.Wire);
-    var badFrame = await phone.Http.PostAsJsonAsync("/compute/jobs/from", new { entity_type = "Photo", entity_id = photo, kind = "edit", prompt = "add a banana", frame = new[] { 0.6, 0.0, 0.6, 0.5 } }, SimDevice.Wire);
+    var badHide = await phone.Http.PostAsJsonAsync("/compute/jobs/from", new { entity_type = "Photo", entity_id = photo, kind = "edit", prompt = "add a banana", hide_hash = new string('d', 64) }, SimDevice.Wire);
     Check(noPrompt.StatusCode == HttpStatusCode.BadRequest && badMask.StatusCode == HttpStatusCode.BadRequest && badKind.StatusCode == HttpStatusCode.BadRequest
-          && badFrame.StatusCode == HttpStatusCode.BadRequest,
-        "demande IA sans phrase, avec un masque inconnu, un cadre hors de l'image ou d'un type inconnu : 400");
+          && badHide.StatusCode == HttpStatusCode.BadRequest,
+        "demande IA sans phrase, avec un masque inconnu, un cache inconnu ou d'un type inconnu : 400");
 
     // An edit with a mask, asked from the phone. An upscaled picture can be edited (only upscaling it again is refused).
     var maskHash = await Upload(phone, Picture(SkiaSharp.SKEncodedImageFormat.Png, 10, 15));
     var asked = await phone.Http.PostAsJsonAsync("/compute/jobs/from", new
     {
         entity_type = "Photo", entity_id = photo, kind = "edit", prompt = "A ripe banana held firmly in her hand", mask_hash = maskHash, mask_text = "hand", erase = false,
-        frame = new[] { 0.25, 0.1, 0.5, 0.6 },
+        hide_hash = maskHash,
     }, SimDevice.Wire);
     var job = Json(asked);
     var p = JsonDocument.Parse(job.GetProperty("params").GetString()!).RootElement;
     Check(asked.StatusCode == HttpStatusCode.Created && job.GetProperty("model").GetString() == "flux-kontext" && job.GetProperty("kind").GetString() == "edit"
           && p.GetProperty("prompt").GetString() == "A ripe banana held firmly in her hand" && p.GetProperty("mask_hash").GetString() == maskHash
           && p.GetProperty("mask_text").GetString() == "hand" && !p.GetProperty("erase").GetBoolean()
-          && p.GetProperty("frame").GetArrayLength() == 4 && p.GetProperty("frame")[2].GetDouble() == 0.5,
-        "demande IA acceptee : modele flux-kontext, phrase, masque, mots, choix d'effacement et cadre gardes");
+          && p.GetProperty("hide_hash").GetString() == maskHash,
+        "demande IA acceptee : modele flux-kontext, phrase, masque, mots, choix d'effacement et cache gardes");
 
     // Only a device that runs Kontext gets it; the hub never takes it.
     Check((await pc.Http.PostAsJsonAsync("/compute/claim", new { name = "LOHAN", rid = "win-x64", models = new[] { "nomos-webphoto-4x" } }, SimDevice.Wire)).StatusCode == HttpStatusCode.NoContent,

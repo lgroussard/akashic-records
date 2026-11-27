@@ -337,11 +337,11 @@ public sealed class ComputeService
 
     /// <summary>
     /// Asks for an AI edit ("edit": a sentence, optionally a mask PNG — white where the change goes — and words naming
-    /// the zone, and whether to empty it first) or a restore ("restore") of a picture already in the app. Done by a PC
+    /// the zone, and whether to empty it first; hidePng = white where the picture is hidden from the AI) or a restore ("restore") of a picture already in the app. Done by a PC
     /// with ComfyUI; once done, the hub makes the result an edit of the same row. Throws HubException for the user.
     /// </summary>
     public async Task<HubComputeJob> RequestEditAsync(string table, long localId, string kind, string? prompt, byte[]? maskPng, string? maskText, bool erase,
-        int tries = 1, string engine = "kontext", double[]? frame = null)
+        int tries = 1, string engine = "kontext", byte[]? hidePng = null)
     {
         if (!InPlaceKinds.Contains(table)) throw new HubException("Ce type d'image ne peut pas être modifié par l'IA.");
         var s = SyncService.Instance.Settings;
@@ -353,23 +353,28 @@ public sealed class ComputeService
             syncId = SyncIdOf(table, localId) ?? throw new HubException("Cette image n'a pas encore pu être envoyée au serveur : réessaie dans un moment.");
         }
         using var hub = new HubClient(s.HubUrl, s.Token);
-        string? maskHash = null;
-        if (maskPng is not null)
+        var maskHash = await SendMaskAsync(hub, maskPng);
+        var hideHash = await SendMaskAsync(hub, hidePng);
+        return await hub.AddComputeEditAsync(table, syncId, kind, prompt, maskHash, maskText, erase, tries, engine, hideHash);
+    }
+
+    // A mask PNG sent to the hub as a blob (once); its hash, or null without a mask.
+    private async Task<string?> SendMaskAsync(HubClient hub, byte[]? png)
+    {
+        if (png is null) return null;
+        Directory.CreateDirectory(WorkDir);
+        var file = Path.Combine(WorkDir, $"mask-{Guid.NewGuid():N}.png");
+        await File.WriteAllBytesAsync(file, png);
+        try
         {
-            Directory.CreateDirectory(WorkDir);
-            var file = Path.Combine(WorkDir, $"mask-{Guid.NewGuid():N}.png");
-            await File.WriteAllBytesAsync(file, maskPng);
-            try
-            {
-                maskHash = await HashAsync(file);
-                if (!await hub.HasFileAsync(maskHash)) await hub.UploadFileAsync(file, maskHash);
-            }
-            finally
-            {
-                try { File.Delete(file); } catch (IOException) { }
-            }
+            var hash = await HashAsync(file);
+            if (!await hub.HasFileAsync(hash)) await hub.UploadFileAsync(file, hash);
+            return hash;
         }
-        return await hub.AddComputeEditAsync(table, syncId, kind, prompt, maskHash, maskText, erase, tries, engine, frame);
+        finally
+        {
+            try { File.Delete(file); } catch (IOException) { }
+        }
     }
 
     /// <summary>The id a row has on the hub (sync_map), or null when it has not been synchronised yet.</summary>

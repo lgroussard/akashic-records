@@ -183,7 +183,7 @@ public static class ImageEditing
         string message;
         try
         {
-            await ComputeService.Instance.RequestEditAsync(table, id, ai.Kind, ai.Prompt, ai.MaskPng, ai.MaskText, ai.Erase, ai.Tries, ai.Engine, ai.Frame);
+            await ComputeService.Instance.RequestEditAsync(table, id, ai.Kind, ai.Prompt, ai.MaskPng, ai.MaskText, ai.Erase, ai.Tries, ai.Engine, ai.HidePng);
             message = (ai.Kind == "restore" ? "Envoyée à la restauration" : "Envoyée à l'IA") + (ai.Tries > 1
                 ? $" : {ai.Tries} versions seront prêtes d'ici quelques minutes, à choisir dans la fenêtre des calculs (« Garder celle-ci »)."
                 : " : la version modifiée remplacera l'image d'ici quelques minutes (suivi dans la fenêtre des calculs).") +

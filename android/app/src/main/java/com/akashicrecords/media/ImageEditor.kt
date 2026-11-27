@@ -80,7 +80,7 @@ private val FULL = Crop(0f, 0f, 1f, 1f)
 private const val MIN_CROP = 0.05f
 
 /** A brush stroke of the AI zone: points as fractions (0..1) of the unturned picture, width as a fraction of its width. */
-private data class ZoneStroke(val points: List<Offset>, val width: Float)
+private data class ZoneStroke(val points: List<Offset>, val width: Float, val hide: Boolean = false)
 
 /**
  * Full-screen editor of a picture already in the app: ⟲ ⟳ quarter turns, a crop frame drawn on the picture
@@ -121,7 +121,8 @@ fun ImageEditor(
     var prompt by remember { mutableStateOf("") }
     var zoneWords by remember { mutableStateOf("") }
     var eraseFirst by remember { mutableStateOf(false) }
-    var painting by remember { mutableStateOf(false) }
+    var brushing by remember { mutableIntStateOf(0) } // 0 off, 1 the zone, 2 what to hide from the AI
+    val painting = brushing != 0
     var brush by remember { mutableFloatStateOf(0.06f) }
     val strokes = remember { mutableStateListOf<ZoneStroke>() }
     var tries by remember { mutableIntStateOf(1) }
@@ -167,10 +168,11 @@ fun ImageEditor(
         }
     }
 
-    // The zone as a mask at the preview's size: white where painted (the PC scales it to the full picture).
-    fun zoneMask(): Bitmap? {
+    // The zone (or what is hidden from the AI) as a mask at the preview's size: white where painted (the PC scales it
+    // to the full picture).
+    fun zoneMask(hide: Boolean = false): Bitmap? {
         val p = preview ?: return null
-        if (strokes.isEmpty()) return null
+        if (strokes.none { it.hide == hide }) return null
         val mask = Bitmap.createBitmap(p.width, p.height, Bitmap.Config.ARGB_8888)
         val canvas = android.graphics.Canvas(mask)
         canvas.drawColor(android.graphics.Color.BLACK)
@@ -178,7 +180,7 @@ fun ImageEditor(
             color = android.graphics.Color.WHITE; style = android.graphics.Paint.Style.STROKE; isAntiAlias = true
             strokeCap = android.graphics.Paint.Cap.ROUND; strokeJoin = android.graphics.Paint.Join.ROUND
         }
-        for (s in strokes) {
+        for (s in strokes.filter { it.hide == hide }) {
             paint.strokeWidth = s.width * p.width
             val path = android.graphics.Path()
             path.moveTo(s.points[0].x * p.width, s.points[0].y * p.height)
@@ -189,24 +191,17 @@ fun ImageEditor(
         return mask
     }
 
-    // The frame drawn (the crop tool), as the AI's frame on the stored (unturned) picture: [x, y, width, height].
-    fun aiFrame(): DoubleArray? {
-        if (crop.full) return null
-        var k = crop
-        repeat(turns) { k = k.turnedLeft() } // undo the right turns
-        return doubleArrayOf(k.l.toDouble(), k.t.toDouble(), (k.r - k.l).toDouble(), (k.b - k.t).toDouble())
-    }
 
     fun sendToAi(kind: String) {
         if (kind == "edit" && prompt.isBlank()) { message = "Écris d'abord ce qu'il faut changer."; return }
-        if (kind == "edit" && engine == "sdxl" && strokes.isEmpty() && zoneWords.isBlank()) { message = "RealVisXL redessine seulement une zone : peins-la ou nomme-la."; return }
+        if (kind == "edit" && engine == "sdxl" && strokes.none { !it.hide } && zoneWords.isBlank()) { message = "RealVisXL redessine seulement une zone : peins-la ou nomme-la."; return }
         busy = true
         message = "Envoi…"
         scope.launch {
             val failure = HubCompute.requestEdit(
                 context, table, id.toLong(), kind, if (kind == "edit") prompt.trim() else null,
                 if (kind == "edit") zoneMask() else null, zoneWords.trim().ifEmpty { null }.takeIf { kind == "edit" }, eraseFirst && kind == "edit",
-                tries, if (kind == "edit") engine else "kontext", if (kind == "edit") aiFrame() else null,
+                tries, if (kind == "edit") engine else "kontext", if (kind == "edit") zoneMask(hide = true) else null,
             )
             busy = false
             message = failure ?: if (tries > 1) "Envoyée : $tries versions à choisir d'ici quelques minutes dans Plus → Agrandir et IA."
@@ -282,13 +277,14 @@ fun ImageEditor(
                 val handle = with(LocalDensity.current) { 7.dp.toPx() }
                 val line = with(LocalDensity.current) { 2.dp.toPx() }
                 val zoneColor = Color(0xFFFF3030).copy(alpha = 0.45f)
+                val hideColor = Color(0xFF14141A).copy(alpha = 0.85f) // hidden from the AI: nearly black
                 Canvas(
                     Modifier.fillMaxSize().pointerInput(painting, ox, oy, dw, dh) {
                         // The AI zone: painted with the finger, on the unturned picture only.
                         if (!painting) return@pointerInput
                         fun frac(p: Offset) = Offset(((p.x - ox) / dw).coerceIn(0f, 1f), ((p.y - oy) / dh).coerceIn(0f, 1f))
                         detectDragGestures(
-                            onDragStart = { pos -> strokes.add(ZoneStroke(listOf(frac(pos)), brush)) },
+                            onDragStart = { pos -> strokes.add(ZoneStroke(listOf(frac(pos)), brush, hide = brushing == 2)) },
                             onDrag = { change, _ ->
                                 change.consume()
                                 val last = strokes.removeAt(strokes.lastIndex)
@@ -346,7 +342,7 @@ fun ImageEditor(
                         path.moveTo(ox + s.points[0].x * dw, oy + s.points[0].y * dh)
                         for (pt in s.points.drop(1)) path.lineTo(ox + pt.x * dw, oy + pt.y * dh)
                         if (s.points.size == 1) path.lineTo(ox + s.points[0].x * dw + 0.5f, oy + s.points[0].y * dh)
-                        drawPath(path, zoneColor, style = Stroke(width = s.width * dw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                        drawPath(path, if (s.hide) hideColor else zoneColor, style = Stroke(width = s.width * dw, cap = StrokeCap.Round, join = StrokeJoin.Round))
                     }
                     if (cropping || !crop.full) {
                         val l = ox + crop.l * dw
@@ -373,20 +369,19 @@ fun ImageEditor(
             // Bottom bars: turning and cropping, then the two sliders; or, in « IA » mode, the AI request.
             if (aiMode) Column(Modifier.fillMaxWidth().background(Palette.Surface1).padding(horizontal = 8.dp, vertical = 4.dp)) {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(enabled = !busy, onClick = { aiMode = false; painting = false; cropping = false }) { Text("← Retouches") }
-                    TextButton(enabled = !busy && turns == 0, onClick = { painting = !painting; cropping = false }) {
-                        Text(if (painting) "✓ Peindre la zone" else "Peindre la zone", color = if (painting) Palette.Accent else Palette.Text)
+                    TextButton(enabled = !busy, onClick = { aiMode = false; brushing = 0 }) { Text("← Retouches") }
+                    TextButton(enabled = !busy && turns == 0, onClick = { brushing = if (brushing == 1) 0 else 1; cropping = false }) {
+                        Text(if (brushing == 1) "✓ Peindre la zone" else "Peindre la zone", color = if (brushing == 1) Palette.Accent else Palette.Text)
                     }
-                    TextButton(enabled = !busy && shown != null, onClick = { cropping = !cropping; painting = false }) {
-                        Text(if (cropping) "✓ Cadre" else "Cadre", color = if (cropping) Palette.Accent else Palette.Text)
+                    TextButton(enabled = !busy && strokes.any { !it.hide }, onClick = { strokes.removeAll { !it.hide } }) { Text("Effacer la zone") }
+                    TextButton(enabled = !busy && turns == 0, onClick = { brushing = if (brushing == 2) 0 else 2; cropping = false }) {
+                        Text(if (brushing == 2) "✓ Cacher à l'IA" else "Cacher à l'IA", color = if (brushing == 2) Palette.Accent else Palette.Text)
                     }
-                    TextButton(enabled = !busy && !crop.full, onClick = { crop = FULL }) { Text("Sans cadre") }
-                    TextButton(enabled = !busy && strokes.isNotEmpty(), onClick = { strokes.clear() }) { Text("Effacer la zone") }
+                    TextButton(enabled = !busy && strokes.any { it.hide }, onClick = { strokes.removeAll { it.hide } }) { Text("Tout montrer") }
                     TextButton(enabled = !busy && shown != null, onClick = { sendToAi("restore") }) { Text("Restaurer") }
                 }
-                Text(
-                    if (crop.full) "Cadre : trace un rectangle pour ne montrer qu'un morceau à l'IA."
-                    else "L'IA ne verra que le cadre (agrandi), puis il sera recollé dans la photo, le reste intact.",
+                if (brushing == 2 || strokes.any { it.hide }) Text(
+                    "Les parties noircies sont cachées à l'IA : elle ne voit que le reste, et elles reviennent telles quelles.",
                     fontSize = 12.sp, color = Palette.TextMuted, modifier = Modifier.padding(horizontal = 8.dp),
                 )
                 if (painting) Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
