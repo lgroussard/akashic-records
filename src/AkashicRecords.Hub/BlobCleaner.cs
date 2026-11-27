@@ -45,10 +45,21 @@ public sealed class BlobCleaner(HubOptions options, HubStore store, ComputeStore
         string RanAt, int GraceDays, int PendingFiles, long PendingBytes, string? NextAt,
         int DeletedFiles, int DeletedBlobs, long DeletedBytes, string? Brake);
 
-    /// <summary>One clean-up pass; <paramref name="now"/> is a parameter so the smoke test can jump ahead in time.</summary>
-    public static Report Run(HubOptions options, HubStore store, ComputeStore compute, BlobStore blobs, DateTime now)
+    /// <summary>One clean-up pass; <paramref name="now"/> is a parameter so the smoke test can jump ahead in time.
+    /// <paramref name="waitAtLeast"/> shortens the delay (« Effacer maintenant » in the apps): only what an earlier pass
+    /// already found unused, at least that long ago, goes; what this pass finds is only marked, as always (a file being
+    /// uploaded has no listing yet for a moment, and must not be taken for an unused one).</summary>
+    public static Report Run(HubOptions options, HubStore store, ComputeStore compute, BlobStore blobs, DateTime now, TimeSpan? waitAtLeast = null)
     {
-        var grace = TimeSpan.FromDays(Math.Max(1, options.DeleteAfterDays));
+        lock (Gate) return RunLocked(options, store, compute, blobs, now, waitAtLeast);
+    }
+
+    private static readonly object Gate = new(); // the daily pass and « Effacer maintenant » never run together
+
+    private static Report RunLocked(HubOptions options, HubStore store, ComputeStore compute, BlobStore blobs, DateTime now, TimeSpan? waitAtLeast)
+    {
+        var days = Math.Max(1, options.DeleteAfterDays);
+        var grace = waitAtLeast ?? TimeSpan.FromDays(days);
         using var marks = OpenMarks(options);
         string? brake = null;
 
@@ -125,8 +136,8 @@ public sealed class BlobCleaner(HubOptions options, HubStore store, ComputeStore
         var pendingBytes = pendingHashes.Sum(h => size.GetValueOrDefault(h));
         var first = fileMarks.Values.Concat(blobMarks.Values).DefaultIfEmpty(DateTime.MaxValue).Min();
 
-        var report = new Report(now.ToString("O"), (int)grace.TotalDays, pendingHashes.Count, pendingBytes,
-            first == DateTime.MaxValue ? null : (first + grace).ToString("O"), expiredRows.Count, deletedBlobs, deletedBytes, brake);
+        var report = new Report(now.ToString("O"), days, pendingHashes.Count, pendingBytes,
+            first == DateTime.MaxValue ? null : (first + TimeSpan.FromDays(days)).ToString("O"), expiredRows.Count, deletedBlobs, deletedBytes, brake);
         File.WriteAllText(Path.Combine(options.DataDir, StatusFile), JsonSerializer.Serialize(report, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower }));
         return report;
     }

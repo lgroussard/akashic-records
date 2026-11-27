@@ -1148,6 +1148,19 @@ await Scenario("20. Menage : un fichier que plus rien n'utilise est efface apres
 
     var status = JsonDocument.Parse(await (await pc.Http.GetAsync("/server")).Content.ReadAsStringAsync()).RootElement;
     Check(status.GetProperty("cleanup").GetProperty("grace_days").GetInt32() == 30, "l'ecran Serveur voit le menage");
+
+    // « Effacer maintenant »: what the daily pass found unused at least an hour ago goes at once; what it finds now
+    // (a file perhaps still being uploaded) is only marked.
+    var g = await Up("photo g supprimee puis effacee maintenant");
+    await pc.Http.PostAsJsonAsync("/sync/push", new PushRequest(null, new List<Mutation>
+        { M("MediaFile", "fg", new { Path = "media/archive/g.jpg", Hash = g, Size = 41 }) }), SimDevice.Wire);
+    var now0 = JsonDocument.Parse(await (await pc.Http.PostAsync("/server/cleanup/now", null)).Content.ReadAsStringAsync()).RootElement;
+    Check(now0.GetProperty("deleted_blobs").GetInt32() == 0 && now0.GetProperty("pending_files").GetInt32() == 1 && blobs.Exists(g),
+        "Effacer maintenant : un fichier vu inutilise a l'instant reste (seulement marque)");
+    var hourLater = BlobCleaner.Run(options, hub.Store, hub.Get<ComputeStore>(), blobs, DateTime.UtcNow.AddHours(2), TimeSpan.FromHours(1));
+    Check(!blobs.Exists(g) && hub.Store.Current("MediaFile", "fg") is null && hourLater.DeletedBlobs == 1 && hourLater.GraceDays == 30
+          && blobs.Exists(b) && blobs.Exists(bEdit) && blobs.Exists(e),
+        "Effacer maintenant, une heure apres : il part pour de bon, rien d'autre ne bouge");
 });
 
 Console.WriteLine($"\n{passed} verifications reussies, {failures} en echec.");

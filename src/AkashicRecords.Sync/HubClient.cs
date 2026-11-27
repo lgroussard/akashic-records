@@ -134,6 +134,10 @@ public sealed class HubClient : IDisposable
     public async Task<HubDiskView> RefreshServerDiskAsync(CancellationToken ct = default) =>
         await Read<HubDiskView>(await Send(() => _http.PostAsJsonAsync("server/disk/refresh", new { }, Wire, ct)), ct);
 
+    /// <summary>« Effacer maintenant »: the deleted files the hub already found unused go now (see the hub's BlobCleaner).</summary>
+    public async Task<HubCleanup> CleanupNowAsync(CancellationToken ct = default) =>
+        await Read<HubCleanup>(await Send(() => _http.PostAsJsonAsync("server/cleanup/now", new { }, Wire, ct)), ct);
+
     public async Task<HubServerStatus> ServerAsync(CancellationToken ct = default) =>
         await Read<HubServerStatus>(await Send(() => _http.GetAsync("server", ct)), ct);
 
