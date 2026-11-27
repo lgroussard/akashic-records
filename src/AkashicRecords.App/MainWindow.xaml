@@ -104,6 +104,19 @@
                             VerticalAlignment="Center"
                             Style="{StaticResource ChipButtonStyle}"
                             Click="MusicButton_OnClick"/>
+                    <!-- The tools that live in their own windows (they used to be only in the tray icon's menu). -->
+                    <Button x:Name="ToolsButton" Content="Outils ▾" Margin="6,0,0,0"
+                            VerticalAlignment="Center"
+                            Style="{StaticResource ChipButtonStyle}"
+                            Click="ToolsButton_OnClick">
+                        <Button.ContextMenu>
+                            <ContextMenu Background="#F21A1A2E" Foreground="White" BorderBrush="#553B82F6">
+                                <MenuItem Header="Téléchargements" Click="ToolsDownloads_OnClick" Foreground="White"/>
+                                <MenuItem Header="Agrandir des images" Click="ToolsUpscale_OnClick" Foreground="White"/>
+                                <MenuItem Header="Serveur" Click="ToolsServer_OnClick" Foreground="White"/>
+                            </ContextMenu>
+                        </Button.ContextMenu>
+                    </Button>
                     <Button x:Name="SettingsButton" Content="⚙" Width="36" Height="30"
                             VerticalAlignment="Center"
                             Style="{StaticResource ChipButtonStyle}"

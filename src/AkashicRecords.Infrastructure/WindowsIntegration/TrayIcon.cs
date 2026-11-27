@@ -20,9 +20,6 @@ public sealed class TrayIcon : IDisposable
     public event Action<bool>? FilmWidgetToggled;
     public event Action<bool>? RemindersToggled;
     public event Action<bool>? RecipeWidgetToggled;
-    public event Action? DownloaderRequested;
-    public event Action? UpscaleRequested;
-    public event Action? ServerRequested;
 
     public TrayIcon(string tooltip, bool startWithWindowsInitiallyChecked)
     {
@@ -41,9 +38,6 @@ public sealed class TrayIcon : IDisposable
         _remindersItem.CheckedChanged += RemindersItem_OnCheckedChanged;
         menu.Items.Add(_remindersItem);
 
-        menu.Items.Add("Téléchargements", null, (_, _) => DownloaderRequested?.Invoke());
-        menu.Items.Add("Agrandir des images", null, (_, _) => UpscaleRequested?.Invoke());
-        menu.Items.Add("Serveur", null, (_, _) => ServerRequested?.Invoke());
 
         _startWithWindowsItem = new ToolStripMenuItem("Start with Windows")
         {
